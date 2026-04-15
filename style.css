@@ -1,0 +1,1343 @@
+:root {
+  --bg: #f5f7f2;
+  --panel: #ffffff;
+  --text: #223024;
+  --muted: #5f6e61;
+  --primary: #2f7d4a;
+  --primary-soft: #e5f4e9;
+  --danger: #9e2f2f;
+  --border: #d8e2d8;
+  --shadow: 0 6px 20px rgba(34, 48, 36, 0.08);
+  --radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at top right, #e9f6eb 0%, var(--bg) 45%, #eef3ea 100%);
+  color: var(--text);
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overflow-x: hidden;
+}
+
+.hero {
+  padding: 32px 20px 18px;
+  text-align: center;
+}
+
+.hero-kicker {
+  margin: 0 0 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.hero-badges {
+  display: none;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(47, 125, 74, 0.1);
+  color: var(--primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(1.5rem, 4vw, 2.2rem);
+}
+
+.hero p {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.hero-subtitle {
+  max-width: 640px;
+  margin-inline: auto;
+}
+
+.hero-stats {
+  display: none;
+}
+
+.hero-stat {
+  min-width: 0;
+}
+
+.hero-stat strong {
+  display: block;
+  font-size: 0.92rem;
+}
+
+.hero-stat span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.app-quicknav {
+  display: none;
+}
+
+.app-quicknav-btn {
+  width: auto;
+}
+
+.container {
+  width: min(1100px, 92vw);
+  max-width: 100%;
+  margin: 0 auto 32px;
+  display: grid;
+  gap: 16px;
+}
+
+.panel {
+  min-width: 0;
+  max-width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 1.12rem;
+}
+
+.hint {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.import-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 12px;
+}
+
+.import-block label,
+.control label,
+.map-controls label {
+  display: block;
+  margin: 0 0 6px;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+input[type="file"],
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input[type="password"],
+textarea,
+select,
+button {
+  width: 100%;
+  font: inherit;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input[type="password"],
+textarea,
+select,
+input[type="file"] {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 150px;
+}
+
+.actions {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.ebird-grid {
+  display: grid;
+  grid-template-columns: 2fr 1.2fr 0.8fr;
+  gap: 10px;
+}
+
+.ebird-actions {
+  grid-template-columns: repeat(2, minmax(0, 180px));
+}
+
+.birdreport-controls {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.birdreport-proxy-control,
+.birdreport-point-control {
+  grid-column: span 2;
+}
+
+.birdreport-actions {
+  grid-template-columns: repeat(3, minmax(0, 220px));
+}
+
+.birdreport-unlocked-actions {
+  grid-template-columns: repeat(2, minmax(0, 220px));
+}
+
+.birdreport-unlocked-controls {
+  margin-top: 10px;
+  grid-template-columns: minmax(0, 360px);
+}
+
+.birdreport-monitor-actions {
+  grid-template-columns: repeat(3, minmax(0, 220px));
+}
+
+.birdreport-monitor-controls {
+  margin-top: 10px;
+  grid-template-columns: minmax(0, 260px);
+}
+
+.embedded-android-app .birdreport-proxy-control {
+  display: none;
+}
+
+.embedded-android-app {
+  background:
+    radial-gradient(circle at top left, rgba(255, 244, 222, 0.92) 0%, rgba(255, 244, 222, 0) 36%),
+    radial-gradient(circle at top right, rgba(197, 232, 205, 0.98) 0%, rgba(197, 232, 205, 0) 42%),
+    linear-gradient(180deg, #eef5ea 0%, #f7f8f2 35%, #f5f6ef 100%);
+}
+
+.embedded-android-app .hero {
+  padding: calc(18px + env(safe-area-inset-top, 0px)) 16px 14px;
+  text-align: left;
+}
+
+.embedded-android-app .hero-kicker {
+  color: #215836;
+}
+
+.embedded-android-app .hero-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.embedded-android-app .hero h1 {
+  font-size: clamp(1.72rem, 6vw, 2.3rem);
+  line-height: 1.08;
+  letter-spacing: -0.02em;
+}
+
+.embedded-android-app .hero-subtitle {
+  margin: 10px 0 0;
+  max-width: none;
+  font-size: 0.94rem;
+  line-height: 1.55;
+}
+
+.embedded-android-app .hero-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.embedded-android-app .hero-stat {
+  padding: 12px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 14px 28px rgba(34, 48, 36, 0.08);
+  backdrop-filter: blur(14px);
+}
+
+.embedded-android-app .app-quicknav {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 8px 16px 12px;
+  background: linear-gradient(180deg, rgba(245, 247, 242, 0.98) 0%, rgba(245, 247, 242, 0.86) 72%, rgba(245, 247, 242, 0) 100%);
+  backdrop-filter: blur(14px);
+  scrollbar-width: none;
+}
+
+.embedded-android-app .app-quicknav::-webkit-scrollbar {
+  display: none;
+}
+
+.embedded-android-app .app-quicknav-btn {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #44624f;
+  border: 1px solid rgba(92, 133, 104, 0.14);
+  font-size: 0.9rem;
+  font-weight: 700;
+  box-shadow: 0 10px 20px rgba(34, 48, 36, 0.05);
+}
+
+.embedded-android-app .app-quicknav-btn.is-active {
+  background: linear-gradient(135deg, #2f7d4a 0%, #4a9962 100%);
+  color: #fff;
+  border-color: transparent;
+}
+
+.embedded-android-app .container {
+  width: 100%;
+  padding: 0 14px calc(24px + env(safe-area-inset-bottom, 0px));
+  gap: 14px;
+}
+
+.embedded-android-app .panel {
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 24px;
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92) 0%, rgba(252, 253, 250, 0.88) 100%);
+  box-shadow: 0 18px 40px rgba(34, 48, 36, 0.08);
+}
+
+.embedded-android-app .panel h2 {
+  font-size: 1.08rem;
+  letter-spacing: -0.01em;
+}
+
+.embedded-android-app .section-heading h3 {
+  font-size: 0.98rem;
+}
+
+.embedded-android-app input[type="text"],
+.embedded-android-app input[type="number"],
+.embedded-android-app input[type="date"],
+.embedded-android-app input[type="password"],
+.embedded-android-app textarea,
+.embedded-android-app select,
+.embedded-android-app input[type="file"] {
+  border-color: #dbe7db;
+  border-radius: 14px;
+  background: #fbfdf9;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.embedded-android-app button {
+  min-height: 46px;
+  border-radius: 14px;
+  box-shadow: 0 12px 24px rgba(47, 125, 74, 0.16);
+}
+
+.embedded-android-app button.ghost,
+.embedded-android-app button.danger {
+  box-shadow: none;
+}
+
+.embedded-android-app .life-list-panel {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(216, 226, 216, 0.86);
+}
+
+.embedded-android-app .records.cards,
+.embedded-android-app #regionQueryContainer.records,
+.embedded-android-app .birdreport-monitor-panel .records.cards {
+  gap: 12px;
+}
+
+.embedded-android-app .record,
+.embedded-android-app .life-item {
+  border-radius: 16px;
+  border-color: #dfe9df;
+  background: linear-gradient(180deg, #fcfdfb 0%, #f8fbf7 100%);
+}
+
+.embedded-android-app .taxonomy-browser {
+  border-radius: 18px;
+  background: linear-gradient(180deg, #fcfefb 0%, #f3f8f1 100%);
+}
+
+.embedded-android-app .birdreport-rare-detail-panel,
+.embedded-android-app .query-detail-panel {
+  border-radius: 22px;
+}
+
+button {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+button:hover {
+  filter: brightness(1.04);
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+  filter: none;
+}
+
+button.ghost {
+  background: var(--primary-soft);
+  color: var(--primary);
+  border: 1px solid #c3e0ca;
+}
+
+button.danger {
+  background: #f9e4e4;
+  color: var(--danger);
+  border: 1px solid #f1c1c1;
+}
+
+.message {
+  min-height: 1.2em;
+  margin: 10px 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.hint.compact {
+  margin-top: 10px;
+  font-size: 0.88rem;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  min-width: 0;
+}
+
+.stats {
+  margin: 12px 0 10px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.section-heading {
+  margin-top: 20px;
+}
+
+.section-heading h3 {
+  margin: 0 0 6px;
+  font-size: 1rem;
+}
+
+.life-list-panel {
+  margin-top: 20px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.life-controls {
+  margin-top: 10px;
+  grid-template-columns: 1.4fr 1fr;
+}
+
+.species-discovery-controls {
+  margin-top: 10px;
+  grid-template-columns: 1.4fr 1fr 1fr;
+}
+
+.taxonomy-browser {
+  margin: 10px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: linear-gradient(180deg, #fbfdfa 0%, #f4f8f2 100%);
+  padding: 8px;
+}
+
+.taxonomy-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.taxonomy-item + .taxonomy-item {
+  margin-top: 4px;
+}
+
+.taxonomy-toggle {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px calc(10px + var(--depth, 0) * 16px);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-weight: 500;
+}
+
+.taxonomy-toggle:hover {
+  background: #eef6ef;
+  border-color: #d4e5d7;
+  filter: none;
+}
+
+.taxonomy-toggle.is-active {
+  background: var(--primary-soft);
+  border-color: #c7dfcd;
+  color: var(--primary);
+}
+
+.taxonomy-caret {
+  color: var(--primary);
+  font-size: 0.9rem;
+}
+
+.taxonomy-label {
+  min-width: 0;
+}
+
+.taxonomy-meta {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.records {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.records.cards {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+#regionQueryContainer.records {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.life-list {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.life-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) repeat(3, auto);
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fbfdfa;
+  color: var(--text);
+  text-align: left;
+}
+
+.life-item:hover {
+  border-color: #c7dfcd;
+  background: #f3faf4;
+  filter: none;
+}
+
+.life-item strong {
+  font-size: 0.98rem;
+}
+
+.life-item span {
+  color: var(--muted);
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+.species-discovery-list .life-item {
+  grid-template-columns: minmax(0, 1.25fr) repeat(3, auto);
+}
+
+.record {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fbfdfa;
+  padding: 10px;
+}
+
+.record > div {
+  min-width: 0;
+}
+
+.records.list .record {
+  display: grid;
+  grid-template-columns: 120px 1fr 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.record strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.record small {
+  color: var(--muted);
+}
+
+.record-note {
+  margin-top: 6px;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.birdreport-monitor-panel .records.cards {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.unlocked-species-list {
+  margin-top: 12px;
+  display: grid;
+  gap: 0;
+  border-top: 1px solid #edf2ed;
+}
+
+.unlocked-species-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.9fr) auto;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid #edf2ed;
+}
+
+.unlocked-species-row.is-active {
+  background: linear-gradient(90deg, rgba(229, 244, 233, 0.75), rgba(229, 244, 233, 0));
+}
+
+.unlocked-species-main {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.unlocked-species-main:hover {
+  filter: none;
+}
+
+.unlocked-species-rank {
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.unlocked-species-name {
+  min-width: 0;
+}
+
+.unlocked-species-name strong {
+  color: #2b6f8d;
+  font-size: 1rem;
+}
+
+.unlocked-species-name em {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.unlocked-species-metric {
+  min-width: 0;
+}
+
+.unlocked-species-metric strong {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 1.12rem;
+}
+
+.unlocked-species-metric span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.unlocked-species-bar {
+  width: 100%;
+  height: 8px;
+  margin-top: 4px;
+  background: #eef1ed;
+  overflow: hidden;
+}
+
+.unlocked-species-bar span {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+
+.unlocked-location-btn {
+  width: auto;
+  min-width: 72px;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #2b6f8d;
+}
+
+.unlocked-location-btn::before {
+  content: "●";
+  margin-right: 6px;
+  color: #2b6f8d;
+  font-size: 0.7rem;
+}
+
+.unlocked-location-btn:hover {
+  background: #edf6f0;
+  filter: none;
+}
+
+.unlocked-location-panel {
+  margin: 0 0 10px 54px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fbfdfa;
+}
+
+.unlocked-location-title {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 10px;
+}
+
+.unlocked-location-title span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.unlocked-location-list {
+  display: grid;
+  gap: 8px;
+}
+
+.unlocked-location-item {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid #e1ebe2;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.unlocked-location-item span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.birdreport-captcha-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.birdreport-captcha-panel > span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.birdreport-captcha-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.birdreport-captcha-image {
+  width: 112px;
+  height: 40px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.birdreport-captcha-input {
+  max-width: 140px;
+}
+
+.record.is-active {
+  border-color: #bdd9c4;
+  background: var(--primary-soft);
+}
+
+.birdreport-rare-detail-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 32;
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfdfa 0%, #f4f8f2 100%);
+  padding: 16px;
+  box-shadow: 0 18px 46px rgba(34, 48, 36, 0.22);
+}
+
+.birdreport-rare-detail-panel.is-hidden {
+  display: none;
+}
+
+.birdreport-rare-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 26;
+  background: rgba(34, 48, 36, 0.26);
+  backdrop-filter: blur(2px);
+}
+
+.birdreport-rare-detail-backdrop.is-hidden {
+  display: none;
+}
+
+.birdreport-rare-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.birdreport-rare-detail-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.birdreport-rare-detail-subtitle {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.birdreport-rare-detail-list {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.birdreport-rare-detail-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.birdreport-rare-detail-item strong {
+  display: block;
+  font-size: 0.97rem;
+}
+
+.birdreport-rare-detail-meta {
+  margin-top: 6px;
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+body.zhejiang-rare-detail-open {
+  overflow: hidden;
+}
+
+.query-record {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  background: #fbfdfa;
+  color: var(--text);
+  text-align: left;
+  box-shadow: none;
+}
+
+.query-record:hover {
+  background: #f3faf4;
+  border-color: #c7dfcd;
+  filter: none;
+}
+
+.query-record.is-active {
+  background: var(--primary-soft);
+  border-color: #bdd9c4;
+}
+
+.query-record strong {
+  font-size: 0.96rem;
+  line-height: 1.3;
+}
+
+.query-record small {
+  font-size: 0.8rem;
+}
+
+.query-record-location {
+  color: var(--text);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.query-record-hint {
+  color: var(--primary);
+}
+
+.query-detail-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 30;
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfdfa 0%, #f2f8f3 100%);
+  padding: 16px;
+  box-shadow: 0 18px 46px rgba(34, 48, 36, 0.22);
+}
+
+.query-detail-panel.is-hidden {
+  display: none;
+}
+
+.query-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 24;
+  background: rgba(34, 48, 36, 0.26);
+  backdrop-filter: blur(2px);
+}
+
+.query-detail-backdrop.is-hidden {
+  display: none;
+}
+
+.query-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.query-detail-title {
+  margin: 0;
+  font-size: 1.08rem;
+}
+
+.query-detail-subtitle {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.query-detail-close {
+  width: auto;
+  min-width: 84px;
+  padding: 8px 12px;
+}
+
+.query-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.query-detail-item {
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid #dfebe1;
+}
+
+.query-detail-item strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.88rem;
+}
+
+.query-detail-item span {
+  color: var(--muted);
+  font-size: 0.88rem;
+  word-break: break-word;
+}
+
+body.query-detail-open {
+  overflow: hidden;
+}
+
+.empty-state {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  background: linear-gradient(180deg, #fbfdfa 0%, #f4f8f2 100%);
+  color: var(--muted);
+  text-align: center;
+}
+
+.map-controls {
+  max-width: 260px;
+  margin-bottom: 10px;
+}
+
+#map {
+  height: 360px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.legend-scale {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 3px;
+}
+
+.legend-cell {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid #e5ece5;
+}
+
+.calendar-heatmap {
+  margin-top: 10px;
+  max-width: 100%;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+img,
+svg,
+canvas {
+  max-width: 100%;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 14px);
+  gap: 3px;
+  width: max-content;
+  min-height: 117px;
+}
+
+.day-cell {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid #e8eee8;
+}
+
+.day-cell.empty {
+  background: transparent;
+  border-color: transparent;
+}
+
+@media (max-width: 860px) {
+  .hero {
+    padding: 24px 16px 14px;
+  }
+
+  .container {
+    width: min(100%, 100vw);
+    padding: 0 12px;
+    margin-bottom: 24px;
+  }
+
+  .panel {
+    padding: 14px;
+  }
+
+  .import-grid,
+  .ebird-grid,
+  .controls,
+  .actions {
+    grid-template-columns: 1fr;
+  }
+
+  .ebird-actions,
+  .birdreport-actions,
+  .birdreport-unlocked-actions,
+  .birdreport-monitor-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .map-controls {
+    max-width: none;
+  }
+
+  .life-item {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .query-detail-header {
+    display: grid;
+  }
+
+  .query-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .query-detail-close {
+    width: 100%;
+  }
+
+  .records.list .record {
+    grid-template-columns: 1fr;
+  }
+
+  .unlocked-species-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 12px 0;
+  }
+
+  .unlocked-species-main {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .unlocked-species-name em {
+    display: block;
+    margin-left: 0;
+    margin-top: 2px;
+  }
+
+  .unlocked-location-btn {
+    justify-self: start;
+  }
+
+  .unlocked-location-panel {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .embedded-android-app .hero {
+    padding-inline: 14px;
+  }
+
+  .embedded-android-app .hero-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .embedded-android-app .container {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .embedded-android-app .panel {
+    padding: 16px;
+    border-radius: 22px;
+  }
+
+  .embedded-android-app .app-quicknav {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .hero h1 {
+    font-size: 1.45rem;
+  }
+
+  .hero p,
+  .hint,
+  .hint.compact,
+  .message,
+  .stats {
+    font-size: 0.88rem;
+  }
+
+  .panel h2 {
+    font-size: 1.02rem;
+  }
+
+  .section-heading h3 {
+    font-size: 0.96rem;
+  }
+
+  .actions {
+    gap: 10px;
+  }
+
+  button {
+    min-height: 44px;
+  }
+
+  textarea {
+    min-height: 128px;
+  }
+
+  .records.cards,
+  #regionQueryContainer.records,
+  .birdreport-monitor-panel .records.cards {
+    grid-template-columns: 1fr;
+  }
+
+  .record {
+    padding: 12px;
+  }
+
+  .record strong {
+    font-size: 0.96rem;
+  }
+
+  .life-item,
+  .species-discovery-list .life-item {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 12px;
+  }
+
+  .life-item span,
+  .taxonomy-meta {
+    white-space: normal;
+  }
+
+  #map {
+    height: 300px;
+  }
+
+  .query-detail-panel {
+    top: auto;
+    right: 10px;
+    left: 10px;
+    bottom: 10px;
+    width: auto;
+    max-height: min(72vh, 640px);
+    border-radius: 18px;
+  }
+
+  .birdreport-rare-detail-panel {
+    top: auto;
+    right: 10px;
+    left: 10px;
+    bottom: 10px;
+    width: auto;
+    max-height: min(72vh, 640px);
+    border-radius: 18px;
+  }
+}
+
+@media (max-width: 420px) {
+  .embedded-android-app .hero {
+    padding-inline: 12px;
+  }
+
+  .embedded-android-app .app-quicknav {
+    gap: 8px;
+    padding: 8px 10px 12px;
+  }
+
+  .embedded-android-app .app-quicknav-btn {
+    padding: 0 14px;
+    min-height: 38px;
+    font-size: 0.86rem;
+  }
+
+  .embedded-android-app .container {
+    padding: 0 10px calc(22px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .container {
+    padding: 0 10px;
+  }
+
+  .panel {
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  input[type="text"],
+  input[type="number"],
+  input[type="date"],
+  input[type="password"],
+  textarea,
+  select,
+  input[type="file"] {
+    padding: 9px;
+  }
+
+  .taxonomy-toggle {
+    grid-template-columns: 16px minmax(0, 1fr);
+  }
+
+  .taxonomy-meta {
+    grid-column: 1 / -1;
+    padding-left: 24px;
+  }
+
+  .query-detail-panel,
+  .birdreport-rare-detail-panel {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    max-height: 78vh;
+  }
+}

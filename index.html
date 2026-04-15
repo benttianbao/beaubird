@@ -1,0 +1,205 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <title>BeauBird 观鸟助手</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <p class="hero-kicker">BeauBird Mobile</p>
+      <div class="hero-badges" aria-hidden="true">
+        <span class="hero-badge">BirdReport 直查</span>
+        <span class="hero-badge">eBird 区域查询</span>
+        <span class="hero-badge">稀有鸟监测</span>
+      </div>
+      <h1>BeauBird 观鸟助手</h1>
+      <p class="hero-subtitle">专注查询与监测：eBird 区域记录、BirdReport 鸟种查询、浙江稀有鸟自动检查。</p>
+      <div class="hero-stats" aria-hidden="true">
+        <div class="hero-stat">
+          <strong>应用内代理</strong>
+          <span>打开即查</span>
+        </div>
+        <div class="hero-stat">
+          <strong>eBird 查询</strong>
+          <span>区域最近观测</span>
+        </div>
+        <div class="hero-stat">
+          <strong>浙江监测</strong>
+          <span>稀有鸟自动检查</span>
+        </div>
+      </div>
+    </header>
+
+    <nav class="app-quicknav" aria-label="首页快捷导航">
+      <button class="app-quicknav-btn is-active" data-target="ebirdSection" type="button">eBird</button>
+      <button class="app-quicknav-btn" data-target="birdreportSection" type="button">BirdReport</button>
+      <button class="app-quicknav-btn" data-target="unlockedSection" type="button">未解锁</button>
+      <button class="app-quicknav-btn" data-target="monitorSection" type="button">监测</button>
+    </nav>
+
+    <main class="container">
+      <section id="ebirdSection" class="panel">
+        <h2>查询 eBird 区域记录</h2>
+        <p class="hint">
+          输入 eBird API 密钥后，可查询某个国家 / 地区 / 县区 / 位置代码下的最近观测。
+          这些区域结果只用于查看，不会写入你的个人记录。
+        </p>
+
+        <div class="ebird-grid">
+          <div class="control">
+            <label for="ebirdApiKey">API 密钥</label>
+            <input id="ebirdApiKey" type="password" placeholder="输入你的 eBird API Key" autocomplete="off" />
+          </div>
+          <div class="control">
+            <label for="ebirdRegionCode">区域代码</label>
+            <input id="ebirdRegionCode" type="text" placeholder="例如 CN-31、US-NY、L123456" />
+          </div>
+          <div class="control">
+            <label for="ebirdBackDays">回溯天数</label>
+            <input id="ebirdBackDays" type="number" min="1" max="30" value="14" />
+          </div>
+        </div>
+
+        <div class="actions ebird-actions">
+          <button id="syncEbirdBtn">查询 eBird</button>
+          <button id="clearEbirdKeyBtn" class="ghost">清除密钥</button>
+        </div>
+        <p class="hint compact">
+          区域代码可填国家、州省、区县或 locId。示例：<code>CN</code>、<code>CN-31</code>、
+          <code>US-CA</code>、<code>L7884500</code>。
+          API 密钥仅保存在当前浏览器的本地存储中。
+        </p>
+        <p class="hint compact">本工具聚焦区域查询；如果你只想快速看一个地区最近有哪些鸟，这里直接查询即可。</p>
+        <p id="ebirdMessage" class="message" aria-live="polite"></p>
+        <div id="regionQuerySummary" class="stats"></div>
+        <div id="regionQueryContainer" class="records cards"></div>
+        <div id="regionQueryBackdrop" class="query-detail-backdrop is-hidden" aria-hidden="true"></div>
+        <div
+          id="regionQueryDetail"
+          class="query-detail-panel is-hidden"
+          aria-live="polite"
+          aria-modal="true"
+          role="dialog"
+          aria-label="鸟种查询详情"
+        ></div>
+      </section>
+
+      <section id="birdreportSection" class="panel">
+        <h2>BirdReport 代理查询</h2>
+        <p class="hint">
+          通过代理请求 BirdReport，按省 / 市 / 区、观测地点和时间范围查看符合条件的鸟种。网页版可连接本地代理，Android APK 版可直接使用内置代理。
+        </p>
+
+        <div class="controls birdreport-controls">
+          <div class="control birdreport-proxy-control">
+            <label for="birdreportProxyUrl">代理地址</label>
+            <input id="birdreportProxyUrl" type="text" value="http://127.0.0.1:8787" />
+          </div>
+          <div class="control">
+            <label for="birdreportStartDate">开始日期</label>
+            <input id="birdreportStartDate" type="date" />
+          </div>
+          <div class="control">
+            <label for="birdreportEndDate">结束日期</label>
+            <input id="birdreportEndDate" type="date" />
+          </div>
+          <div class="control">
+            <label for="birdreportProvince">省</label>
+            <select id="birdreportProvince">
+              <option value="">请选择省</option>
+            </select>
+          </div>
+          <div class="control">
+            <label for="birdreportCity">市</label>
+            <select id="birdreportCity">
+              <option value="">请选择市</option>
+            </select>
+          </div>
+          <div class="control">
+            <label for="birdreportDistrict">区</label>
+            <select id="birdreportDistrict">
+              <option value="">请选择区</option>
+            </select>
+          </div>
+          <div class="control birdreport-point-control">
+            <label for="birdreportPointName">观测地点</label>
+            <input id="birdreportPointName" type="text" placeholder="例如 西溪湿地、鄱阳湖、某公园" autocomplete="off" />
+          </div>
+        </div>
+
+        <div class="actions birdreport-actions">
+          <button id="queryBirdreportProxyBtn">通过代理查询鸟种</button>
+          <button id="openBirdreportTaxonBtn" class="ghost">打开 BirdReport 结果页</button>
+          <button id="openBirdreportSearchBtn" class="ghost">打开 BirdReport 查询页</button>
+        </div>
+        <p id="birdreportProxyHint" class="hint compact">网页版需要先在本机运行代理脚本；Android APK 版会自动启用应用内代理。</p>
+        <p id="birdreportMessage" class="message" aria-live="polite"></p>
+        <div id="birdreportSpeciesSummary" class="stats"></div>
+        <div id="birdreportSpeciesContainer" class="records cards"></div>
+
+        <div id="unlockedSection" class="life-list-panel birdreport-unlocked-panel">
+          <div class="section-heading">
+            <h3>未解锁鸟种查询</h3>
+            <p class="hint compact">
+              输入记录用户姓名，按浙江 588 种鸟种名录核对该用户还缺哪些鸟种。缺口列表按浙江历史记录数从多到少排列，地点按报告编号顺序快速加载。
+            </p>
+          </div>
+          <div class="controls birdreport-unlocked-controls">
+            <div class="control birdreport-unlocked-user-control">
+              <label for="birdreportUnlockedUsername">记录用户</label>
+              <input id="birdreportUnlockedUsername" type="text" placeholder="输入记录中心用户名" autocomplete="off" />
+            </div>
+          </div>
+          <div class="actions birdreport-unlocked-actions">
+            <button id="queryUnlockedSpeciesBtn">查询未解锁鸟种</button>
+            <button id="clearUnlockedSpeciesBtn" class="ghost">清空结果</button>
+          </div>
+          <p id="unlockedSpeciesMessage" class="message" aria-live="polite"></p>
+          <div id="unlockedSpeciesSummary" class="stats"></div>
+          <div id="unlockedSpeciesContainer" class="unlocked-species-list"></div>
+        </div>
+
+        <div id="monitorSection" class="life-list-panel birdreport-monitor-panel">
+          <div class="section-heading">
+            <h3>浙江稀有鸟种监测</h3>
+            <p class="hint compact">
+              基线规则固定为“仅浙江省、不限日期、记录次数小于等于 500”。名单会保存在当前浏览器中；页面保持打开时，会每隔 1 小时自动检查一次所选日期的浙江数据。
+            </p>
+          </div>
+          <div class="controls birdreport-monitor-controls">
+            <div class="control">
+              <label for="zhejiangRareMonitorDate">检查日期</label>
+              <input id="zhejiangRareMonitorDate" type="date" />
+            </div>
+          </div>
+          <div class="actions birdreport-monitor-actions">
+            <button id="saveZhejiangRareSpeciesBtn">保存浙江稀有鸟种名单</button>
+            <button id="checkZhejiangRareSpeciesBtn" class="ghost">立即检查所选日期数据</button>
+            <button id="toggleZhejiangRareMonitorBtn" class="ghost">开始每小时监测</button>
+          </div>
+          <p id="zhejiangRareSpeciesMessage" class="message" aria-live="polite"></p>
+          <div id="zhejiangRareSpeciesSummary" class="stats"></div>
+          <div id="zhejiangRareSpeciesContainer" class="records cards"></div>
+        </div>
+        <div id="zhejiangRareSpeciesDetailBackdrop" class="birdreport-rare-detail-backdrop is-hidden" aria-hidden="true"></div>
+        <div
+          id="zhejiangRareSpeciesDetail"
+          class="birdreport-rare-detail-panel is-hidden"
+          aria-live="polite"
+          aria-modal="true"
+          role="dialog"
+          aria-label="浙江稀有鸟种观测地点详情"
+        ></div>
+      </section>
+
+    </main>
+    <script src="https://www.birdreport.cn/plugins/jquery/jquery.min.js"></script>
+    <script src="https://www.birdreport.cn/plugins/crypto-js/crypto-js.min.js"></script>
+    <script src="https://www.birdreport.cn/assets/js/jqueryAjax.js"></script>
+    <script src="https://www.birdreport.cn/assets/js/aes.util.js"></script>
+    <script src="./data/zhejiang-birdreport-species.js"></script>
+    <script src="./script.js"></script>
+  </body>
+</html>

@@ -1,0 +1,12 @@
+.gradle-home/
+.tmp/
+
+android/.gradle/
+android/**/build/
+android/local.properties
+
+*.apk
+*.ap_
+
+.DS_Store
+Thumbs.db

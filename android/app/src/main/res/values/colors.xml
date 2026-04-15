@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="beaubird_primary">#2F7D4A</color>
+    <color name="beaubird_primary_dark">#1E5531</color>
+    <color name="beaubird_surface">#F5F7F2</color>
+    <color name="beaubird_on_primary">#FFFFFFFF</color>
+</resources>
