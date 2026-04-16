@@ -372,6 +372,49 @@ textarea {
   border-top: 1px solid rgba(216, 226, 216, 0.86);
 }
 
+.embedded-android-app .unlocked-species-list {
+  gap: 10px;
+  border-top: 0;
+}
+
+.embedded-android-app .unlocked-species-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe7db;
+  border-left: 4px solid #8fb99b;
+  border-radius: 8px;
+  background: #fbfdfa;
+}
+
+.embedded-android-app .unlocked-species-row:nth-of-type(even) {
+  background: #f5faf6;
+}
+
+.embedded-android-app .unlocked-species-row.is-active {
+  border-color: #98c7a5;
+  border-left-color: #2f7d4a;
+  background: #edf7ef;
+}
+
+.embedded-android-app .unlocked-species-main {
+  grid-template-columns: 40px minmax(0, 1fr);
+}
+
+.embedded-android-app .unlocked-species-metric {
+  padding-left: 48px;
+}
+
+.embedded-android-app .unlocked-location-btn {
+  display: none;
+}
+
+.embedded-android-app .unlocked-location-panel {
+  margin: -2px 0 12px;
+  border-color: #d6e5d7;
+  background: #fcfdfb;
+}
+
 .embedded-android-app .records.cards,
 .embedded-android-app #regionQueryContainer.records,
 .embedded-android-app .birdreport-monitor-panel .records.cards {
@@ -1175,6 +1218,14 @@ canvas {
 
   .unlocked-location-panel {
     margin-left: 0;
+  }
+
+  .embedded-android-app .unlocked-species-row {
+    padding: 12px;
+  }
+
+  .embedded-android-app .unlocked-location-panel {
+    margin: -2px 0 12px;
   }
 }
 

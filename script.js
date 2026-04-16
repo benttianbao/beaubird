@@ -1596,12 +1596,16 @@ async function queryUnlockedSpeciesByUser() {
   setUnlockedSpeciesMessage(`正在查询 ${username} 的浙江鸟种...`);
 
   try {
-    const catalog = await fetchZhejiangSpeciesCatalogForUnlocked({
+    const catalog = normalizeBirdreportTaxa(await fetchZhejiangSpeciesCatalogForUnlocked({
       onProgress: (message) => setUnlockedSpeciesMessage(message)
-    });
-    const observed = await fetchUserZhejiangSpecies(username, {
+    }));
+    const observed = normalizeBirdreportTaxa(await fetchUserZhejiangSpecies(username, {
       onProgress: (message) => setUnlockedSpeciesMessage(message)
-    });
+    }));
+    if (catalog.length && !observed.length) {
+      throw new Error(`BirdReport 没有查到「${username}」在浙江的鸟种记录；请确认输入的是记录页里显示的完整记录用户名。`);
+    }
+
     const missing = buildUnlockedMissingSpecies(catalog, observed);
 
     state.unlockedSpeciesCatalog = catalog;
@@ -1613,7 +1617,7 @@ async function queryUnlockedSpeciesByUser() {
     saveUnlockedSpeciesCache();
     renderUnlockedSpeciesPanel();
     setUnlockedSpeciesMessage(
-      `${username} 已解锁 ${catalog.length - missing.length} / ${catalog.length} 种浙江鸟种，还差 ${missing.length} 种。`
+      `${username} 已解锁 ${observed.length} / ${catalog.length} 种浙江鸟种，还差 ${missing.length} 种。`
     );
   } catch (error) {
     setUnlockedSpeciesMessage(`未解锁鸟种查询失败：${error.message}`, true);
@@ -1630,7 +1634,7 @@ async function fetchZhejiangSpeciesCatalogForUnlocked(options = {}) {
       onProgress: (message) => onProgress?.(message.replace("BirdReport 鸟种", "浙江鸟种名录"))
     });
     if (onlineCatalog.length) {
-      return sortBirdreportTaxaByReportCountDesc(onlineCatalog.map(serializeBirdreportTaxon));
+      return onlineCatalog.map(serializeBirdreportTaxon).sort(sortBirdreportTaxaByReportCountDesc);
     }
   } catch (error) {
     console.warn("Failed to refresh Zhejiang species catalog from BirdReport:", error);
@@ -1642,7 +1646,7 @@ async function fetchZhejiangSpeciesCatalogForUnlocked(options = {}) {
 
 async function fetchUserZhejiangSpecies(username, options = {}) {
   const { onProgress } = options;
-  return fetchAllBirdreportTaxa(
+  const primary = await fetchAllBirdreportTaxa(
     createBirdreportPayload({
       province: BIRDREPORT_RARE_SPECIES_PROVINCE,
       username,
@@ -1652,13 +1656,29 @@ async function fetchUserZhejiangSpecies(username, options = {}) {
       onProgress: (message) => onProgress?.(message.replace("BirdReport 鸟种", "用户浙江鸟种"))
     }
   );
+  if (primary.length) {
+    return primary;
+  }
+
+  onProgress?.("按兼容模式重新核对记录用户鸟种...");
+  return fetchAllBirdreportTaxa(
+    createBirdreportPayload({
+      province: BIRDREPORT_RARE_SPECIES_PROVINCE,
+      username
+    }),
+    {
+      onProgress: (message) => onProgress?.(message.replace("BirdReport 鸟种", "用户浙江鸟种"))
+    }
+  );
 }
 
 function buildUnlockedMissingSpecies(catalog, observed) {
-  const observedKeys = new Set(observed.map(getBirdreportTaxonKey).filter(Boolean));
-  const observedNames = new Set(observed.map((item) => String(item?.taxonname || item?.name || "").trim()).filter(Boolean));
+  const catalogItems = getBirdreportTaxaArray(catalog);
+  const observedItems = getBirdreportTaxaArray(observed);
+  const observedKeys = new Set(observedItems.map(getBirdreportTaxonKey).filter(Boolean));
+  const observedNames = new Set(observedItems.map((item) => String(item?.taxonname || item?.name || "").trim()).filter(Boolean));
 
-  return [...catalog]
+  return catalogItems
     .filter((item) => !observedKeys.has(getBirdreportTaxonKey(item)) && !observedNames.has(String(item?.taxonname || "").trim()))
     .sort(sortBirdreportTaxaByReportCountDesc);
 }
@@ -1677,9 +1697,12 @@ function renderUnlockedSpeciesPanel() {
     return;
   }
 
-  const catalogCount = state.unlockedSpeciesCatalog.length || 0;
-  const missingCount = state.unlockedMissingSpecies.length || 0;
-  const observedCount = catalogCount ? catalogCount - missingCount : 0;
+  const catalog = getBirdreportTaxaArray(state.unlockedSpeciesCatalog);
+  const observed = getBirdreportTaxaArray(state.unlockedObservedSpecies);
+  const missing = getBirdreportTaxaArray(state.unlockedMissingSpecies);
+  const catalogCount = catalog.length || 0;
+  const missingCount = missing.length || 0;
+  const observedCount = observed.length || (catalogCount ? catalogCount - missingCount : 0);
 
   if (!catalogCount) {
     elements.unlockedSpeciesSummary.textContent = "输入记录用户后，可核对浙江 588 种名录中的未解锁鸟种。";
@@ -1700,7 +1723,7 @@ function renderUnlockedSpeciesPanel() {
 
 function renderUnlockedSpeciesList() {
   elements.unlockedSpeciesContainer.innerHTML = "";
-  const missing = state.unlockedMissingSpecies || [];
+  const missing = getBirdreportTaxaArray(state.unlockedMissingSpecies);
   if (!missing.length) {
     elements.unlockedSpeciesContainer.innerHTML = '<div class="empty-state">这个用户已经解锁浙江名录里的全部鸟种。</div>';
     return;
@@ -2502,6 +2525,49 @@ function serializeBirdreportTaxon(item) {
   };
 }
 
+function getBirdreportTaxaArray(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const candidates = [
+    payload.species,
+    payload.list,
+    payload.rows,
+    payload.records,
+    payload.items,
+    payload.result,
+    payload.data
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object") {
+      const nested = getBirdreportTaxaArray(candidate);
+      if (nested.length) {
+        return nested;
+      }
+    }
+  }
+
+  return [];
+}
+
+function normalizeBirdreportTaxa(payload) {
+  return getBirdreportTaxaArray(payload)
+    .map(serializeBirdreportTaxon)
+    .filter((item) => item.key);
+}
+
 async function fetchZhejiangSpeciesBaselineFromJson() {
   const parsed = await loadZhejiangSpeciesData();
   const species = normalizeZhejiangSpeciesCatalog(parsed);
@@ -2707,7 +2773,12 @@ async function fetchBirdreportRecordsByTaxon(species, targetDate, options = {}) 
 
 function normalizeBirdreportTaxonPage(response) {
   const decoded = decodeBirdreportPayload(response?.data);
-  return Array.isArray(decoded) ? decoded : [];
+  const decodedItems = getBirdreportTaxaArray(decoded);
+  if (decodedItems.length) {
+    return decodedItems;
+  }
+
+  return getBirdreportTaxaArray(response);
 }
 
 function normalizeBirdreportRecordPage(response) {
@@ -3484,13 +3555,23 @@ function loadUnlockedSpeciesCache() {
     }
 
     const parsed = JSON.parse(raw);
-    return {
+    const cache = {
       username: String(parsed?.username || "").trim(),
       savedAt: String(parsed?.savedAt || "").trim(),
-      catalog: Array.isArray(parsed?.catalog) ? parsed.catalog.map(serializeBirdreportTaxon).filter((item) => item.key) : [],
-      observed: Array.isArray(parsed?.observed) ? parsed.observed.map(serializeBirdreportTaxon).filter((item) => item.key) : [],
-      missing: Array.isArray(parsed?.missing) ? parsed.missing.map(serializeBirdreportTaxon).filter((item) => item.key) : []
+      catalog: normalizeBirdreportTaxa(parsed?.catalog),
+      observed: normalizeBirdreportTaxa(parsed?.observed),
+      missing: normalizeBirdreportTaxa(parsed?.missing)
     };
+
+    if (cache.username && !cache.catalog.length) {
+      return createEmptyUnlockedSpeciesCache();
+    }
+
+    if (cache.username && cache.catalog.length && !cache.observed.length && cache.missing.length >= cache.catalog.length) {
+      return createEmptyUnlockedSpeciesCache();
+    }
+
+    return cache;
   } catch (error) {
     console.warn("Failed to load unlocked species cache:", error);
     return createEmptyUnlockedSpeciesCache();
@@ -3511,9 +3592,9 @@ function saveUnlockedSpeciesCache() {
   const payload = {
     username: state.unlockedTargetUsername,
     savedAt: state.unlockedSpeciesCacheSavedAt,
-    catalog: state.unlockedSpeciesCatalog.map(serializeBirdreportTaxon),
-    observed: state.unlockedObservedSpecies.map(serializeBirdreportTaxon),
-    missing: state.unlockedMissingSpecies.map(serializeBirdreportTaxon)
+    catalog: normalizeBirdreportTaxa(state.unlockedSpeciesCatalog),
+    observed: normalizeBirdreportTaxa(state.unlockedObservedSpecies),
+    missing: normalizeBirdreportTaxa(state.unlockedMissingSpecies)
   };
   localStorage.setItem(BIRDREPORT_UNLOCKED_SPECIES_CACHE_STORAGE, JSON.stringify(payload));
 }
