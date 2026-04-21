@@ -209,7 +209,7 @@ textarea {
 }
 
 .birdreport-unlocked-actions {
-  grid-template-columns: repeat(2, minmax(0, 220px));
+  grid-template-columns: repeat(3, minmax(0, 220px));
 }
 
 .birdreport-unlocked-controls {
@@ -592,9 +592,113 @@ button.danger {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
 
+#birdreportSpeciesContainer.records,
 #regionQueryContainer.records {
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
+  display: block;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+
+.result-table {
+  min-width: 760px;
+}
+
+.result-table-header,
+.result-table-row {
+  display: grid;
+  grid-template-columns: var(--table-columns);
+  align-items: center;
+}
+
+.result-table-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, #eef3ef 0%, #e6ece7 100%);
+  border-bottom: 1px solid var(--border);
+}
+
+.result-table-body {
+  background: #fff;
+}
+
+.result-table-row {
+  min-height: 64px;
+  border-top: 1px solid #edf2ed;
+}
+
+.result-table-row:first-child {
+  border-top: 0;
+}
+
+.result-table-row:nth-child(even) {
+  background: #fbfdfa;
+}
+
+.result-table-row.is-active {
+  background: linear-gradient(90deg, rgba(229, 244, 233, 0.9), rgba(239, 247, 241, 0.75));
+}
+
+.result-table-cell {
+  min-width: 0;
+  padding: 12px 14px;
+}
+
+.result-table-header .result-table-cell {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #314438;
+}
+
+.result-table-index,
+.result-table-date,
+.result-table-count,
+.result-table-status {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.result-table-location,
+.result-table-status {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.result-table-name-btn {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2b6f8d;
+  box-shadow: none;
+  text-align: left;
+}
+
+.result-table-name-btn:hover {
+  filter: none;
+}
+
+.result-table-name-btn strong {
+  color: #2b6f8d;
+  font-size: 1rem;
+}
+
+.result-table-name-btn:disabled strong {
+  color: var(--muted);
+}
+
+.result-table-meta {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .life-list {
@@ -941,44 +1045,107 @@ body.zhejiang-rare-detail-open {
   overflow: hidden;
 }
 
-.query-record {
+body.birdreport-species-detail-open {
+  overflow: hidden;
+}
+
+body.unlocked-export-open {
+  overflow: hidden;
+}
+
+.unlocked-export-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(25, 36, 27, 0.5);
+  backdrop-filter: blur(2px);
+}
+
+.unlocked-export-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  left: 16px;
+  bottom: 16px;
+  z-index: 81;
   display: grid;
-  gap: 4px;
-  padding: 9px 10px;
-  background: #fbfdfa;
-  color: var(--text);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: linear-gradient(180deg, #fbfdfa 0%, #f2f6f1 100%);
+  box-shadow: 0 18px 46px rgba(34, 48, 36, 0.22);
+}
+
+.unlocked-export-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.unlocked-export-header h3 {
+  margin: 0;
+  font-size: 1.06rem;
+}
+
+.unlocked-export-header p,
+.unlocked-export-meta {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.unlocked-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.unlocked-export-actions button {
+  width: auto;
+}
+
+.unlocked-export-table-wrap {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.unlocked-export-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+}
+
+.unlocked-export-table th,
+.unlocked-export-table td {
+  border-bottom: 1px solid #e6ece7;
+  padding: 12px 14px;
   text-align: left;
-  box-shadow: none;
+  vertical-align: top;
 }
 
-.query-record:hover {
-  background: #f3faf4;
-  border-color: #c7dfcd;
-  filter: none;
+.unlocked-export-table th {
+  position: sticky;
+  top: 0;
+  background: #edf4ee;
+  z-index: 1;
 }
 
-.query-record.is-active {
-  background: var(--primary-soft);
-  border-color: #bdd9c4;
+.unlocked-export-table tbody tr:nth-child(even) td {
+  background: #fbfdfa;
 }
 
-.query-record strong {
-  font-size: 0.96rem;
-  line-height: 1.3;
-}
-
-.query-record small {
-  font-size: 0.8rem;
-}
-
-.query-record-location {
-  color: var(--text);
-  font-size: 0.86rem;
-  line-height: 1.35;
-}
-
-.query-record-hint {
-  color: var(--primary);
+.unlocked-export-copy-source {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
 }
 
 .query-detail-panel {
@@ -1184,12 +1351,28 @@ canvas {
     display: grid;
   }
 
+  .unlocked-export-header {
+    display: grid;
+  }
+
+  .unlocked-export-panel {
+    top: 10px;
+    right: 10px;
+    left: 10px;
+    bottom: 10px;
+    padding: 14px;
+  }
+
   .query-detail-grid {
     grid-template-columns: 1fr;
   }
 
   .query-detail-close {
     width: 100%;
+  }
+
+  .result-table {
+    min-width: 640px;
   }
 
   .records.list .record {
@@ -1286,6 +1469,7 @@ canvas {
   }
 
   .records.cards,
+  #birdreportSpeciesContainer.records,
   #regionQueryContainer.records,
   .birdreport-monitor-panel .records.cards {
     grid-template-columns: 1fr;

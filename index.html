@@ -138,6 +138,15 @@
         <p id="birdreportMessage" class="message" aria-live="polite"></p>
         <div id="birdreportSpeciesSummary" class="stats"></div>
         <div id="birdreportSpeciesContainer" class="records cards"></div>
+        <div id="birdreportSpeciesDetailBackdrop" class="birdreport-rare-detail-backdrop is-hidden" aria-hidden="true"></div>
+        <div
+          id="birdreportSpeciesDetail"
+          class="birdreport-rare-detail-panel is-hidden"
+          aria-live="polite"
+          aria-modal="true"
+          role="dialog"
+          aria-label="BirdReport 鸟种地点详情"
+        ></div>
 
         <div id="unlockedSection" class="life-list-panel birdreport-unlocked-panel">
           <div class="section-heading">
@@ -154,6 +163,7 @@
           </div>
           <div class="actions birdreport-unlocked-actions">
             <button id="queryUnlockedSpeciesBtn">查询未解锁鸟种</button>
+            <button id="exportUnlockedSpeciesBtn" class="ghost">导出表格</button>
             <button id="clearUnlockedSpeciesBtn" class="ghost">清空结果</button>
           </div>
           <p id="unlockedSpeciesMessage" class="message" aria-live="polite"></p>
