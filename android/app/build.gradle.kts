@@ -43,6 +43,7 @@ android {
       assets.include("index.html")
       assets.include("style.css")
       assets.include("script.js")
+      assets.include("ebird-seasonal-core.js")
       assets.include("vendor/jquery.min.js")
       assets.include("vendor/crypto-js.min.js")
       assets.include("vendor/jqueryAjax.js")

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <title>BeauBird 观鸟助手</title>
-    <link rel="stylesheet" href="./style.css?v=20260507-0003" />
+    <link rel="stylesheet" href="./style.css?v=20260507-0004" />
   </head>
   <body>
     <header class="hero">
@@ -75,6 +75,35 @@
         <p id="ebirdMessage" class="message" aria-live="polite"></p>
         <div id="regionQuerySummary" class="stats"></div>
         <div id="regionQueryContainer" class="records cards"></div>
+        <div id="ebirdSeasonalPanel" class="life-list-panel ebird-seasonal-panel">
+          <div class="section-heading">
+            <h3>浙江当季可能出现鸟种</h3>
+            <p class="hint compact">
+              固定分析 <code>CN-ZJ</code>，按目标日期前后窗口统计多年历史记录，并用最近 30 天记录标记是否已确认。
+            </p>
+          </div>
+          <div class="controls ebird-seasonal-controls">
+            <div class="control">
+              <label for="ebirdSeasonalDate">目标日期</label>
+              <input id="ebirdSeasonalDate" type="date" />
+            </div>
+            <div class="control">
+              <label for="ebirdSeasonalYears">历史年份</label>
+              <input id="ebirdSeasonalYears" type="number" min="1" max="15" value="10" />
+            </div>
+            <div class="control">
+              <label for="ebirdSeasonalWindow">前后天数</label>
+              <input id="ebirdSeasonalWindow" type="number" min="0" max="14" value="7" />
+            </div>
+          </div>
+          <div class="actions ebird-seasonal-actions">
+            <button id="analyzeEbirdSeasonalBtn">分析浙江当季鸟种</button>
+            <button id="clearEbirdSeasonalCacheBtn" class="ghost">清除历史缓存</button>
+          </div>
+          <p id="ebirdSeasonalMessage" class="message" aria-live="polite"></p>
+          <div id="ebirdSeasonalSummary" class="stats"></div>
+          <div id="ebirdSeasonalContainer" class="records cards"></div>
+        </div>
         <div id="regionQueryBackdrop" class="query-detail-backdrop is-hidden" aria-hidden="true"></div>
         <div
           id="regionQueryDetail"
@@ -205,11 +234,12 @@
       </section>
 
     </main>
-    <script src="./vendor/jquery.min.js?v=20260507-0003"></script>
-    <script src="./vendor/crypto-js.min.js?v=20260507-0003"></script>
-    <script src="./vendor/jqueryAjax.js?v=20260507-0003"></script>
-    <script src="./vendor/aes.util.js?v=20260507-0003"></script>
-    <script src="./data/zhejiang-birdreport-species.js?v=20260507-0003"></script>
-    <script src="./script.js?v=20260507-0003"></script>
+    <script src="./vendor/jquery.min.js?v=20260507-0004"></script>
+    <script src="./vendor/crypto-js.min.js?v=20260507-0004"></script>
+    <script src="./vendor/jqueryAjax.js?v=20260507-0004"></script>
+    <script src="./vendor/aes.util.js?v=20260507-0004"></script>
+    <script src="./data/zhejiang-birdreport-species.js?v=20260507-0004"></script>
+    <script src="./ebird-seasonal-core.js?v=20260507-0004"></script>
+    <script src="./script.js?v=20260507-0004"></script>
   </body>
 </html>

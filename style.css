@@ -439,6 +439,7 @@ textarea {
 
 .embedded-android-app .records.cards,
 .embedded-android-app #regionQueryContainer.records,
+.embedded-android-app #ebirdSeasonalContainer.records,
 .embedded-android-app .birdreport-monitor-panel .records.cards {
   gap: 12px;
 }
@@ -705,7 +706,8 @@ button.danger {
 }
 
 #birdreportSpeciesContainer.records,
-#regionQueryContainer.records {
+#regionQueryContainer.records,
+#ebirdSeasonalContainer.records {
   display: block;
   overflow-x: auto;
   border: 1px solid var(--border);
@@ -716,6 +718,10 @@ button.danger {
 
 .result-table {
   min-width: 760px;
+}
+
+.seasonal-prediction-table {
+  min-width: 900px;
 }
 
 .result-table-header,
@@ -811,6 +817,72 @@ button.danger {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.seasonal-probability {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.seasonal-probability.is-high {
+  background: #e7f4eb;
+  color: #215836;
+}
+
+.seasonal-probability.is-medium {
+  background: #f7efd9;
+  color: #765a16;
+}
+
+.seasonal-probability.is-low {
+  background: #eef1f4;
+  color: #53606a;
+}
+
+.result-table-status small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.seasonal-prediction-detail {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #dfe9df;
+  border-radius: 12px;
+  background: #fbfdfa;
+}
+
+.seasonal-detail-card {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #e3ece4;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.seasonal-detail-card strong {
+  display: block;
+  color: #1f5134;
+  font-size: 0.9rem;
+}
+
+.seasonal-detail-card span {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.5;
 }
 
 .life-list {
@@ -1657,6 +1729,10 @@ canvas {
   .unlocked-detail-grid {
     grid-template-columns: 1fr;
   }
+
+  .seasonal-prediction-detail {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1718,6 +1794,7 @@ canvas {
   .records.cards,
   #birdreportSpeciesContainer.records,
   #regionQueryContainer.records,
+  #ebirdSeasonalContainer.records,
   .birdreport-monitor-panel .records.cards {
     grid-template-columns: 1fr;
   }
