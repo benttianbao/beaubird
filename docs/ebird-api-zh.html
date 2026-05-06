@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>eBird API 2.0 中文功能说明</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 16mm 14mm;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: #17211b;
+      font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.62;
+      background: #fff;
+    }
+
+    h1, h2, h3, h4 {
+      color: #153d2a;
+      line-height: 1.28;
+      page-break-after: avoid;
+    }
+
+    h1 {
+      margin: 0 0 18px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #2f7d4a;
+      font-size: 24pt;
+    }
+
+    h2 {
+      margin: 24px 0 10px;
+      padding-top: 8px;
+      font-size: 17pt;
+    }
+
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 13.5pt;
+    }
+
+    h4 {
+      margin: 14px 0 6px;
+      font-size: 12pt;
+    }
+
+    p {
+      margin: 0 0 9px;
+    }
+
+    a {
+      color: #2264aa;
+      text-decoration: none;
+      overflow-wrap: anywhere;
+    }
+
+    code {
+      padding: 1px 4px;
+      border-radius: 4px;
+      background: #eef5ef;
+      color: #174029;
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 10px 0 12px;
+      padding: 10px 12px;
+      border: 1px solid #dbe8df;
+      border-radius: 7px;
+      background: #f7faf7;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+      page-break-inside: avoid;
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+    }
+
+    table {
+      width: 100%;
+      margin: 10px 0 14px;
+      border-collapse: collapse;
+      font-size: 10pt;
+      page-break-inside: avoid;
+    }
+
+    th,
+    td {
+      padding: 6px 7px;
+      border: 1px solid #dbe6dc;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf5ef;
+      color: #173d2a;
+      font-weight: 700;
+      text-align: left;
+    }
+
+    tr:nth-child(even) td {
+      background: #fbfdfb;
+    }
+
+    ol {
+      margin: 0 0 12px 20px;
+      padding: 0;
+    }
+
+    li {
+      margin: 4px 0;
+    }
+  </style>
+</head>
+<body>
+<h1>eBird API 2.0 中文功能说明</h1>
+<p>整理日期：2026-05-07 原始文档：&lt;https://documenter.getpostman.com/view/664302/S1ENwy59&gt;</p>
+<p>这份文档按“功能能做什么”来翻译和整理 eBird API 2.0。它不是逐字翻译，而是把 Postman 文档中的接口、用途、路径、常用参数和注意事项整理成便于开发查阅的中文 Markdown。</p>
+<h2>1. 基础信息</h2>
+<h3>1.1 基础地址</h3>
+<pre><code>https://api.ebird.org/v2</code></pre>
+<p>Postman 文档里的 <code>{{serverName}}/{{contextRoot}}</code> 通常对应：</p>
+<pre><code>serverName = api.ebird.org
+contextRoot = v2</code></pre>
+<h3>1.2 鉴权方式</h3>
+<p>大多数接口都需要 eBird API Key。推荐放在请求头：</p>
+<pre><code>X-eBirdApiToken: 你的 API Key</code></pre>
+<p>文档也说明可以用查询参数 <code>key=你的 API Key</code>，但实际开发更建议使用请求头，避免 key 出现在 URL、日志或浏览器历史里。</p>
+<h3>1.3 默认返回格式</h3>
+<p>多数接口默认返回 JSON。少数参考类接口支持 <code>fmt=csv</code> 或 <code>fmt=json</code>，例如分类、热点、地区列表等。为了前端或 App 使用稳定，建议显式加：</p>
+<pre><code>fmt=json</code></pre>
+<h3>1.4 常见参数速查</h3>
+<table><thead><tr><th>参数</th><th>中文含义</th><th>常见取值 / 说明</th></tr></thead><tbody><tr><td><code>regionCode</code></td><td>地区代码</td><td>国家、省州、县区或地点代码，如 <code>CN</code>、<code>CN-ZJ</code>、<code>US-NY</code>、<code>L123456</code></td></tr>
+<tr><td><code>speciesCode</code></td><td>eBird 鸟种代码</td><td>通常是 6 位左右的英文缩写，可从 taxonomy 接口获取</td></tr>
+<tr><td><code>lat</code> / <code>lng</code></td><td>纬度 / 经度</td><td>附近查询必填</td></tr>
+<tr><td><code>dist</code></td><td>搜索半径，单位 km</td><td>多数附近查询最大 50 km</td></tr>
+<tr><td><code>back</code></td><td>向前查询天数</td><td>1-30，很多接口默认 14</td></tr>
+<tr><td><code>sppLocale</code></td><td>鸟种俗名语言</td><td><code>zh</code> 可返回中文俗名，默认 <code>en</code></td></tr>
+<tr><td><code>locale</code></td><td>分类俗名语言</td><td>taxonomy 接口常用，<code>zh</code> 为中文</td></tr>
+<tr><td><code>fmt</code></td><td>返回格式</td><td><code>json</code> 或 <code>csv</code></td></tr>
+<tr><td><code>maxResults</code></td><td>返回数量上限</td><td>不同接口上限不同</td></tr>
+<tr><td><code>hotspot</code></td><td>只查热点记录</td><td><code>true</code> / <code>false</code></td></tr>
+<tr><td><code>includeProvisional</code></td><td>包含未审核记录</td><td><code>true</code> / <code>false</code></td></tr>
+<tr><td><code>detail</code></td><td>返回字段详略</td><td><code>simple</code> / <code>full</code></td></tr>
+<tr><td><code>cat</code></td><td>分类类别过滤</td><td>如 <code>species</code>、<code>issf</code>、<code>form</code>、<code>slash</code>、<code>spuh</code>、<code>hybrid</code> 等</td></tr></tbody></table>
+<h2>2. data/obs：观测记录接口</h2>
+<p>这组接口用于查询 eBird 清单中提交的观测记录。可以按地区查，也可以按经纬度查附近记录。多数“最近”接口只查最近 30 天内的数据。</p>
+<h3>2.1 查询某地区最近观测到的鸟种</h3>
+<pre><code>GET /data/obs/{regionCode}/recent</code></pre>
+<p>用途：查询国家、省州、县区或地点最近出现过的鸟种。结果通常按每个鸟种只返回该地区最新的一条记录。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>back</code></td><td>向前查多少天，1-30，默认 14</td></tr>
+<tr><td><code>cat</code></td><td>只查某些分类类别</td></tr>
+<tr><td><code>hotspot</code></td><td>只返回热点记录</td></tr>
+<tr><td><code>includeProvisional</code></td><td>是否包含未审核记录</td></tr>
+<tr><td><code>maxResults</code></td><td>限制返回数量</td></tr>
+<tr><td><code>r</code></td><td>指定最多 10 个地点代码</td></tr>
+<tr><td><code>sppLocale</code></td><td>鸟种中文名可用 <code>zh</code></td></tr></tbody></table>
+<p>示例：</p>
+<pre><code>curl &quot;https://api.ebird.org/v2/data/obs/CN-ZJ/recent?back=7&amp;sppLocale=zh&quot; \
+  -H &quot;X-eBirdApiToken: YOUR_TOKEN&quot;</code></pre>
+<h3>2.2 查询某地区最近的稀有 / 值得关注记录</h3>
+<pre><code>GET /data/obs/{regionCode}/recent/notable</code></pre>
+<p>用途：查询某地区最近的 notable records，也就是当地或全国层面的稀有、不寻常、季节异常等记录。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>back</code></td><td>向前查多少天，1-30，默认 14</td></tr>
+<tr><td><code>detail</code></td><td><code>simple</code> 返回简略字段，<code>full</code> 返回更完整字段</td></tr>
+<tr><td><code>hotspot</code></td><td>只返回热点记录</td></tr>
+<tr><td><code>maxResults</code></td><td>限制返回数量</td></tr>
+<tr><td><code>r</code></td><td>指定最多 10 个地点代码</td></tr>
+<tr><td><code>sppLocale</code></td><td>鸟种中文名可用 <code>zh</code></td></tr></tbody></table>
+<h3>2.3 查询某地区某个鸟种的最近记录</h3>
+<pre><code>GET /data/obs/{regionCode}/recent/{speciesCode}</code></pre>
+<p>用途：在指定地区查某个鸟种最近 30 天内的记录。通常每个地点只返回该鸟种最近的一条记录。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>back</code></td><td>向前查多少天</td></tr>
+<tr><td><code>hotspot</code></td><td>只查热点记录</td></tr>
+<tr><td><code>includeProvisional</code></td><td>包含未审核记录</td></tr>
+<tr><td><code>maxResults</code></td><td>返回数量上限</td></tr>
+<tr><td><code>r</code></td><td>指定地点代码</td></tr>
+<tr><td><code>sppLocale</code></td><td>鸟种俗名语言</td></tr></tbody></table>
+<p>提示：<code>speciesCode</code> 可以通过 <code>/ref/taxonomy/ebird</code> 获取。</p>
+<h3>2.4 查询某坐标附近的最近观测记录</h3>
+<pre><code>GET /data/obs/geo/recent</code></pre>
+<p>用途：按经纬度查询附近最近观测记录。适合“当前位置附近最近有什么鸟”的功能。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>lat</code></td><td>纬度，必填</td></tr>
+<tr><td><code>lng</code></td><td>经度，必填</td></tr>
+<tr><td><code>dist</code></td><td>半径 km，0-50，默认 25</td></tr>
+<tr><td><code>back</code></td><td>向前查多少天，默认 14</td></tr>
+<tr><td><code>cat</code></td><td>分类类别过滤</td></tr>
+<tr><td><code>hotspot</code></td><td>只查热点</td></tr>
+<tr><td><code>includeProvisional</code></td><td>是否包含未审核</td></tr>
+<tr><td><code>maxResults</code></td><td>返回数量上限</td></tr>
+<tr><td><code>sort</code></td><td><code>date</code> 按日期，<code>species</code> 按分类顺序</td></tr>
+<tr><td><code>sppLocale</code></td><td>鸟种中文名可用 <code>zh</code></td></tr></tbody></table>
+<p>示例：</p>
+<pre><code>curl &quot;https://api.ebird.org/v2/data/obs/geo/recent?lat=30.274&amp;lng=120.155&amp;dist=20&amp;sppLocale=zh&quot; \
+  -H &quot;X-eBirdApiToken: YOUR_TOKEN&quot;</code></pre>
+<h3>2.5 查询某坐标附近某个鸟种的最近记录</h3>
+<pre><code>GET /data/obs/geo/recent/{speciesCode}</code></pre>
+<p>用途：按经纬度查询附近某个鸟种的记录。适合“附近哪里最近看过某鸟种”。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>lat</code> / <code>lng</code></td><td>经纬度，必填</td></tr>
+<tr><td><code>dist</code></td><td>半径 km，0-50，默认 25</td></tr>
+<tr><td><code>back</code></td><td>向前查多少天</td></tr>
+<tr><td><code>hotspot</code></td><td>只查热点</td></tr>
+<tr><td><code>includeProvisional</code></td><td>是否包含未审核</td></tr>
+<tr><td><code>maxResults</code></td><td>返回数量上限</td></tr>
+<tr><td><code>sppLocale</code></td><td>鸟种俗名语言</td></tr></tbody></table>
+<h3>2.6 查询最近见到某鸟种的最近地点</h3>
+<pre><code>GET /data/nearest/geo/recent/{speciesCode}</code></pre>
+<p>用途：找出距离指定经纬度最近、最近曾记录过某鸟种的地点。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>lat</code> / <code>lng</code></td><td>经纬度，必填</td></tr>
+<tr><td><code>back</code></td><td>向前查多少天，默认 14</td></tr>
+<tr><td><code>dist</code></td><td>限制最大距离，最大 50 km</td></tr>
+<tr><td><code>hotspot</code></td><td>只查热点</td></tr>
+<tr><td><code>includeProvisional</code></td><td>是否包含未审核</td></tr>
+<tr><td><code>maxResults</code></td><td>上限通常为 3000</td></tr>
+<tr><td><code>sppLocale</code></td><td>鸟种俗名语言</td></tr></tbody></table>
+<p>和 2.5 的区别：2.5 是查半径范围内的记录；2.6 更强调“离我最近在哪里见过这个鸟”。</p>
+<h3>2.7 查询某坐标附近最近的稀有 / 值得关注记录</h3>
+<pre><code>GET /data/obs/geo/recent/notable</code></pre>
+<p>用途：按当前位置查附近稀有或异常记录。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>lat</code> / <code>lng</code></td><td>经纬度，必填</td></tr>
+<tr><td><code>dist</code></td><td>半径 km，0-50，默认 25</td></tr>
+<tr><td><code>back</code></td><td>向前查多少天</td></tr>
+<tr><td><code>detail</code></td><td><code>simple</code> 或 <code>full</code></td></tr>
+<tr><td><code>hotspot</code></td><td>只查热点</td></tr>
+<tr><td><code>maxResults</code></td><td>返回数量上限</td></tr>
+<tr><td><code>sppLocale</code></td><td>鸟种俗名语言</td></tr></tbody></table>
+<h3>2.8 查询某地区某一天的历史观测</h3>
+<pre><code>GET /data/obs/{regionCode}/historic/{y}/{m}/{d}</code></pre>
+<p>用途：查询某地区在某个具体日期记录到的所有分类单元。适合做历史日统计、年度对比、迁徙日期回顾。</p>
+<p>路径参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>regionCode</code></td><td>地区或地点代码</td></tr>
+<tr><td><code>y</code></td><td>年，1800 至今</td></tr>
+<tr><td><code>m</code></td><td>月，1-12</td></tr>
+<tr><td><code>d</code></td><td>日</td></tr></tbody></table>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>cat</code></td><td>分类类别过滤</td></tr>
+<tr><td><code>detail</code></td><td><code>simple</code> 或 <code>full</code></td></tr>
+<tr><td><code>hotspot</code></td><td>只查热点</td></tr>
+<tr><td><code>includeProvisional</code></td><td>是否包含未审核</td></tr>
+<tr><td><code>maxResults</code></td><td>返回数量上限</td></tr>
+<tr><td><code>rank</code></td><td><code>mrec</code> 取当天最新记录，<code>create</code> 取最早添加记录</td></tr>
+<tr><td><code>r</code></td><td>指定最多 50 个地点代码</td></tr>
+<tr><td><code>sppLocale</code></td><td>鸟种俗名语言</td></tr></tbody></table>
+<p>注意：该接口结果可能有约 30 分钟缓存。</p>
+<h2>3. product：产品页数据接口</h2>
+<p>这组接口对应 eBird 网站上常见的产品页数据，比如排行榜、清单列表、地区统计、某份清单详情等。</p>
+<h3>3.1 查询某地区最近提交的清单</h3>
+<pre><code>GET /product/lists/{regionCode}</code></pre>
+<p>用途：获取某地区最近提交的 checklist 列表。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>maxResults</code></td><td>返回清单数量，1-200，默认 10</td></tr></tbody></table>
+<h3>3.2 查询某地区某一天提交的清单</h3>
+<pre><code>GET /product/lists/{regionCode}/{y}/{m}/{d}</code></pre>
+<p>用途：获取指定地区在某个日期提交的清单列表。</p>
+<p>路径参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>regionCode</code></td><td>国家、省州、县区或地点代码</td></tr>
+<tr><td><code>y</code> / <code>m</code> / <code>d</code></td><td>年、月、日</td></tr></tbody></table>
+<h3>3.3 查询某地区某一天的 Top 100 贡献者</h3>
+<pre><code>GET /product/top100/{regionCode}/{y}/{m}/{d}</code></pre>
+<p>用途：获取某地区某一天的前 100 位贡献者。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>rankedBy</code></td><td><code>spp</code> 按鸟种数排序，<code>cl</code> 按完整清单数排序</td></tr>
+<tr><td><code>maxResults</code></td><td>返回贡献者数量，1-100</td></tr></tbody></table>
+<p>注意：结果大约每 15 分钟更新一次。按鸟种数排序时，完整清单数相关字段可能为 0；按完整清单数排序时，鸟种数相关字段可能为 0。</p>
+<h3>3.4 查询某地区某一天的统计汇总</h3>
+<pre><code>GET /product/stats/{regionCode}/{y}/{m}/{d}</code></pre>
+<p>用途：获取某地区某一天的提交清单数、记录鸟种数、贡献者数等汇总数据。</p>
+<p>路径参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>regionCode</code></td><td>国家、省州、县区或地点代码</td></tr>
+<tr><td><code>y</code> / <code>m</code> / <code>d</code></td><td>年、月、日</td></tr></tbody></table>
+<p>注意：结果大约每 15 分钟更新一次。</p>
+<h3>3.5 查看某份清单详情</h3>
+<pre><code>GET /product/checklist/view/{subId}</code></pre>
+<p>用途：获取某份 checklist 的详细信息及其中所有观测记录。</p>
+<p>路径参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>subId</code></td><td>清单编号，例如 <code>S123456789</code></td></tr></tbody></table>
+<p>重要注意：官方文档明确提醒不要用这个接口大规模下载数据，否则可能被封禁。它适合查看单份清单详情，不适合批量爬取。</p>
+<h3>3.6 查询某地区历史记录过的鸟种列表</h3>
+<pre><code>GET /product/spplist/{regionCode}</code></pre>
+<p>用途：返回某地区历史上被记录过的所有 eBird 鸟种代码。适合做地区总名录、已记录 / 未记录对比、目标鸟种筛选。</p>
+<p>路径参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>regionCode</code></td><td>国家、省州、县区或地点代码</td></tr></tbody></table>
+<p>返回结果通常是 <code>speciesCode</code> 数组。</p>
+<h2>4. ref/hotspot：热点接口</h2>
+<p>热点是 eBird 中的公共观鸟地点。这组接口适合做地图、附近热点、地点详情、热点清单入口。</p>
+<h3>4.1 查询某地区的热点</h3>
+<pre><code>GET /ref/hotspot/{regionCode}</code></pre>
+<p>用途：获取某个国家、省州、县区或地点范围内的热点列表。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>back</code></td><td>如果提供，只返回最近若干天有记录的热点</td></tr>
+<tr><td><code>fmt</code></td><td><code>json</code> 或 <code>csv</code>，建议显式用 <code>fmt=json</code></td></tr></tbody></table>
+<p>常见返回字段包括 <code>locId</code>、<code>locName</code>、<code>lat</code>、<code>lng</code>、<code>countryCode</code>、<code>subnational1Code</code>、<code>subnational2Code</code>、<code>latestObsDt</code>、<code>numSpeciesAllTime</code> 等。</p>
+<h3>4.2 查询某坐标附近的热点</h3>
+<pre><code>GET /ref/hotspot/geo</code></pre>
+<p>用途：根据经纬度查附近热点。适合“附近观鸟点”。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>lat</code> / <code>lng</code></td><td>经纬度，必填</td></tr>
+<tr><td><code>dist</code></td><td>半径 km</td></tr>
+<tr><td><code>back</code></td><td>只看最近若干天活跃的热点</td></tr>
+<tr><td><code>fmt</code></td><td><code>json</code> 或 <code>csv</code>，建议 <code>fmt=json</code></td></tr></tbody></table>
+<p>示例：</p>
+<pre><code>curl &quot;https://api.ebird.org/v2/ref/hotspot/geo?lat=30.274&amp;lng=120.155&amp;dist=20&amp;fmt=json&quot; \
+  -H &quot;X-eBirdApiToken: YOUR_TOKEN&quot;</code></pre>
+<h3>4.3 查询某个热点详情</h3>
+<pre><code>GET /ref/hotspot/info/{locId}</code></pre>
+<p>用途：获取某个热点的地点信息，如名称、坐标、所属地区、历史鸟种数等。</p>
+<p>路径参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>locId</code></td><td>eBird 地点 / 热点编号，通常以 <code>L</code> 开头</td></tr></tbody></table>
+<h2>5. ref/taxonomy：分类体系接口</h2>
+<p>这组接口用于获取 eBird 使用的分类名录、鸟种代码、版本、语言、类群等。</p>
+<h3>5.1 获取 eBird 分类名录</h3>
+<pre><code>GET /ref/taxonomy/ebird</code></pre>
+<p>用途：下载 eBird 当前或指定版本的分类体系。开发中常用来建立 <code>speciesCode</code>、中文名、拉丁名之间的映射。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>cat</code></td><td>只返回某些分类类别，需小写</td></tr>
+<tr><td><code>fmt</code></td><td><code>csv</code> 或 <code>json</code>，默认可能是 <code>csv</code>，建议 <code>fmt=json</code></td></tr>
+<tr><td><code>locale</code></td><td>俗名语言，中文用 <code>zh</code></td></tr>
+<tr><td><code>species</code></td><td>只查指定鸟种代码，多个用逗号分隔</td></tr>
+<tr><td><code>version</code></td><td>指定 taxonomy 版本，默认最新</td></tr></tbody></table>
+<p>示例：</p>
+<pre><code>curl &quot;https://api.ebird.org/v2/ref/taxonomy/ebird?fmt=json&amp;locale=zh&quot; \
+  -H &quot;X-eBirdApiToken: YOUR_TOKEN&quot;</code></pre>
+<p>常见返回字段包括 <code>sciName</code>、<code>comName</code>、<code>speciesCode</code>、<code>category</code>、<code>taxonOrder</code>、<code>order</code>、<code>familyCode</code>、<code>familyComName</code>、<code>familySciName</code> 等。</p>
+<h3>5.2 获取某个鸟种的分类形式 / 亚种形式</h3>
+<pre><code>GET /ref/taxon/forms/{speciesCode}</code></pre>
+<p>用途：获取某个鸟种在 eBird taxonomy 中承认的 forms，比如亚种、地理型或其他下级形式。</p>
+<p>路径参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>speciesCode</code></td><td>eBird 鸟种代码</td></tr></tbody></table>
+<h3>5.3 获取 eBird 支持的俗名语言代码</h3>
+<pre><code>GET /ref/taxa-locales/ebird</code></pre>
+<p>用途：获取 eBird 俗名支持的语言 / 地区代码列表。可用来判断 <code>locale</code> 或 <code>sppLocale</code> 能不能填某种语言。</p>
+<h3>5.4 获取 taxonomy 版本列表</h3>
+<pre><code>GET /ref/taxonomy/versions</code></pre>
+<p>用途：获取所有可用的 eBird taxonomy 版本，并识别哪个是最新版本。</p>
+<p>这个接口通常不需要 API Key。</p>
+<h3>5.5 获取鸟类分组列表</h3>
+<pre><code>GET /ref/sppgroup/{speciesGrouping}</code></pre>
+<p>用途：获取鸟类分组，例如鸥类、燕鸥、雀科等，用于构建筛选器或分组展示。</p>
+<p>路径参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>speciesGrouping</code></td><td><code>merlin</code> 或 <code>ebird</code></td></tr></tbody></table>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>groupNameLocale</code></td><td>分组名称语言，中文可用 <code>zh</code></td></tr></tbody></table>
+<p>说明：<code>merlin</code> 会按 Merlin 的方式把相似鸟类放在一起；<code>ebird</code> 更接近分类顺序。</p>
+<h2>6. ref/region / ref/geo：地区接口</h2>
+<p>这组接口用于查地区信息、下级地区、相邻地区。适合做地区选择器、行政区级联、边界相邻地区推荐。</p>
+<h3>6.1 查询地区信息</h3>
+<pre><code>GET /ref/region/info/{regionCode}</code></pre>
+<p>用途：获取某个地区或地点的名称及地理范围信息。</p>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>regionNameFormat</code></td><td>控制地区名显示方式，如 <code>full</code>、<code>nameonly</code>、<code>detailed</code>、<code>revdetailed</code></td></tr>
+<tr><td><code>delim</code></td><td>地区名各层级之间的分隔符，默认类似 <code>, </code></td></tr></tbody></table>
+<p><code>regionNameFormat</code> 常见含义：</p>
+<table><thead><tr><th>取值</th><th>含义</th></tr></thead><tbody><tr><td><code>full</code></td><td>完整名称</td></tr>
+<tr><td><code>nameonly</code></td><td>只返回本级名称</td></tr>
+<tr><td><code>namequal</code></td><td>返回带限定的名称</td></tr>
+<tr><td><code>detailed</code></td><td>返回较详细描述</td></tr>
+<tr><td><code>detailednoqual</code></td><td>到上级地区层级的描述</td></tr>
+<tr><td><code>revdetailed</code></td><td>反向详细名称</td></tr></tbody></table>
+<h3>6.2 查询下级地区列表</h3>
+<pre><code>GET /ref/region/list/{regionType}/{parentRegionCode}</code></pre>
+<p>用途：获取某个国家或地区下面的下级地区列表。</p>
+<p>路径参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>regionType</code></td><td>要返回的地区层级：<code>country</code>、<code>subnational1</code>、<code>subnational2</code></td></tr>
+<tr><td><code>parentRegionCode</code></td><td>父级地区代码，或 <code>world</code></td></tr></tbody></table>
+<p>常用参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>fmt</code></td><td><code>json</code> 或 <code>csv</code>，默认 <code>json</code></td></tr></tbody></table>
+<p>示例：</p>
+<pre><code>curl &quot;https://api.ebird.org/v2/ref/region/list/subnational1/CN?fmt=json&quot; \
+  -H &quot;X-eBirdApiToken: YOUR_TOKEN&quot;</code></pre>
+<h3>6.3 查询相邻地区</h3>
+<pre><code>GET /ref/adjacent/{regionCode}</code></pre>
+<p>用途：返回与某个国家、省州或县区接壤的地区列表。</p>
+<p>路径参数：</p>
+<table><thead><tr><th>参数</th><th>说明</th></tr></thead><tbody><tr><td><code>regionCode</code></td><td>国家、一级行政区或二级行政区代码</td></tr></tbody></table>
+<p>注意：官方文档说明，目前只有美国、新西兰、墨西哥的部分二级行政区支持相邻地区查询。</p>
+<h2>7. 常见返回字段说明</h2>
+<h3>7.1 观测记录字段</h3>
+<table><thead><tr><th>字段</th><th>中文含义</th></tr></thead><tbody><tr><td><code>speciesCode</code></td><td>eBird 鸟种代码</td></tr>
+<tr><td><code>comName</code></td><td>俗名，受 <code>sppLocale</code> 影响</td></tr>
+<tr><td><code>sciName</code></td><td>学名</td></tr>
+<tr><td><code>locId</code></td><td>地点编号</td></tr>
+<tr><td><code>locName</code></td><td>地点名称</td></tr>
+<tr><td><code>obsDt</code></td><td>观测日期时间</td></tr>
+<tr><td><code>howMany</code></td><td>数量</td></tr>
+<tr><td><code>lat</code> / <code>lng</code></td><td>经纬度</td></tr>
+<tr><td><code>obsValid</code></td><td>记录是否有效</td></tr>
+<tr><td><code>obsReviewed</code></td><td>是否已审核</td></tr>
+<tr><td><code>locationPrivate</code></td><td>是否为私人地点</td></tr>
+<tr><td><code>subId</code></td><td>checklist 编号</td></tr></tbody></table>
+<h3>7.2 地点 / 热点字段</h3>
+<table><thead><tr><th>字段</th><th>中文含义</th></tr></thead><tbody><tr><td><code>locId</code></td><td>地点编号</td></tr>
+<tr><td><code>locName</code></td><td>地点名称</td></tr>
+<tr><td><code>lat</code> / <code>lng</code></td><td>经纬度</td></tr>
+<tr><td><code>countryCode</code></td><td>国家代码</td></tr>
+<tr><td><code>subnational1Code</code></td><td>一级行政区代码</td></tr>
+<tr><td><code>subnational2Code</code></td><td>二级行政区代码</td></tr>
+<tr><td><code>latestObsDt</code></td><td>最近观测日期</td></tr>
+<tr><td><code>numSpeciesAllTime</code></td><td>历史记录鸟种数</td></tr></tbody></table>
+<h3>7.3 分类字段</h3>
+<table><thead><tr><th>字段</th><th>中文含义</th></tr></thead><tbody><tr><td><code>speciesCode</code></td><td>鸟种代码</td></tr>
+<tr><td><code>comName</code></td><td>俗名</td></tr>
+<tr><td><code>sciName</code></td><td>学名</td></tr>
+<tr><td><code>category</code></td><td>分类类别</td></tr>
+<tr><td><code>taxonOrder</code></td><td>分类排序</td></tr>
+<tr><td><code>order</code></td><td>目</td></tr>
+<tr><td><code>familyCode</code></td><td>科代码</td></tr>
+<tr><td><code>familyComName</code></td><td>科俗名</td></tr>
+<tr><td><code>familySciName</code></td><td>科学名</td></tr></tbody></table>
+<h2>8. 开发建议</h2>
+<ol>
+<li>中文名展示优先使用 <code>sppLocale=zh</code> 或 taxonomy 的 <code>locale=zh</code>。</li>
+<li>对 <code>ref/taxonomy/ebird</code>、<code>ref/hotspot/*</code>、<code>ref/region/list/*</code> 这类支持格式切换的接口，建议显式加 <code>fmt=json</code>。</li>
+<li><code>back</code> 通常最多 30 天，<code>dist</code> 通常最多 50 km，不要把它当作无限历史检索。</li>
+<li>大批量历史分析不要用 <code>product/checklist/view/{subId}</code> 批量抓清单详情，官方文档明确警告可能被封禁。</li>
+<li>遇到返回字段中带全大写 <code>ID</code> 的旧字段，例如 <code>locID</code>、<code>subID</code>，应优先使用小写形式如 <code>locId</code>、<code>subId</code>，因为旧字段可能被移除。</li>
+<li>做 App 缓存时，taxonomy、region、hotspot 这类参考数据可以长缓存；recent observations、notable observations、top100、stats 这类动态数据应短缓存。</li>
+<li>需要“地区总鸟种”时，用 <code>/product/spplist/{regionCode}</code>；需要“实时最近记录”时，用 <code>/data/obs/.../recent</code>；需要“官方分类名录”时，用 <code>/ref/taxonomy/ebird</code>。</li>
+</ol>
+<h2>9. 常用场景对照</h2>
+<table><thead><tr><th>你想做什么</th><th>推荐接口</th></tr></thead><tbody><tr><td>查浙江最近有哪些鸟</td><td><code>GET /data/obs/CN-ZJ/recent?sppLocale=zh</code></td></tr>
+<tr><td>查附近最近有什么鸟</td><td><code>GET /data/obs/geo/recent?lat=...&amp;lng=...&amp;dist=...&amp;sppLocale=zh</code></td></tr>
+<tr><td>查附近哪里最近见过某鸟</td><td><code>GET /data/nearest/geo/recent/{speciesCode}?lat=...&amp;lng=...</code></td></tr>
+<tr><td>查附近稀有记录</td><td><code>GET /data/obs/geo/recent/notable?lat=...&amp;lng=...</code></td></tr>
+<tr><td>查某地历史总名录</td><td><code>GET /product/spplist/{regionCode}</code></td></tr>
+<tr><td>查 eBird 分类和中文名映射</td><td><code>GET /ref/taxonomy/ebird?fmt=json&amp;locale=zh</code></td></tr>
+<tr><td>查某地区热点</td><td><code>GET /ref/hotspot/{regionCode}?fmt=json</code></td></tr>
+<tr><td>查附近热点</td><td><code>GET /ref/hotspot/geo?lat=...&amp;lng=...&amp;dist=...&amp;fmt=json</code></td></tr>
+<tr><td>做国家 / 省 / 县级联选择器</td><td><code>GET /ref/region/list/{regionType}/{parentRegionCode}</code></td></tr>
+<tr><td>查看某份清单完整详情</td><td><code>GET /product/checklist/view/{subId}</code></td></tr></tbody></table>
+<h2>10. 资料来源</h2>
+<p>- eBird API 2.0 Postman 文档：&lt;https://documenter.getpostman.com/view/664302/S1ENwy59&gt; - eBird API 2.0 Postman Collection：&lt;https://www.postman.com/orange-crater-145710/byld-apis/collection/novf30k/ebird-api-2-0&gt; - Postman 请求页：Top 100、Regional statistics、View Checklist、Region Info、Sub Region List、Hotspots、Taxonomy、Adjacent Regions 等。</p>
+</body>
+</html>

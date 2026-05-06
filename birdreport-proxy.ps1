@@ -1,7 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 $listener = [System.Net.HttpListener]::new()
-$prefix = "http://127.0.0.1:8787/"
+$port = if ($env:BEAUBIRD_PROXY_PORT) { [int]$env:BEAUBIRD_PROXY_PORT } else { 8787 }
+$prefix = "http://127.0.0.1:$port/"
 $listener.Prefixes.Add($prefix)
 
 $endpointMap = @{
@@ -32,6 +33,7 @@ $endpointMap = @{
 }
 
 $birdreportCookieContainer = [System.Net.CookieContainer]::new()
+$birdreportCookies = @{}
 
 function Write-JsonResponse {
   param(
@@ -97,6 +99,144 @@ function Read-StreamBytes {
   }
 }
 
+function Get-BirdreportCookieHeader {
+  if ($birdreportCookies.Count -eq 0) {
+    return ""
+  }
+
+  return ($birdreportCookies.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join "; "
+}
+
+function Store-BirdreportSetCookieHeaders {
+  param([string[]] $HeaderLines)
+
+  foreach ($line in $HeaderLines) {
+    if ($line -notmatch "^\s*Set-Cookie\s*:\s*([^;]+)") {
+      continue
+    }
+
+    $cookiePair = $Matches[1]
+    $separator = $cookiePair.IndexOf("=")
+    if ($separator -le 0) {
+      continue
+    }
+
+    $name = $cookiePair.Substring(0, $separator).Trim()
+    $value = $cookiePair.Substring($separator + 1).Trim()
+    if ($name) {
+      $birdreportCookies[$name] = $value
+    }
+  }
+}
+
+function Read-CurlResponseMetadata {
+  param([Parameter(Mandatory = $true)] [string] $HeaderPath)
+
+  $statusCode = 200
+  $contentType = "application/json; charset=utf-8"
+  if (-not (Test-Path -LiteralPath $HeaderPath)) {
+    return @{
+      StatusCode = $statusCode
+      ContentType = $contentType
+    }
+  }
+
+  $headerLines = Get-Content -LiteralPath $HeaderPath
+  Store-BirdreportSetCookieHeaders -HeaderLines $headerLines
+
+  foreach ($line in $headerLines) {
+    if ($line -match "^HTTP/\S+\s+(\d+)") {
+      $statusCode = [int]$Matches[1]
+    } elseif ($line -match "^\s*Content-Type\s*:\s*(.+)$") {
+      $contentType = $Matches[1].Trim()
+    }
+  }
+
+  return @{
+    StatusCode = $statusCode
+    ContentType = if ($contentType) { $contentType } else { "application/json; charset=utf-8" }
+  }
+}
+
+function Invoke-BirdreportCurlRequest {
+  param(
+    [Parameter(Mandatory = $true)] [string] $RemotePath,
+    [Parameter(Mandatory = $true)] [string] $Referer,
+    [Parameter(Mandatory = $true)] [string] $Method,
+    [string] $Body = "",
+    [string] $ContentType = "application/json; charset=UTF-8",
+    [hashtable] $Headers = @{},
+    [string] $Accept = "application/json, text/plain, */*"
+  )
+
+  $tempRoot = [System.IO.Path]::GetTempPath()
+  $requestBodyPath = [System.IO.Path]::Combine($tempRoot, "beaubird-birdreport-request-$([guid]::NewGuid().ToString("N")).txt")
+  $responseBodyPath = [System.IO.Path]::Combine($tempRoot, "beaubird-birdreport-response-$([guid]::NewGuid().ToString("N")).bin")
+  $responseHeaderPath = [System.IO.Path]::Combine($tempRoot, "beaubird-birdreport-header-$([guid]::NewGuid().ToString("N")).txt")
+
+  try {
+    $curlArgs = @(
+      "--silent",
+      "--show-error",
+      "--max-time", "45",
+      "--connect-timeout", "15",
+      "--request", $Method,
+      "--url", $RemotePath,
+      "--output", $responseBodyPath,
+      "--dump-header", $responseHeaderPath,
+      "--header", "Accept: $Accept",
+      "--header", "Accept-Encoding: identity",
+      "--header", "Origin: https://www.birdreport.cn",
+      "--header", "Referer: $Referer",
+      "--header", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+    )
+
+    $cookieHeader = Get-BirdreportCookieHeader
+    if ($cookieHeader) {
+      $curlArgs += @("--header", "Cookie: $cookieHeader")
+    }
+
+    foreach ($key in $Headers.Keys) {
+      $value = [string]$Headers[$key]
+      if ($value) {
+        $curlArgs += @("--header", "${key}: $value")
+      }
+    }
+
+    if ($Method -eq "POST") {
+      [System.IO.File]::WriteAllText($requestBodyPath, $Body, [System.Text.Encoding]::UTF8)
+      $curlArgs += @("--header", "Content-Type: $ContentType", "--data-binary", "@$requestBodyPath")
+    }
+
+    $curlOutput = & curl.exe @curlArgs 2>&1
+    $curlExitCode = $LASTEXITCODE
+    if ($curlExitCode -ne 0) {
+      $details = ($curlOutput | Out-String).Trim()
+      if (-not $details) {
+        $details = "curl.exe exited with code $curlExitCode"
+      }
+      throw "BirdReport curl relay failed: $details"
+    }
+
+    $metadata = Read-CurlResponseMetadata -HeaderPath $responseHeaderPath
+    $bodyBytes = if (Test-Path -LiteralPath $responseBodyPath) {
+      [System.IO.File]::ReadAllBytes($responseBodyPath)
+    } else {
+      [byte[]]::new(0)
+    }
+
+    return @{
+      StatusCode = $metadata.StatusCode
+      ContentType = $metadata.ContentType
+      BodyBytes = $bodyBytes
+    }
+  } finally {
+    Remove-Item -LiteralPath $requestBodyPath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $responseBodyPath -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $responseHeaderPath -ErrorAction SilentlyContinue
+  }
+}
+
 function Invoke-BirdreportRelay {
   param(
     [Parameter(Mandatory = $true)] [string] $RemotePath,
@@ -114,6 +254,18 @@ function Invoke-BirdreportRelay {
     "requestId" = $Request.Headers["requestId"]
     "sign" = $Request.Headers["sign"]
   }
+
+  return Invoke-BirdreportCurlRequest `
+    -RemotePath $RemotePath `
+    -Referer $Referer `
+    -Method "POST" `
+    -Body $Body `
+    -ContentType "application/x-www-form-urlencoded; charset=UTF-8" `
+    -Headers @{
+      timestamp = $headers["timestamp"]
+      requestId = $headers["requestId"]
+      sign = $headers["sign"]
+    }
 
   $request = [System.Net.HttpWebRequest]::Create($RemotePath)
   $request.Method = "POST"
@@ -187,6 +339,14 @@ function Invoke-BirdreportPlainRequest {
     [string] $Body = "",
     [string] $ContentType = "application/json; charset=UTF-8"
   )
+
+  return Invoke-BirdreportCurlRequest `
+    -RemotePath $RemotePath `
+    -Referer $Referer `
+    -Method $Method `
+    -Body $Body `
+    -ContentType $ContentType `
+    -Accept $(if ($RemotePath -like "*/generate*") { "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8" } else { "application/json, text/plain, */*" })
 
   $request = [System.Net.HttpWebRequest]::Create($RemotePath)
   $request.Method = $Method

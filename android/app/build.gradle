@@ -9,6 +9,7 @@ def generatedWebAssetsDir = layout.buildDirectory.dir('generated/beaubird-assets
 tasks.register('syncWebAssets', Sync) {
     from(webRootDir) {
         include 'index.html', 'style.css', 'script.js'
+        include 'vendor/jquery.min.js', 'vendor/crypto-js.min.js', 'vendor/jqueryAjax.js', 'vendor/aes.util.js'
         include 'data/zhejiang-birdreport-species.json', 'data/zhejiang-birdreport-species.js'
     }
     into(generatedWebAssetsDir)
@@ -22,8 +23,8 @@ android {
         applicationId "cn.beaubird.app"
         minSdk 26
         targetSdk 34
-        versionCode 3
-        versionName "1.0.2"
+        versionCode 4
+        versionName "1.0.3"
     }
 
     buildTypes {

@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>未解锁鸟种查询 Android 原型</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #eef5ea;
+        --panel: rgba(255, 255, 255, 0.94);
+        --panel-strong: #f7fbf4;
+        --line: #dce8db;
+        --line-strong: #c7d9c9;
+        --text: #223024;
+        --muted: #5f7264;
+        --accent: #2f7d4a;
+        --accent-soft: #e9f5ec;
+        --accent-ink: #215836;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+        background:
+          radial-gradient(circle at top left, rgba(255, 244, 222, 0.9) 0%, rgba(255, 244, 222, 0) 36%),
+          radial-gradient(circle at top right, rgba(197, 232, 205, 0.95) 0%, rgba(197, 232, 205, 0) 42%),
+          linear-gradient(180deg, #eef5ea 0%, #f7f8f2 35%, #f5f6ef 100%);
+        color: var(--text);
+      }
+
+      .phone {
+        width: min(100%, 430px);
+        margin: 0 auto;
+        min-height: 100vh;
+        padding: 18px 14px 28px;
+      }
+
+      .screen {
+        border: 1px solid rgba(255, 255, 255, 0.92);
+        border-radius: 28px;
+        overflow: hidden;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(250, 252, 248, 0.9) 100%);
+        box-shadow: 0 22px 54px rgba(34, 48, 36, 0.14);
+      }
+
+      .topbar {
+        padding: 20px 18px 14px;
+        background: linear-gradient(180deg, #35544e 0%, #40596b 100%);
+        color: #fff;
+      }
+
+      .topbar h1 {
+        margin: 0;
+        font-size: 1.12rem;
+        text-align: center;
+      }
+
+      .content {
+        padding: 16px;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .summary-item {
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: var(--panel-strong);
+      }
+
+      .summary-item strong {
+        display: block;
+        font-size: 1rem;
+        color: var(--accent-ink);
+      }
+
+      .summary-item span {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 0.78rem;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+
+      .toolbar strong {
+        font-size: 0.94rem;
+      }
+
+      .toolbar button {
+        border: 1px solid var(--line-strong);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--accent-ink);
+        padding: 7px 12px;
+        font: inherit;
+      }
+
+      .table {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: hidden;
+        background: var(--panel);
+      }
+
+      .table-head,
+      .row-button {
+        display: grid;
+        grid-template-columns: 54px 72px minmax(0, 1fr) 76px 54px;
+        align-items: center;
+        gap: 0;
+      }
+
+      .table-head {
+        background: #edf4ee;
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 700;
+      }
+
+      .table-head span,
+      .row-button span {
+        padding: 11px 10px;
+        border-right: 1px solid var(--line);
+      }
+
+      .table-head span:last-child,
+      .row-button span:last-child {
+        border-right: 0;
+      }
+
+      .row {
+        border-top: 1px solid var(--line);
+      }
+
+      .row:first-of-type {
+        border-top: 0;
+      }
+
+      .row-button {
+        width: 100%;
+        border: 0;
+        background: #fff;
+        padding: 0;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+      }
+
+      .row:nth-child(even) .row-button {
+        background: #fbfdfa;
+      }
+
+      .row.is-active .row-button {
+        background: var(--accent-soft);
+      }
+
+      .row-rank,
+      .row-code,
+      .row-count,
+      .row-toggle {
+        text-align: center;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .row-name strong {
+        display: block;
+        font-size: 0.95rem;
+      }
+
+      .row-name small {
+        display: block;
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 0.76rem;
+      }
+
+      .row-toggle {
+        color: var(--accent);
+        font-size: 1rem;
+      }
+
+      .detail {
+        padding: 12px;
+        border-top: 1px solid var(--line);
+        background: #fcfefb;
+      }
+
+      .detail-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .detail-card {
+        padding: 9px 10px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+      }
+
+      .detail-card strong,
+      .location-card strong {
+        display: block;
+        font-size: 0.8rem;
+      }
+
+      .detail-card span,
+      .location-card span {
+        display: block;
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 0.76rem;
+        line-height: 1.45;
+      }
+
+      .location-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .location-card {
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+      }
+
+      @media (max-width: 420px) {
+        .phone {
+          padding-left: 10px;
+          padding-right: 10px;
+        }
+
+        .content {
+          padding: 12px;
+        }
+
+        .table-head,
+        .row-button {
+          grid-template-columns: 48px 66px minmax(0, 1fr) 68px 48px;
+        }
+
+        .table-head span,
+        .row-button span {
+          padding-left: 8px;
+          padding-right: 8px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="phone">
+      <section class="screen">
+        <header class="topbar">
+          <h1>未解锁鸟种查询</h1>
+        </header>
+        <div class="content">
+          <div class="summary">
+            <div class="summary-item">
+              <strong>记录用户 郑四</strong>
+              <span>缓存 2026-05-06 00:11</span>
+            </div>
+            <div class="summary-item">
+              <strong>浙江名录 588 种</strong>
+              <span>默认按浙江历史记录数从高到低排序</span>
+            </div>
+            <div class="summary-item">
+              <strong>已解锁 391 种</strong>
+              <span>进度保持不变</span>
+            </div>
+            <div class="summary-item">
+              <strong>未解锁 197 种</strong>
+              <span>默认收起，点行展开</span>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <strong>紧凑表格原型</strong>
+            <button type="button">显示鸟种信息</button>
+          </div>
+
+          <section class="table" aria-label="未解锁鸟种紧凑表格">
+            <div class="table-head">
+              <span>序号</span>
+              <span>编号</span>
+              <span>中文名</span>
+              <span>历史记录</span>
+              <span>展开</span>
+            </div>
+
+            <article class="row is-active">
+              <button class="row-button" type="button">
+                <span class="row-rank">1</span>
+                <span class="row-code">4248</span>
+                <span class="row-name">
+                  <strong>白腰叉尾海燕</strong>
+                  <small>Hydrobates leucorhous</small>
+                </span>
+                <span class="row-count">6,842</span>
+                <span class="row-toggle">⌃</span>
+              </button>
+              <div class="detail">
+                <div class="detail-grid">
+                  <div class="detail-card">
+                    <strong>学名</strong>
+                    <span>Hydrobates leucorhous</span>
+                  </div>
+                  <div class="detail-card">
+                    <strong>缺口频率</strong>
+                    <span>1.26840%</span>
+                  </div>
+                  <div class="detail-card">
+                    <strong>目 / 科</strong>
+                    <span>鹱形目 · 海燕科</span>
+                  </div>
+                  <div class="detail-card">
+                    <strong>地点状态</strong>
+                    <span>点击行后直接加载 BirdReport 公开地点</span>
+                  </div>
+                </div>
+                <div class="location-list">
+                  <div class="location-card">
+                    <strong>南麂列岛海域</strong>
+                    <span>2025-11-21 06:30 至 2025-11-21 10:45</span>
+                    <span>记录用户：郑四 · 数量：3 · 报告编号：202511210087</span>
+                  </div>
+                  <div class="location-card">
+                    <strong>舟山东福山外海</strong>
+                    <span>2024-10-13 07:05 至 2024-10-13 11:20</span>
+                    <span>记录用户：海边巡鸟人 · 数量：1 · 报告编号：202410130214</span>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="row">
+              <button class="row-button" type="button">
+                <span class="row-rank">2</span>
+                <span class="row-code">4462</span>
+                <span class="row-name">
+                  <strong>扁嘴海雀</strong>
+                  <small>默认收起，展开后再看详细信息</small>
+                </span>
+                <span class="row-count">4,518</span>
+                <span class="row-toggle">⌄</span>
+              </button>
+            </article>
+
+            <article class="row">
+              <button class="row-button" type="button">
+                <span class="row-rank">3</span>
+                <span class="row-code">4533</span>
+                <span class="row-name">
+                  <strong>草原鹞</strong>
+                  <small>中文名留在主表，其他信息折叠</small>
+                </span>
+                <span class="row-count">4,006</span>
+                <span class="row-toggle">⌄</span>
+              </button>
+            </article>
+
+            <article class="row">
+              <button class="row-button" type="button">
+                <span class="row-rank">4</span>
+                <span class="row-code">4128</span>
+                <span class="row-name">
+                  <strong>大红鹳</strong>
+                  <small>表格行高更紧凑，适合安卓长列表查看</small>
+                </span>
+                <span class="row-count">3,921</span>
+                <span class="row-toggle">⌄</span>
+              </button>
+            </article>
+          </section>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -11,8 +11,8 @@ android {
     applicationId = "cn.beaubird.app"
     minSdk = 26
     targetSdk = 34
-    versionCode = 1
-    versionName = "1.0.0"
+    versionCode = 4
+    versionName = "1.0.3"
   }
 
   buildTypes {
@@ -43,6 +43,10 @@ android {
       assets.include("index.html")
       assets.include("style.css")
       assets.include("script.js")
+      assets.include("vendor/jquery.min.js")
+      assets.include("vendor/crypto-js.min.js")
+      assets.include("vendor/jqueryAjax.js")
+      assets.include("vendor/aes.util.js")
       assets.include("data/zhejiang-birdreport-species.json")
       assets.include("data/zhejiang-birdreport-species.js")
     }

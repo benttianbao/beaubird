@@ -420,6 +420,10 @@ class BeauBirdLocalServer(private val context: Context) {
       "/index.html" to "index.html",
       "/style.css" to "style.css",
       "/script.js" to "script.js",
+      "/vendor/jquery.min.js" to "vendor/jquery.min.js",
+      "/vendor/crypto-js.min.js" to "vendor/crypto-js.min.js",
+      "/vendor/jqueryAjax.js" to "vendor/jqueryAjax.js",
+      "/vendor/aes.util.js" to "vendor/aes.util.js",
       "/data/zhejiang-birdreport-species.json" to "data/zhejiang-birdreport-species.json",
       "/data/zhejiang-birdreport-species.js" to "data/zhejiang-birdreport-species.js"
     )
@@ -429,6 +433,10 @@ class BeauBirdLocalServer(private val context: Context) {
       "/index.html" to "text/html; charset=UTF-8",
       "/style.css" to "text/css; charset=UTF-8",
       "/script.js" to "application/javascript; charset=UTF-8",
+      "/vendor/jquery.min.js" to "application/javascript; charset=UTF-8",
+      "/vendor/crypto-js.min.js" to "application/javascript; charset=UTF-8",
+      "/vendor/jqueryAjax.js" to "application/javascript; charset=UTF-8",
+      "/vendor/aes.util.js" to "application/javascript; charset=UTF-8",
       "/data/zhejiang-birdreport-species.json" to "application/json; charset=UTF-8",
       "/data/zhejiang-birdreport-species.js" to "application/javascript; charset=UTF-8"
     )

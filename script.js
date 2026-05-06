@@ -16,6 +16,9 @@ const BIRDREPORT_ZHEJIANG_SPECIES_DATA_URL = "./data/zhejiang-birdreport-species
 const BIRDREPORT_ZHEJIANG_SPECIES_GLOBAL = "BEAUBIRD_ZHEJIANG_SPECIES_DATA";
 const BIRDREPORT_VERSION = "CH4";
 const ANDROID_APP_USER_AGENT_TOKEN = "BeauBirdAndroidApp";
+const BIRDREPORT_PARAM_PUBLIC_KEY = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCvxXa98E1uWXnBzXkS2yHUfnBM6n3PCwLdfIox03T91joBvjtoDqiQ5x3tTOfpHs3LtiqMMEafls6b0YWtgB1dse1W5m+FpeusVkCOkQxB4SZDH6tuerIknnmB/Hsq5wgEkIvO5Pff9biig6AyoAkdWpSek/1/B7zYIepYY0lxKQIDAQAB";
+const BIRDREPORT_AES_KEY_SOURCE = "6756696653534952657053656868665752665050485566485667545454484967";
+const BIRDREPORT_AES_IV_SOURCE = "53536868555767547048526949655455";
 const DEFAULT_BIRDREPORT_PROXY_URL = "http://127.0.0.1:8787";
 const BIRDREPORT_RARE_SPECIES_PROVINCE = "浙江省";
 const BIRDREPORT_RARE_SPECIES_THRESHOLD = 500;
@@ -321,6 +324,8 @@ const state = {
   unlockedMissingSpecies: unlockedSpeciesCache.missing,
   unlockedTargetUsername: unlockedSpeciesCache.username,
   unlockedSpeciesCacheSavedAt: unlockedSpeciesCache.savedAt,
+  unlockedSpeciesShowMeta: false,
+  unlockedSpeciesTableVisible: true,
   activeUnlockedSpeciesKey: null,
   unlockedSpeciesDetailRecords: [],
   unlockedSpeciesDetailLoading: false,
@@ -1485,13 +1490,13 @@ async function initBirdreportProxy() {
 }
 
 function canUseBirdreportProxy() {
-  if (!window.jQuery || typeof window.jQuery.ajax !== "function") {
-    setBirdreportMessage("BirdReport 代理依赖未加载：缺少 jQuery。", true);
+  if (typeof window.fetch !== "function") {
+    setBirdreportMessage("当前环境缺少 fetch，暂时无法连接 BirdReport 代理。", true);
     return false;
   }
 
-  if (!window.BIRDREPORT_APIJS || typeof window.BIRDREPORT_APIJS.decode !== "function") {
-    setBirdreportMessage("BirdReport 解码依赖未加载，无法读取鸟种结果。", true);
+  if (!window.JSEncrypt || typeof window.MD5 !== "function") {
+    setBirdreportMessage("BirdReport 请求签名依赖未加载，暂时无法连接代理。", true);
     return false;
   }
 
@@ -1659,6 +1664,7 @@ async function queryUnlockedSpeciesByUser() {
     state.unlockedMissingSpecies = missing;
     state.unlockedTargetUsername = username;
     state.unlockedSpeciesCacheSavedAt = new Date().toISOString();
+    state.unlockedSpeciesTableVisible = true;
     clearUnlockedSpeciesDetail();
     saveUnlockedSpeciesCache();
     renderUnlockedSpeciesPanel();
@@ -1752,20 +1758,66 @@ function renderUnlockedSpeciesPanel() {
   updateUnlockedSpeciesExportButton();
 
   if (!catalogCount) {
+    elements.unlockedSpeciesSummary.classList.remove("is-rich");
     elements.unlockedSpeciesSummary.textContent = "输入记录用户后，可核对浙江 588 种名录中的未解锁鸟种。";
     elements.unlockedSpeciesContainer.innerHTML = '<div class="empty-state">查询结果会显示在这里。</div>';
     return;
   }
 
-  elements.unlockedSpeciesSummary.textContent = [
-    `记录用户 ${state.unlockedTargetUsername || "未填写"}`,
-    `已解锁 ${observedCount} 种`,
-    `未解锁 ${missingCount} 种`,
-    `浙江名录 ${catalogCount} 种`,
-    state.unlockedSpeciesCacheSavedAt ? `缓存 ${formatDateTime(state.unlockedSpeciesCacheSavedAt)}` : ""
-  ].filter(Boolean).join(" · ");
+  renderUnlockedSpeciesSummary({
+    observedCount,
+    missingCount,
+    catalogCount
+  });
 
   renderUnlockedSpeciesList();
+}
+
+function renderUnlockedSpeciesSummary({ observedCount, missingCount, catalogCount }) {
+  elements.unlockedSpeciesSummary.classList.add("is-rich");
+  elements.unlockedSpeciesSummary.innerHTML = `
+    <div class="unlocked-summary-toolbar">
+      <div class="unlocked-summary-grid">
+        ${renderUnlockedSpeciesSummaryCard("记录用户", state.unlockedTargetUsername || "未填写")}
+        ${renderUnlockedSpeciesSummaryCard("已解锁", `${observedCount} 种`)}
+        ${renderUnlockedSpeciesSummaryCard("未解锁", `${missingCount} 种`)}
+        ${renderUnlockedSpeciesSummaryCard("浙江名录", `${catalogCount} 种`)}
+        ${
+          state.unlockedSpeciesCacheSavedAt
+            ? renderUnlockedSpeciesSummaryCard("缓存", formatDateTime(state.unlockedSpeciesCacheSavedAt))
+            : ""
+        }
+      </div>
+      <div class="unlocked-summary-actions">
+        <button type="button" class="ghost unlocked-summary-toggle">${state.unlockedSpeciesShowMeta ? "隐藏鸟种信息" : "显示鸟种信息"}</button>
+      </div>
+    </div>
+  `;
+  elements.unlockedSpeciesSummary
+    .querySelector(".unlocked-summary-toggle")
+    ?.addEventListener("click", toggleUnlockedSpeciesInfoVisibility);
+}
+
+function renderUnlockedSpeciesSummaryCard(label, value) {
+  return `
+    <div class="unlocked-summary-card">
+      <strong>${escapeHtml(value)}</strong>
+      <span>${escapeHtml(label)}</span>
+    </div>
+  `;
+}
+
+function toggleUnlockedSpeciesInfoVisibility() {
+  state.unlockedSpeciesShowMeta = !state.unlockedSpeciesShowMeta;
+  renderUnlockedSpeciesPanel();
+}
+
+function toggleUnlockedSpeciesTableVisibility() {
+  state.unlockedSpeciesTableVisible = !state.unlockedSpeciesTableVisible;
+  if (!state.unlockedSpeciesTableVisible) {
+    clearUnlockedSpeciesDetail();
+  }
+  renderUnlockedSpeciesPanel();
 }
 
 function renderUnlockedSpeciesList() {
@@ -1773,6 +1825,15 @@ function renderUnlockedSpeciesList() {
   const missing = getBirdreportTaxaArray(state.unlockedMissingSpecies);
   if (!missing.length) {
     elements.unlockedSpeciesContainer.innerHTML = '<div class="empty-state">这个用户已经解锁浙江名录里的全部鸟种。</div>';
+    return;
+  }
+
+  if (!state.unlockedSpeciesTableVisible) {
+    elements.unlockedSpeciesContainer.append(createUnlockedSpeciesFloatingActions(missing.length));
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = `已隐藏 ${missing.length} 个未解锁鸟种，点击“展开全部鸟种”查看表格。`;
+    elements.unlockedSpeciesContainer.append(empty);
     return;
   }
 
@@ -1784,53 +1845,121 @@ function renderUnlockedSpeciesList() {
     )
   );
 
+  const table = document.createElement("div");
+  table.className = "unlocked-species-table";
+  table.innerHTML = `
+    <div class="unlocked-species-table-head" role="row">
+      <span class="unlocked-table-cell unlocked-cell-rank">序号</span>
+      <span class="unlocked-table-cell unlocked-cell-code">编号</span>
+      <span class="unlocked-table-cell unlocked-cell-name">中文名</span>
+      <span class="unlocked-table-cell unlocked-cell-count">历史记录</span>
+      <span class="unlocked-table-cell unlocked-cell-toggle">展开</span>
+    </div>
+  `;
+
+  elements.unlockedSpeciesContainer.append(createUnlockedSpeciesFloatingActions(missing.length));
+
   missing.forEach((item, index) => {
     const key = getBirdreportTaxonKey(item);
     const isActive = key === state.activeUnlockedSpeciesKey;
     const reportCount = getBirdreportReportCount(item);
     const frequency = (reportCount / totalReportCount) * 100;
-    const row = document.createElement("article");
-    row.className = `unlocked-species-row${isActive ? " is-active" : ""}`;
-    row.innerHTML = `
-      <button type="button" class="unlocked-species-main" aria-label="查看 ${escapeHtml(item.taxonname || "未命名鸟种")} 的公开地点">
-        <span class="unlocked-species-rank">${index + 1}.</span>
-        <span class="unlocked-species-name">
+    const taxonId = String(item?.taxon_id || item?.taxonid || item?.id || "--").trim() || "--";
+    const entry = document.createElement("article");
+    entry.className = [
+      "unlocked-species-entry",
+      isActive ? "is-active" : ""
+    ].filter(Boolean).join(" ");
+    entry.innerHTML = `
+      <button
+        type="button"
+        class="unlocked-species-row"
+        aria-expanded="${isActive ? "true" : "false"}"
+        aria-label="${isActive ? "收起" : "展开"} ${escapeHtml(item.taxonname || "未命名鸟种")} 的鸟种信息和公开地点"
+      >
+        <span class="unlocked-table-cell unlocked-cell-rank">${index + 1}</span>
+        <span class="unlocked-table-cell unlocked-cell-code">${escapeHtml(taxonId)}</span>
+        <span class="unlocked-table-cell unlocked-cell-name">
           <strong>${escapeHtml(item.taxonname || "未命名鸟种")}</strong>
-          <em>${escapeHtml(item.latinname || "未提供学名")}</em>
+          ${state.unlockedSpeciesShowMeta ? `<small>${escapeHtml(buildUnlockedSpeciesMetaLine(item))}</small>` : ""}
         </span>
+        <span class="unlocked-table-cell unlocked-cell-count">${escapeHtml(reportCount.toLocaleString("zh-CN"))}</span>
+        <span class="unlocked-table-cell unlocked-cell-toggle" aria-hidden="true">${isActive ? "⌃" : "⌄"}</span>
       </button>
-      <div class="unlocked-species-metric">
-        <strong>${frequency.toFixed(5)}%</strong>
-        <span>缺口频率 · 浙江历史记录数 ${escapeHtml(reportCount.toLocaleString("zh-CN"))}</span>
-        <div class="unlocked-species-bar" aria-hidden="true">
-          <span style="width: ${Math.max(0.5, Math.min(100, frequency)).toFixed(5)}%"></span>
-        </div>
-      </div>
-      <button type="button" class="unlocked-location-btn"${item.taxon_id ? "" : " disabled"}>地点</button>
     `;
 
-    row.querySelector(".unlocked-species-main")?.addEventListener("click", () => toggleUnlockedSpeciesLocations(item));
-    row.querySelector(".unlocked-location-btn")?.addEventListener("click", () => toggleUnlockedSpeciesLocations(item));
-    elements.unlockedSpeciesContainer.append(row);
+    entry.querySelector(".unlocked-species-row")?.addEventListener("click", () => toggleUnlockedSpeciesLocations(item));
 
     if (isActive) {
-      elements.unlockedSpeciesContainer.append(renderUnlockedSpeciesLocationPanel(item));
+      entry.append(
+        renderUnlockedSpeciesLocationPanel(item, {
+          reportCount,
+          frequency
+        })
+      );
     }
+
+    table.append(entry);
   });
+
+  elements.unlockedSpeciesContainer.append(table);
 }
 
-function renderUnlockedSpeciesLocationPanel(species) {
+function createUnlockedSpeciesFloatingActions(missingCount) {
+  const actions = document.createElement("div");
+  actions.className = `unlocked-floating-actions${state.unlockedSpeciesTableVisible ? "" : " is-collapsed"}`;
+  const buttonLabel = state.unlockedSpeciesTableVisible ? "隐藏全部鸟种" : "展开全部鸟种";
+  actions.innerHTML = `
+    <button type="button" class="ghost unlocked-floating-table-toggle" aria-label="${escapeHtml(buttonLabel)}">
+      <span>${escapeHtml(buttonLabel)}</span>
+      <small>${escapeHtml(String(missingCount))} 种</small>
+    </button>
+  `;
+  actions
+    .querySelector(".unlocked-floating-table-toggle")
+    ?.addEventListener("click", toggleUnlockedSpeciesTableVisibility);
+  return actions;
+}
+
+function buildUnlockedSpeciesMetaLine(item) {
+  const taxonMeta = [item?.taxonordername, item?.taxonfamilyname].filter(Boolean).join(" · ");
+  return [item?.latinname, taxonMeta].filter(Boolean).join(" · ") || "点击展开查看详情";
+}
+
+function renderUnlockedSpeciesLocationPanel(species, context = {}) {
   const panel = document.createElement("div");
   panel.className = "unlocked-location-panel";
+  const reportCount = Number.isFinite(context.reportCount) ? context.reportCount : getBirdreportReportCount(species);
+  const frequency = Number.isFinite(context.frequency) ? context.frequency : 0;
+  const summaryBlock = `
+    <div class="unlocked-detail-grid">
+      <div class="unlocked-detail-card">
+        <strong>学名</strong>
+        <span>${escapeHtml(species.latinname || "未提供学名")}</span>
+      </div>
+      <div class="unlocked-detail-card">
+        <strong>缺口频率</strong>
+        <span>${escapeHtml(frequency.toFixed(5))}%</span>
+      </div>
+      <div class="unlocked-detail-card">
+        <strong>目 / 科</strong>
+        <span>${escapeHtml(formatUnlockedSpeciesTaxonomy(species))}</span>
+      </div>
+      <div class="unlocked-detail-card">
+        <strong>浙江历史记录</strong>
+        <span>${escapeHtml(reportCount.toLocaleString("zh-CN"))}</span>
+      </div>
+    </div>
+  `;
 
   if (state.unlockedSpeciesDetailLoading) {
-    panel.innerHTML = '<div class="empty-state">正在按报告编号加载公开地点...</div>';
+    panel.innerHTML = `${summaryBlock}<div class="empty-state">正在按报告编号加载公开地点...</div>`;
     return panel;
   }
 
   if (state.unlockedSpeciesDetailError) {
     if (state.unlockedSpeciesDetailError === "captcha_required") {
-      panel.innerHTML = `
+      panel.innerHTML = `${summaryBlock}
         <div class="birdreport-captcha-panel">
           <strong>BirdReport 需要验证码</strong>
           <span>请输入图片里的验证码，验证通过后会自动重新加载这个鸟种的地点。</span>
@@ -1865,16 +1994,17 @@ function renderUnlockedSpeciesLocationPanel(species) {
       return panel;
     }
 
-    panel.innerHTML = `<div class="empty-state">加载失败：${escapeHtml(state.unlockedSpeciesDetailError)}</div>`;
+    panel.innerHTML = `${summaryBlock}<div class="empty-state">加载失败：${escapeHtml(state.unlockedSpeciesDetailError)}</div>`;
     return panel;
   }
 
   if (!state.unlockedSpeciesDetailRecords.length) {
-    panel.innerHTML = '<div class="empty-state">BirdReport 暂时没有返回可展示的公开地点。</div>';
+    panel.innerHTML = `${summaryBlock}<div class="empty-state">BirdReport 暂时没有返回可展示的公开地点。</div>`;
     return panel;
   }
 
   panel.innerHTML = `
+    ${summaryBlock}
     <div class="unlocked-location-title">
       <strong>${escapeHtml(species.taxonname || "未命名鸟种")} 公开地点</strong>
       <span>按官网记录页的观测时间倒序展示</span>
@@ -1894,6 +2024,12 @@ function renderUnlockedSpeciesLocationPanel(species) {
     </div>
   `;
   return panel;
+}
+
+function formatUnlockedSpeciesTaxonomy(species) {
+  const orderName = String(species?.taxonordername || "").trim() || "未提供目";
+  const familyName = String(species?.taxonfamilyname || "").trim() || "未提供科";
+  return `${orderName} · ${familyName}`;
 }
 
 async function toggleUnlockedSpeciesLocations(species) {
@@ -2157,6 +2293,7 @@ function clearUnlockedSpeciesResults(options = {}) {
   state.unlockedMissingSpecies = [];
   state.unlockedTargetUsername = "";
   state.unlockedSpeciesCacheSavedAt = "";
+  state.unlockedSpeciesTableVisible = true;
   clearUnlockedSpeciesDetail();
   clearUnlockedSpeciesCache();
   if (!keepUsername && elements.birdreportUnlockedUsername) {
@@ -3488,24 +3625,116 @@ function sortBirdreportTaxaByRecordCount(items) {
 function birdreportProxyPost(path, data) {
   const baseUrl = normalizeProxyBaseUrl(elements.birdreportProxyUrl.value);
   persistBirdreportProxySettings();
+  const signedRequest = buildBirdreportSignedRequest(data);
 
-  return new Promise((resolve, reject) => {
-    window.jQuery.ajax({
-      url: `${baseUrl}${path}`,
-      method: "POST",
-      data,
-      dataType: "json",
-      success: (response) => resolve(response),
-      error: (xhr) => {
-        const rawMessage = xhr?.responseJSON?.error || xhr?.responseJSON?.msg || xhr?.responseText || `HTTP ${xhr?.status || 500}`;
-        const message =
-          String(rawMessage).trim() === "Unknown endpoint"
-            ? `代理脚本里还没有 ${path}，请先重启 birdreport-proxy.ps1 以加载最新接口`
-            : rawMessage;
-        reject(new Error(message));
+  return fetch(`${baseUrl}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      ...signedRequest.headers
+    },
+    body: signedRequest.body
+  }).then(async (response) => {
+    let payload = null;
+    const text = await response.text();
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        payload = text;
       }
-    });
+    }
+
+    if (response.ok) {
+      return payload;
+    }
+
+    const rawMessage =
+      payload?.error ||
+      payload?.msg ||
+      (typeof payload === "string" ? payload : "") ||
+      `HTTP ${response.status}`;
+    const message =
+      String(rawMessage).trim() === "Unknown endpoint"
+        ? `代理脚本里还没有 ${path}，请先重启 birdreport-proxy.ps1 以加载最新接口`
+        : rawMessage;
+    throw new Error(message);
   });
+}
+
+function buildBirdreportSignedRequest(data) {
+  const serializedData = serializeBirdreportRequestData(data);
+  const normalizedPayload = JSON.stringify(sortBirdreportObjectKeys(parseBirdreportRequestData(serializedData)));
+  const timestamp = String(Date.now());
+  const requestId = generateBirdreportRequestId();
+  const sign = window.MD5(`${normalizedPayload}${requestId}${timestamp}`);
+  const encrypt = new window.JSEncrypt();
+  encrypt.setPublicKey(BIRDREPORT_PARAM_PUBLIC_KEY);
+  const encryptedBody = encrypt.encryptLong(normalizedPayload);
+
+  if (!encryptedBody) {
+    throw new Error("BirdReport 请求体加密失败。");
+  }
+
+  return {
+    body: encryptedBody,
+    headers: {
+      timestamp,
+      requestId,
+      sign
+    }
+  };
+}
+
+function serializeBirdreportRequestData(data) {
+  const params = new URLSearchParams();
+  Object.entries(data || {}).forEach(([key, value]) => {
+    if (value == null || value === "") {
+      return;
+    }
+    params.append(key, String(value));
+  });
+  return params.toString();
+}
+
+function parseBirdreportRequestData(serializedData) {
+  if (!serializedData) {
+    return {};
+  }
+
+  const result = {};
+  serializedData.split("&").forEach((entry) => {
+    if (!entry) {
+      return;
+    }
+    const separatorIndex = entry.indexOf("=");
+    if (separatorIndex === -1) {
+      result[entry] = "";
+      return;
+    }
+    result[entry.slice(0, separatorIndex)] = entry.slice(separatorIndex + 1);
+  });
+  return result;
+}
+
+function sortBirdreportObjectKeys(source) {
+  return Object.keys(source || {})
+    .sort()
+    .reduce((result, key) => {
+      result[key] = source[key];
+      return result;
+    }, {});
+}
+
+function generateBirdreportRequestId() {
+  const hexDigits = "0123456789abcdef";
+  const output = [];
+  for (let index = 0; index < 32; index += 1) {
+    output[index] = hexDigits[Math.floor(Math.random() * 16)];
+  }
+  output[14] = "4";
+  output[19] = hexDigits[(Number.parseInt(output[19], 16) & 0x3) | 0x8];
+  return output.join("");
 }
 
 function renderBirdreportRegionOptions(target, items, labelKey, codeKey, placeholder) {
@@ -3613,10 +3842,57 @@ function decodeBirdreportPayload(payload) {
   }
 
   if (typeof payload === "string") {
-    return JSON.parse(window.BIRDREPORT_APIJS.decode(payload) || "[]");
+    const trimmed = payload.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    try {
+      return JSON.parse(trimmed);
+    } catch (jsonError) {
+      let decodedText = "";
+      if (typeof window.BIRDREPORT_APIJS?.decode === "function") {
+        try {
+          decodedText = window.BIRDREPORT_APIJS.decode.call(window.BIRDREPORT_APIJS, trimmed) || "";
+        } catch (decodeError) {
+          decodedText = decodeBirdreportPayloadWithCryptoJs(trimmed);
+        }
+      } else {
+        decodedText = decodeBirdreportPayloadWithCryptoJs(trimmed);
+      }
+      return JSON.parse(decodedText || "[]");
+    }
   }
 
   return payload;
+}
+
+function decodeBirdreportPayloadWithCryptoJs(payload) {
+  if (!window.CryptoJS?.AES || !window.CryptoJS?.enc) {
+    throw new Error("BirdReport 解码依赖未加载，暂时不能读取返回结果。");
+  }
+
+  const key = window.CryptoJS.enc.Utf8.parse(decodeBirdreportDecimalPairs(BIRDREPORT_AES_KEY_SOURCE));
+  const iv = window.CryptoJS.enc.Hex.parse(decodeBirdreportDecimalPairs(BIRDREPORT_AES_IV_SOURCE));
+  const decoded = window.CryptoJS.AES.decrypt(payload, key, {
+    iv,
+    mode: window.CryptoJS.mode.CBC,
+    padding: window.CryptoJS.pad.Pkcs7
+  }).toString(window.CryptoJS.enc.Utf8);
+
+  if (!decoded) {
+    throw new Error("BirdReport 返回数据解码失败。");
+  }
+
+  return decoded;
+}
+
+function decodeBirdreportDecimalPairs(source) {
+  let output = "";
+  for (let index = 0; index < source.length; index += 2) {
+    output += String.fromCharCode(Number(source.slice(index, index + 2)));
+  }
+  return output;
 }
 
 function setBirdreportLoading(isLoading) {

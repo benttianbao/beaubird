@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <title>未解锁鸟种查询实装预览</title>
+    <link rel="stylesheet" href="../style.css" />
+    <script>
+      localStorage.setItem(
+        "birdBlogBirdreportUnlockedSpeciesCacheV1",
+        JSON.stringify({
+          username: "郑四",
+          savedAt: "2026-05-06T00:11:00.000Z",
+          catalog: [
+            { taxon_id: "4248", taxonname: "白腰叉尾海燕", latinname: "Hydrobates leucorhous", taxonordername: "鹱形目", taxonfamilyname: "海燕科", reportcount: 6842 },
+            { taxon_id: "4462", taxonname: "扁嘴海雀", latinname: "Synthliboramphus antiquus", taxonordername: "鸻形目", taxonfamilyname: "海雀科", reportcount: 4518 },
+            { taxon_id: "4533", taxonname: "草原鹞", latinname: "Circus macrourus", taxonordername: "鹰形目", taxonfamilyname: "鹰科", reportcount: 4006 },
+            { taxon_id: "4128", taxonname: "大红鹳", latinname: "Phoenicopterus roseus", taxonordername: "红鹳目", taxonfamilyname: "红鹳科", reportcount: 3921 },
+            { taxon_id: "4886", taxonname: "淡眉柳莺", latinname: "Phylloscopus humei", taxonordername: "雀形目", taxonfamilyname: "柳莺科", reportcount: 3624 },
+            { taxon_id: "4710", taxonname: "褐背伯劳", latinname: "Lanius vittatus", taxonordername: "雀形目", taxonfamilyname: "伯劳科", reportcount: 3188 }
+          ],
+          observed: [
+            { taxon_id: "4886", taxonname: "淡眉柳莺", latinname: "Phylloscopus humei", taxonordername: "雀形目", taxonfamilyname: "柳莺科", reportcount: 3624 },
+            { taxon_id: "4710", taxonname: "褐背伯劳", latinname: "Lanius vittatus", taxonordername: "雀形目", taxonfamilyname: "伯劳科", reportcount: 3188 }
+          ],
+          missing: [
+            { taxon_id: "4248", taxonname: "白腰叉尾海燕", latinname: "Hydrobates leucorhous", taxonordername: "鹱形目", taxonfamilyname: "海燕科", reportcount: 6842 },
+            { taxon_id: "4462", taxonname: "扁嘴海雀", latinname: "Synthliboramphus antiquus", taxonordername: "鸻形目", taxonfamilyname: "海雀科", reportcount: 4518 },
+            { taxon_id: "4533", taxonname: "草原鹞", latinname: "Circus macrourus", taxonordername: "鹰形目", taxonfamilyname: "鹰科", reportcount: 4006 },
+            { taxon_id: "4128", taxonname: "大红鹳", latinname: "Phoenicopterus roseus", taxonordername: "红鹳目", taxonfamilyname: "红鹳科", reportcount: 3921 }
+          ]
+        })
+      );
+    </script>
+  </head>
+  <body class="embedded-android-app">
+    <main class="container" style="padding-top: 18px;">
+      <section class="panel">
+        <div id="unlockedSection" class="life-list-panel birdreport-unlocked-panel">
+          <div class="section-heading">
+            <h3>未解锁鸟种查询</h3>
+            <p class="hint compact">实装预览页：使用真实脚本和样式，模拟 Android 端未解锁鸟种紧凑表格。</p>
+          </div>
+          <div class="controls birdreport-unlocked-controls">
+            <div class="control birdreport-unlocked-user-control">
+              <label for="birdreportUnlockedUsername">记录用户</label>
+              <input id="birdreportUnlockedUsername" type="text" autocomplete="off" />
+            </div>
+          </div>
+          <div class="actions birdreport-unlocked-actions">
+            <button id="queryUnlockedSpeciesBtn">查询未解锁鸟种</button>
+            <button id="exportUnlockedSpeciesBtn" class="ghost">导出表格</button>
+            <button id="clearUnlockedSpeciesBtn" class="ghost">清空结果</button>
+          </div>
+          <p id="unlockedSpeciesMessage" class="message" aria-live="polite"></p>
+          <div id="unlockedSpeciesSummary" class="stats"></div>
+          <div id="unlockedSpeciesContainer" class="unlocked-species-list"></div>
+        </div>
+      </section>
+
+      <div hidden>
+        <input id="ebirdApiKey" type="text" />
+        <input id="ebirdRegionCode" type="text" />
+        <input id="ebirdBackDays" type="number" />
+        <button id="syncEbirdBtn" type="button"></button>
+        <button id="clearEbirdKeyBtn" type="button"></button>
+        <p id="importMessage"></p>
+        <p id="ebirdMessage"></p>
+        <div id="regionQuerySummary"></div>
+        <div id="regionQueryContainer"></div>
+        <div id="regionQueryBackdrop" class="is-hidden"></div>
+        <div id="regionQueryDetail" class="is-hidden"></div>
+        <input id="birdreportProxyUrl" type="text" />
+        <input id="birdreportStartDate" type="date" />
+        <input id="birdreportEndDate" type="date" />
+        <select id="birdreportProvince"></select>
+        <select id="birdreportCity"></select>
+        <select id="birdreportDistrict"></select>
+        <input id="birdreportPointName" type="text" />
+        <button id="queryBirdreportProxyBtn" type="button"></button>
+        <button id="openBirdreportTaxonBtn" type="button"></button>
+        <button id="openBirdreportSearchBtn" type="button"></button>
+        <p id="birdreportMessage"></p>
+        <div id="birdreportSpeciesSummary"></div>
+        <div id="birdreportSpeciesContainer"></div>
+        <div id="birdreportSpeciesDetailBackdrop" class="is-hidden"></div>
+        <div id="birdreportSpeciesDetail" class="is-hidden"></div>
+        <input id="zhejiangRareMonitorDate" type="date" />
+        <button id="saveZhejiangRareSpeciesBtn" type="button"></button>
+        <button id="checkZhejiangRareSpeciesBtn" type="button"></button>
+        <button id="toggleZhejiangRareMonitorBtn" type="button"></button>
+        <p id="zhejiangRareSpeciesMessage"></p>
+        <div id="zhejiangRareSpeciesSummary"></div>
+        <div id="zhejiangRareSpeciesContainer"></div>
+        <div id="zhejiangRareSpeciesDetailBackdrop" class="is-hidden"></div>
+        <div id="zhejiangRareSpeciesDetail" class="is-hidden"></div>
+      </div>
+    </main>
+
+    <script src="../script.js"></script>
+    <script>
+      state.unlockedSpeciesShowMeta = true;
+      state.activeUnlockedSpeciesKey = getBirdreportTaxonKey(state.unlockedMissingSpecies[0]);
+      state.unlockedSpeciesDetailRecords = [
+        {
+          pointName: "南麂列岛海域",
+          startTimeLabel: "2025-11-21 06:30",
+          endTimeLabel: "2025-11-21 10:45",
+          username: "郑四",
+          taxonCount: 3,
+          serialId: "202511210087"
+        },
+        {
+          pointName: "舟山东福山外海",
+          startTimeLabel: "2024-10-13 07:05",
+          endTimeLabel: "2024-10-13 11:20",
+          username: "海边巡鸟人",
+          taxonCount: 1,
+          serialId: "202410130214"
+        }
+      ];
+      state.unlockedSpeciesDetailLoading = false;
+      state.unlockedSpeciesDetailError = "";
+      renderUnlockedSpeciesPanel();
+      setUnlockedSpeciesMessage("实装预览已载入本地示例数据。");
+    </script>
+  </body>
+</html>

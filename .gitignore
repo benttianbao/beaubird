@@ -10,3 +10,8 @@ android/local.properties
 
 .DS_Store
 Thumbs.db
+
+# Local reference/material files that are not part of releases.
+target_birds.json
+tools/generate-bird-ppt.js
+凤阳山鸟种预习.pptx
