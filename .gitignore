@@ -1,5 +1,6 @@
 .gradle-home/
 .tmp/
+server/wecom-rare-bot/.env
 
 android/.gradle/
 android/**/build/
