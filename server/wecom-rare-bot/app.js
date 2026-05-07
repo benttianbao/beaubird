@@ -4,6 +4,7 @@ const { extractDateCommand, formatRareBirdReply } = require("./core");
 const {
   createWecomSignature,
   decryptWecomMessage,
+  encryptWecomMessage,
   verifyWecomSignature
 } = require("./wecom-crypto");
 
@@ -11,6 +12,17 @@ function createTextReplyPayload(content) {
   return {
     msgtype: "text",
     text: {
+      content: String(content || "")
+    }
+  };
+}
+
+function createTextStreamReplyPayload(content, streamId) {
+  return {
+    msgtype: "stream",
+    stream: {
+      id: String(streamId || Date.now()),
+      finish: true,
       content: String(content || "")
     }
   };
@@ -51,6 +63,54 @@ function extractTextFromJson(payload) {
     payload.event?.content
   ];
   return String(candidates.find((item) => item != null) || "").trim();
+}
+
+function extractEncryptedFromJson(payload) {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  return String(payload.encrypt || payload.Encrypt || payload.msg_encrypt || payload.msgEncrypt || "").trim();
+}
+
+function extractTextFromDecryptedMessage(message) {
+  const text = String(message || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  if (text.startsWith("{")) {
+    try {
+      return extractTextFromJson(JSON.parse(text));
+    } catch {
+      return text;
+    }
+  }
+
+  if (text.startsWith("<")) {
+    return parseXmlValue(text, "Content");
+  }
+
+  return text;
+}
+
+function createEncryptedJsonReplyPayload(payload, { config, timestamp, nonce }) {
+  const outputTimestamp = String(timestamp || Math.floor(Date.now() / 1000));
+  const outputNonce = String(nonce || Math.random().toString(36).slice(2, 12));
+  const encrypted = encryptWecomMessage(JSON.stringify(payload), {
+    encodingAesKey: config.encodingAesKey,
+    corpId: config.corpId || ""
+  });
+  return {
+    encrypt: encrypted,
+    msgsignature: createWecomSignature({
+      token: config.token,
+      timestamp: outputTimestamp,
+      nonce: outputNonce,
+      encrypted
+    }),
+    timestamp: outputTimestamp,
+    nonce: outputNonce
+  };
 }
 
 async function handleIncomingText(text, options = {}) {
@@ -127,15 +187,45 @@ async function handleWecomGet(requestUrl, response, config) {
   write(response, 200, echo || "ok", "text/plain; charset=utf-8");
 }
 
-async function handleJsonCallback(payload, response, options) {
-  let text = extractTextFromJson(payload);
-  if (!text && payload?.Encrypt && options.config?.encodingAesKey) {
-    const plainXml = decryptWecomMessage(payload.Encrypt, {
-      encodingAesKey: options.config.encodingAesKey,
-      corpId: options.config.corpId
+async function handleJsonCallback(payload, requestUrl, response, options) {
+  const encrypted = extractEncryptedFromJson(payload);
+  if (encrypted && options.config?.encodingAesKey) {
+    const { config } = options;
+    if (config.token) {
+      const ok = verifyWecomSignature({
+        token: config.token,
+        timestamp: requestUrl.searchParams.get("timestamp"),
+        nonce: requestUrl.searchParams.get("nonce"),
+        encrypted,
+        signature: requestUrl.searchParams.get("msg_signature")
+      });
+      if (!ok) {
+        write(response, 403, "invalid signature", "text/plain; charset=utf-8");
+        return;
+      }
+    }
+
+    const plainMessage = decryptWecomMessage(encrypted, {
+      encodingAesKey: config.encodingAesKey,
+      corpId: config.corpId
     });
-    text = parseXmlValue(plainXml, "Content");
+    const text = extractTextFromDecryptedMessage(plainMessage);
+    const replyPayload = await handleIncomingText(text, { ...options, sendGroupWebhook: null });
+    const content = replyPayload?.text?.content || "";
+    const streamPayload = createTextStreamReplyPayload(content, extractDateCommand(text));
+    writeJson(
+      response,
+      200,
+      createEncryptedJsonReplyPayload(streamPayload, {
+        config,
+        timestamp: requestUrl.searchParams.get("timestamp"),
+        nonce: requestUrl.searchParams.get("nonce")
+      })
+    );
+    return;
   }
+
+  let text = extractTextFromJson(payload);
   const replyPayload = await handleIncomingText(text, { ...options, sendGroupWebhook: null });
   writeJson(response, 200, replyPayload);
 }
@@ -195,7 +285,7 @@ function createRareBotHttpHandler(options = {}) {
       const body = await readBody(request);
       const contentType = String(request.headers["content-type"] || "");
       if (contentType.includes("application/json") || body.trim().startsWith("{")) {
-        await handleJsonCallback(JSON.parse(body || "{}"), response, { ...options, config });
+        await handleJsonCallback(JSON.parse(body || "{}"), requestUrl, response, { ...options, config });
         return;
       }
 
@@ -208,8 +298,10 @@ function createRareBotHttpHandler(options = {}) {
 
 module.exports = {
   createRareBotHttpHandler,
+  createTextStreamReplyPayload,
   createTextReplyPayload,
   createWecomSignature,
+  extractTextFromDecryptedMessage,
   extractTextFromJson,
   handleIncomingText,
   parseXmlValue

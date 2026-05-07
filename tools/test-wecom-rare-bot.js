@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const http = require("node:http");
 const test = require("node:test");
 
 const {
@@ -22,6 +23,7 @@ const {
   encryptLong
 } = require("../server/wecom-rare-bot/birdreport-client");
 const {
+  createRareBotHttpHandler,
   createTextReplyPayload,
   handleIncomingText,
   parseXmlValue
@@ -296,6 +298,59 @@ test("handleIncomingText returns usage text when no valid date is found", async 
 test("parseXmlValue reads CDATA and plain XML values", () => {
   assert.equal(parseXmlValue("<xml><Content><![CDATA[@bot 2026-05-07]]></Content><ToUserName>ww</ToUserName></xml>", "Content"), "@bot 2026-05-07");
   assert.equal(parseXmlValue("<xml><MsgType>text</MsgType></xml>", "MsgType"), "text");
+});
+
+test("encrypted JSON smart robot callbacks return encrypted stream replies", async () => {
+  const token = "token-for-test";
+  const encodingAesKey = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+  const timestamp = "1778173853";
+  const nonce = "1778103445";
+  const encrypted = encryptWecomMessage(JSON.stringify({ msgtype: "text", text: { content: "@bot 2026-05-07" } }), {
+    corpId: "",
+    encodingAesKey,
+    randomBytes: Buffer.alloc(16, 2)
+  });
+  const signature = signWecomPayload({ token, timestamp, nonce, encrypted });
+  const handler = createRareBotHttpHandler({
+    config: { token, encodingAesKey, corpId: "" },
+    service: {
+      async queryDate(date) {
+        assert.equal(date, "2026-05-07");
+        return { reply: "浙江稀有记录 2026-05-07\n共命中 1 种" };
+      }
+    }
+  });
+  const server = http.createServer(handler);
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    const { port } = server.address();
+    const response = await fetch(
+      `http://127.0.0.1:${port}/wecom/rare-bot?msg_signature=${signature}&timestamp=${timestamp}&nonce=${nonce}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ encrypt: encrypted })
+      }
+    );
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(typeof body.encrypt, "string");
+    assert.equal(body.msgsignature, signWecomPayload({ token, timestamp: body.timestamp, nonce: body.nonce, encrypted: body.encrypt }));
+
+    const decrypted = JSON.parse(decryptWecomMessage(body.encrypt, { encodingAesKey, corpId: "" }));
+    assert.deepEqual(decrypted, {
+      msgtype: "stream",
+      stream: {
+        id: "2026-05-07",
+        finish: true,
+        content: "浙江稀有记录 2026-05-07\n共命中 1 种"
+      }
+    });
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test("parseDotEnv reads simple bot environment files", () => {
