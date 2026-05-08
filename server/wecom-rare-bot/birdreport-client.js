@@ -10,6 +10,9 @@ const TAXON_URL = "https://api.birdreport.cn/front/record/activity/taxon";
 const TAXON_REFERER = "https://www.birdreport.cn/home/search/taxon.html";
 const RECORD_URL = "https://api.birdreport.cn/front/record/search/page";
 const RECORD_REFERER = "https://www.birdreport.cn/home/search/record.html";
+const CAPTCHA_URL = "https://api.birdreport.cn/front/code/visited/generate";
+const CAPTCHA_VERIFY_URL = "https://api.birdreport.cn/front/code/visited/verify";
+const CAPTCHA_REFERER = "https://www.birdreport.cn/home/code/verify.html";
 const PAGE_LIMIT = 500;
 const RECORD_LIMIT = 100;
 const PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
@@ -205,16 +208,25 @@ function createBirdreportClient(options = {}) {
   const signRequest = options.signRequest || buildSignedBirdreportRequest;
   const cookieJar = createCookieJar();
 
+  function withBirdreportHeaders(extraHeaders = {}) {
+    const cookieHeader = cookieJar.header();
+    return {
+      Accept: "application/json, text/plain, */*",
+      Origin: ORIGIN,
+      "User-Agent": USER_AGENT,
+      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+      ...extraHeaders
+    };
+  }
+
   async function postBirdreport(url, referer, data) {
     const signedRequest = signRequest(data);
-    const cookieHeader = cookieJar.header();
     const response = await fetchImpl(url, {
       method: "POST",
-      headers: {
+      headers: withBirdreportHeaders({
         ...signedRequest.headers,
-        Referer: referer,
-        ...(cookieHeader ? { Cookie: cookieHeader } : {})
-      },
+        Referer: referer
+      }),
       body: signedRequest.body
     });
     cookieJar.store(response.headers);
@@ -225,6 +237,46 @@ function createBirdreportClient(options = {}) {
     const payload = text ? JSON.parse(text) : {};
     if (payload?.success === false || payload?.errorCode) {
       throw createBirdreportBusinessError(payload);
+    }
+    return payload;
+  }
+
+  async function fetchCaptchaImage() {
+    const response = await fetchImpl(`${CAPTCHA_URL}?timestamp=${Date.now()}`, {
+      method: "GET",
+      headers: withBirdreportHeaders({
+        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        Referer: CAPTCHA_REFERER
+      })
+    });
+    cookieJar.store(response.headers);
+    const body = Buffer.from(await response.arrayBuffer());
+    if (!response.ok) {
+      throw new Error(`BirdReport 验证码加载失败：HTTP ${response.status}`);
+    }
+    return {
+      body,
+      contentType: response.headers?.get?.("content-type") || "image/png"
+    };
+  }
+
+  async function verifyCaptcha(code) {
+    const response = await fetchImpl(CAPTCHA_VERIFY_URL, {
+      method: "POST",
+      headers: withBirdreportHeaders({
+        "Content-Type": "application/json; charset=UTF-8",
+        Referer: CAPTCHA_REFERER
+      }),
+      body: JSON.stringify({ code: String(code || "").trim() })
+    });
+    cookieJar.store(response.headers);
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`BirdReport 验证码校验失败：HTTP ${response.status}`);
+    }
+    const payload = text ? JSON.parse(text) : {};
+    if (!payload?.success) {
+      throw new Error(payload?.msg || payload?.message || "验证码不正确");
     }
     return payload;
   }
@@ -280,13 +332,17 @@ function createBirdreportClient(options = {}) {
   }
 
   return {
+    fetchCaptchaImage,
     fetchAllTaxa,
     fetchRecordsByTaxon,
-    postBirdreport
+    postBirdreport,
+    verifyCaptcha
   };
 }
 
 module.exports = {
+  CAPTCHA_URL,
+  CAPTCHA_VERIFY_URL,
   RECORD_URL,
   TAXON_URL,
   buildSignedBirdreportRequest,

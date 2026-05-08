@@ -5,8 +5,10 @@ const {
   DEFAULT_PROVINCE,
   aggregateLocations,
   buildRareHits,
-  formatRareBirdReply,
+  formatRareSpeciesListReply,
+  formatSpeciesLocationReply,
   isValidIsoDate,
+  matchRareSpeciesByName,
   normalizeBirdreportTaxon
 } = require("./core");
 
@@ -61,7 +63,7 @@ function createRareBirdQueryService(options = {}) {
     return baselineCache;
   }
 
-  async function queryDate(date) {
+  async function queryDateHits(date) {
     if (!isValidIsoDate(date)) {
       throw new Error("日期格式必须是 YYYY-MM-DD。");
     }
@@ -72,33 +74,62 @@ function createRareBirdQueryService(options = {}) {
     const baseline = await loadBaselineSpecies();
     const payload = createBirdreportPayload({ province, startTime: date, endTime: date });
     const dailyTaxa = await birdreportClient.fetchAllTaxa(payload);
-    const hits = buildRareHits(dailyTaxa, baseline);
+    return buildRareHits(dailyTaxa, baseline);
+  }
 
-    await mapWithConcurrency(hits, recordConcurrency, async (hit) => {
-      if (typeof birdreportClient.fetchRecordsByTaxon !== "function") {
-        hit.locations = [];
-        return;
-      }
-      try {
-        const records = await birdreportClient.fetchRecordsByTaxon(hit, date);
-        hit.locations = aggregateLocations(records);
-      } catch (error) {
-        hit.locations = [];
-        hit.locationError = error?.message || "地点查询失败";
-      }
-    });
-
+  async function queryDateSpecies(date) {
+    const hits = await queryDateHits(date);
     return {
       date,
       province,
       hits,
-      reply: formatRareBirdReply({ date, province, hits })
+      reply: formatRareSpeciesListReply({ date, province, hits })
+    };
+  }
+
+  async function querySpeciesLocations(date, speciesName) {
+    const hits = await queryDateHits(date);
+    const match = matchRareSpeciesByName(hits, speciesName);
+    if (match.status !== "matched") {
+      return {
+        date,
+        province,
+        status: match.status,
+        species: match.species,
+        candidates: match.candidates,
+        locations: [],
+        reply: formatSpeciesLocationReply({
+          date,
+          speciesName,
+          status: match.status,
+          candidates: match.candidates
+        })
+      };
+    }
+
+    if (!birdreportClient || typeof birdreportClient.fetchRecordsByTaxon !== "function") {
+      throw new Error("BirdReport 记录查询客户端不可用。");
+    }
+
+    const records = await birdreportClient.fetchRecordsByTaxon(match.species, date);
+    const locations = aggregateLocations(records);
+
+    return {
+      date,
+      province,
+      status: "matched",
+      species: match.species,
+      candidates: [],
+      locations,
+      reply: formatSpeciesLocationReply({ date, species: match.species, locations })
     };
   }
 
   return {
     loadBaselineSpecies,
-    queryDate
+    queryDate: queryDateSpecies,
+    queryDateSpecies,
+    querySpeciesLocations
   };
 }
 

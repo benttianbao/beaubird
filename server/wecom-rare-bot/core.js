@@ -32,6 +32,36 @@ function extractDateCommand(text) {
   return match[0];
 }
 
+function parseRareBotCommand(text) {
+  const source = String(text || "").trim();
+  if (!source.includes("@")) {
+    return null;
+  }
+
+  const match = /\b\d{4}-\d{2}-\d{2}\b/.exec(source);
+  if (!match || !isValidIsoDate(match[0])) {
+    return null;
+  }
+
+  const speciesName = source
+    .slice(match.index + match[0].length)
+    .replace(/^[\s,，:：;；。]+/, "")
+    .trim();
+  return {
+    type: speciesName ? "location" : "date",
+    date: match[0],
+    speciesName
+  };
+}
+
+function extractCaptchaCode(text) {
+  const source = String(text || "").trim();
+  if (!source || source.includes("@") || /\b\d{4}-\d{2}-\d{2}\b/.test(source)) {
+    return null;
+  }
+  return /^[A-Za-z0-9]{4,6}$/.test(source) ? source : null;
+}
+
 function getTaxonKey(item) {
   return String(item?.taxon_id || item?.taxonid || item?.id || item?.key || item?.taxonname || item?.name || "").trim();
 }
@@ -92,6 +122,40 @@ function buildRareHits(dailyTaxa, rareBaseline) {
   }
 
   return sortTaxaByRecordCount(hits);
+}
+
+function normalizeSpeciesNameForMatch(value) {
+  return String(value || "").replace(/[\s　,，.。:：;；、]/g, "").trim();
+}
+
+function matchRareSpeciesByName(hits, speciesName) {
+  const query = normalizeSpeciesNameForMatch(speciesName);
+  if (!query) {
+    return { status: "none", species: null, candidates: [] };
+  }
+
+  const normalizedHits = (hits || []).map((item) => ({
+    item,
+    name: normalizeSpeciesNameForMatch(item?.taxonname || item?.name)
+  }));
+  const exact = normalizedHits.filter((entry) => entry.name === query).map((entry) => entry.item);
+  if (exact.length === 1) {
+    return { status: "matched", species: exact[0], candidates: [] };
+  }
+  if (exact.length > 1) {
+    return { status: "multiple", species: null, candidates: exact };
+  }
+
+  const candidates = normalizedHits
+    .filter((entry) => entry.name && (entry.name.includes(query) || query.includes(entry.name)))
+    .map((entry) => entry.item);
+  if (candidates.length === 1) {
+    return { status: "matched", species: candidates[0], candidates: [] };
+  }
+  if (candidates.length > 1) {
+    return { status: "multiple", species: null, candidates };
+  }
+  return { status: "none", species: null, candidates: [] };
 }
 
 function normalizeBirdreportRecord(item, index = 0) {
@@ -173,6 +237,60 @@ function formatLocationSummary(locations, maxLocations = 6) {
   return `地点：${summary}${rest}`;
 }
 
+function formatRareSpeciesListReply({ date, province = DEFAULT_PROVINCE, hits = [], error = "" } = {}) {
+  const displayProvince = String(province || DEFAULT_PROVINCE).replace(/省$/, "");
+  if (error) {
+    return `${displayProvince}稀有鸟种 ${date || ""}\n查询失败：${error}`.trim();
+  }
+  if (!hits.length) {
+    return `${displayProvince}稀有鸟种 ${date}\n当天暂未发现命中的稀有鸟种。`;
+  }
+
+  const lines = [`${displayProvince}稀有鸟种 ${date}`, `共 ${hits.length} 种`];
+  hits.forEach((item, index) => {
+    lines.push(`${index + 1}. ${item.taxonname || item.name || "未命名鸟种"}`);
+  });
+  return lines.join("\n");
+}
+
+function formatCandidateReply({ date, speciesName, candidates = [] } = {}) {
+  const lines = [`${speciesName || "该鸟种"} ${date || ""} 匹配到多个鸟种，请补全名称：`.trim()];
+  candidates.slice(0, 8).forEach((item, index) => {
+    lines.push(`${index + 1}. ${item.taxonname || item.name || "未命名鸟种"}`);
+  });
+  return lines.join("\n");
+}
+
+function formatSpeciesLocationReply({ date, species, speciesName = "", locations = [], candidates = [], status = "matched", error = "" } = {}) {
+  const displayName = species?.taxonname || species?.name || speciesName || "该鸟种";
+  if (error) {
+    return `${displayName} ${date || ""} 浙江公开地点\n查询失败：${error}`.trim();
+  }
+  if (status === "multiple") {
+    return formatCandidateReply({ date, speciesName: displayName, candidates });
+  }
+  if (status === "none") {
+    return `${displayName} ${date || ""}\n当天未命中该稀有鸟种。`.trim();
+  }
+
+  const sortedLocations = [...(locations || [])].sort((left, right) => {
+    const countDiff = (Number(right?.count) || 0) - (Number(left?.count) || 0);
+    if (countDiff !== 0) {
+      return countDiff;
+    }
+    return String(left?.name || "").localeCompare(String(right?.name || ""), "zh-CN");
+  });
+  if (!sortedLocations.length) {
+    return `${displayName} ${date} 浙江公开地点\n暂未查到可展示的公开地点。`;
+  }
+
+  const lines = [`${displayName} ${date} 浙江公开地点`, `共 ${sortedLocations.length} 个地点`];
+  sortedLocations.forEach((item, index) => {
+    lines.push(`${index + 1}. ${item.name || "地点未公开"} ${Number(item.count) || 0} 次`);
+  });
+  return lines.join("\n");
+}
+
 function formatRareBirdReply({ date, province = DEFAULT_PROVINCE, hits = [], error = "" } = {}) {
   const displayProvince = String(province || DEFAULT_PROVINCE).replace(/省$/, "");
   if (error) {
@@ -200,12 +318,17 @@ module.exports = {
   RARE_RECORDCOUNT_THRESHOLD,
   aggregateLocations,
   buildRareHits,
+  extractCaptchaCode,
   extractDateCommand,
   formatLocationSummary,
+  formatRareSpeciesListReply,
   formatRareBirdReply,
+  formatSpeciesLocationReply,
   getTaxonKey,
   isValidIsoDate,
+  matchRareSpeciesByName,
   normalizeBirdreportRecord,
   normalizeBirdreportTaxon,
+  parseRareBotCommand,
   sortTaxaByRecordCount
 };

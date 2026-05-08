@@ -1,6 +1,6 @@
 # 企业微信浙江稀有记录机器人
 
-这个服务独立于现有前端和 Android 功能，默认监听 `127.0.0.1:8791`。群里发送 `@机器人 2026-05-07` 后，服务会查询这一天浙江省 BirdReport 稀有鸟种记录，并返回鸟种、出现次数和地点。
+这个服务独立于现有前端和 Android 功能，默认监听 `127.0.0.1:8791`。群里发送 `@机器人 2026-05-07` 后，服务会查询这一天浙江省 BirdReport 稀有鸟种记录，并只返回鸟种名称；发送 `@机器人 2026-05-07 仙八色鸫` 会返回这个鸟种当天的公开出现地点。
 
 ## 本地启动
 
@@ -39,9 +39,25 @@ https://your-tunnel.example.com/wecom/rare-bot
 - 优先确认企业微信后台是否有“智能机器人 / API 模式”。有的话使用同一个回调地址，机器人可直接在群内回复。
 - 如果暂时不能使用智能机器人，则创建自建应用回调，并再准备目标群的群机器人 Webhook URL。自建应用负责接收消息，Webhook 负责把查询结果推回群里。
 - 需要准备：`CorpID`、`Token`、`EncodingAESKey`；兜底方案还需要 `WECOM_GROUP_WEBHOOK_URL`。
+- 云服务器部署时设置 `WECOM_PUBLIC_BASE_URL`，例如 `http://120.26.231.157`，用于生成 BirdReport 验证码图片链接。
+
+## 群内命令
+
+```text
+@机器人 2026-05-07
+```
+
+只返回当天浙江命中的稀有鸟种名称，不显示出现次数和地点。
+
+```text
+@机器人 2026-05-07 仙八色鸫
+```
+
+返回这个鸟种当天在浙江的公开地点和地点出现次数。遇到 BirdReport 验证码时，机器人会发出验证码图片链接，直接在群里回复验证码即可自动重试刚才的查询。
 
 ## 回调行为
 
 - `GET /wecom/rare-bot`：企业微信 URL 验证。
-- `POST /wecom/rare-bot` JSON：智能机器人 API 模式，直接返回 `msgtype=text`。
+- `GET /wecom/rare-bot/captcha/:id`：临时验证码图片。
+- `POST /wecom/rare-bot` JSON：智能机器人 API 模式，返回加密 `msgtype=stream` 文本。
 - `POST /wecom/rare-bot` XML：自建应用消息回调，解密后查询，并通过群 Webhook 推送结果，接口返回 `success`。

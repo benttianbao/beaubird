@@ -54,7 +54,8 @@ function loadConfigFromEnv() {
     corpId: process.env.WECOM_CORP_ID || process.env.WECHAT_WORK_CORP_ID || "",
     token: process.env.WECOM_TOKEN || process.env.WECHAT_WORK_BOT_TOKEN || "",
     encodingAesKey: process.env.WECOM_ENCODING_AES_KEY || process.env.WECHAT_WORK_ENCODING_AES_KEY || "",
-    groupWebhookUrl: process.env.WECOM_GROUP_WEBHOOK_URL || process.env.WECHAT_WORK_GROUP_WEBHOOK_URL || ""
+    groupWebhookUrl: process.env.WECOM_GROUP_WEBHOOK_URL || process.env.WECHAT_WORK_GROUP_WEBHOOK_URL || "",
+    publicBaseUrl: process.env.WECOM_PUBLIC_BASE_URL || process.env.WECHAT_WORK_PUBLIC_BASE_URL || ""
   };
 }
 
@@ -94,12 +95,14 @@ function createGroupWebhookSender(groupWebhookUrl, fetchImpl = fetch) {
 
 function createServer() {
   const config = loadConfigFromEnv();
+  const birdreportClient = createBirdreportClient();
   const service = createRareBirdQueryService({
-    birdreportClient: createBirdreportClient()
+    birdreportClient
   });
   const handler = createRareBotHttpHandler({
     config,
     service,
+    birdreportClient,
     sendGroupWebhook: createGroupWebhookSender(config.groupWebhookUrl)
   });
   return http.createServer(handler);
