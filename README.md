@@ -67,7 +67,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 在“未解锁”区域输入 BirdReport 记录用户名，例如：
 
 ```text
-Lingod
+1234
 ```
 
 查询结果会显示：
