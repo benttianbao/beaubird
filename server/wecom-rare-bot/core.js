@@ -56,10 +56,11 @@ function parseRareBotCommand(text) {
 
 function extractCaptchaCode(text) {
   const source = String(text || "").trim();
-  if (!source || source.includes("@") || /\b\d{4}-\d{2}-\d{2}\b/.test(source)) {
+  if (!source || /\b\d{4}-\d{2}-\d{2}\b/.test(source)) {
     return null;
   }
-  return /^[A-Za-z0-9]{4,6}$/.test(source) ? source : null;
+  const tokens = source.match(/[A-Za-z0-9]{4,6}/g) || [];
+  return tokens.length ? tokens[tokens.length - 1] : null;
 }
 
 function getTaxonKey(item) {

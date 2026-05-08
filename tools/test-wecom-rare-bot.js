@@ -65,7 +65,8 @@ test("parseRareBotCommand separates date list and species location commands", ()
 test("extractCaptchaCode accepts short direct verification replies", () => {
   assert.equal(extractCaptchaCode("a7K9"), "a7K9");
   assert.equal(extractCaptchaCode("  1234  "), "1234");
-  assert.equal(extractCaptchaCode("@机器人 1234"), null);
+  assert.equal(extractCaptchaCode("@机器人 1234"), "1234");
+  assert.equal(extractCaptchaCode("@浙江稀有鸟 a7K9"), "a7K9");
   assert.equal(extractCaptchaCode("2026-05-07"), null);
 });
 
@@ -557,6 +558,42 @@ test("handleIncomingText verifies captcha replies and retries the pending comman
     ["locations", "2026-05-07", "仙八色鸫"]
   ]);
   assert.equal(captchaStore.getSession("room-1:user-1"), null);
+  assert.deepEqual(result, createTextReplyPayload("验证码通过，已重新查询。\n\n仙八色鸫 2026-05-07 浙江公开地点\n共 1 个地点\n1. 杭州西溪湿地 1 次"));
+});
+
+test("handleIncomingText accepts at-mentioned captcha replies", async () => {
+  const calls = [];
+  const captchaStore = createCaptchaSessionStore({
+    idFactory: () => "captcha-1",
+    now: () => 1000
+  });
+  captchaStore.createSession({
+    key: "room-1:user-1",
+    retryText: "@机器人 2026-05-07 仙八色鸫",
+    image: { body: Buffer.from("image-bytes"), contentType: "image/png" }
+  });
+
+  const result = await handleIncomingText("@机器人 a7K9", {
+    sessionKey: "room-1:user-1",
+    captchaStore,
+    birdreportClient: {
+      async verifyCaptcha(code) {
+        calls.push(["verify", code]);
+        return { success: true };
+      }
+    },
+    service: {
+      async querySpeciesLocations(date, speciesName) {
+        calls.push(["locations", date, speciesName]);
+        return { reply: "仙八色鸫 2026-05-07 浙江公开地点\n共 1 个地点\n1. 杭州西溪湿地 1 次" };
+      }
+    }
+  });
+
+  assert.deepEqual(calls, [
+    ["verify", "a7K9"],
+    ["locations", "2026-05-07", "仙八色鸫"]
+  ]);
   assert.deepEqual(result, createTextReplyPayload("验证码通过，已重新查询。\n\n仙八色鸫 2026-05-07 浙江公开地点\n共 1 个地点\n1. 杭州西溪湿地 1 次"));
 });
 
