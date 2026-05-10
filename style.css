@@ -208,6 +208,72 @@ textarea {
   grid-template-columns: repeat(3, minmax(0, 220px));
 }
 
+.bird-prep-controls {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.bird-prep-proxy-control {
+  grid-column: span 2;
+}
+
+.bird-prep-actions {
+  grid-template-columns: repeat(4, minmax(0, 190px));
+}
+
+.bird-prep-picker {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: minmax(220px, 0.7fr) minmax(320px, 1.3fr);
+  gap: 10px;
+}
+
+.bird-prep-species-options {
+  min-height: 260px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  overflow: auto;
+}
+
+.bird-prep-species-option,
+.bird-prep-species-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  color: var(--text);
+}
+
+.bird-prep-species-option {
+  cursor: pointer;
+}
+
+.bird-prep-species-option:hover {
+  background: #f3f8f1;
+}
+
+.bird-prep-species-option[aria-selected="true"] {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.bird-prep-species-option input {
+  width: auto;
+  margin-top: 3px;
+  flex: 0 0 auto;
+}
+
+.bird-prep-species-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bird-prep-species-empty {
+  color: var(--muted);
+}
+
 .birdreport-unlocked-actions {
   grid-template-columns: repeat(3, minmax(0, 220px));
 }
@@ -1657,9 +1723,18 @@ canvas {
 
   .ebird-actions,
   .birdreport-actions,
+  .bird-prep-actions,
   .birdreport-unlocked-actions,
   .birdreport-monitor-actions {
     grid-template-columns: 1fr;
+  }
+
+  .bird-prep-picker {
+    grid-template-columns: 1fr;
+  }
+
+  .bird-prep-proxy-control {
+    grid-column: auto;
   }
 
   .map-controls {

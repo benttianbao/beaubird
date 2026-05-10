@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <title>BeauBird 观鸟助手</title>
-    <link rel="stylesheet" href="./style.css?v=20260507-0004" />
+    <link rel="stylesheet" href="./style.css?v=20260509-0002" />
   </head>
   <body>
     <header class="hero">
@@ -12,10 +12,11 @@
       <div class="hero-badges" aria-hidden="true">
         <span class="hero-badge">BirdReport 直查</span>
         <span class="hero-badge">eBird 区域查询</span>
+        <span class="hero-badge">预习 PPT</span>
         <span class="hero-badge">稀有鸟监测</span>
       </div>
       <h1>BeauBird 观鸟助手</h1>
-      <p class="hero-subtitle">专注查询与监测：eBird 区域记录、BirdReport 鸟种查询、浙江稀有鸟自动检查。</p>
+      <p class="hero-subtitle">专注查询与监测：eBird 区域记录、BirdReport 鸟种查询、鸟类预习课件、浙江稀有鸟自动检查。</p>
       <div class="hero-stats" aria-hidden="true">
         <div class="hero-stat">
           <strong>应用内代理</strong>
@@ -35,6 +36,7 @@
     <nav class="app-quicknav" aria-label="首页快捷导航">
       <button class="app-quicknav-btn is-active" data-target="ebirdSection" type="button">eBird</button>
       <button class="app-quicknav-btn" data-target="birdreportSection" type="button">BirdReport</button>
+      <button class="app-quicknav-btn" data-target="birdPrepSection" type="button">预习 PPT</button>
       <button class="app-quicknav-btn" data-target="unlockedSection" type="button">未解锁</button>
       <button class="app-quicknav-btn" data-target="monitorSection" type="button">监测</button>
     </nav>
@@ -79,7 +81,7 @@
           <div class="section-heading">
             <h3>浙江当季可能出现鸟种</h3>
             <p class="hint compact">
-              固定分析 <code>CN-ZJ</code>，按目标日期前后窗口统计多年历史记录，并用最近 30 天记录标记是否已确认。
+              固定分析 <code>CN-33</code>，按目标日期前后窗口统计多年历史记录，并用最近 30 天记录标记是否已确认。
             </p>
           </div>
           <div class="controls ebird-seasonal-controls">
@@ -233,6 +235,62 @@
         ></div>
       </section>
 
+      <section id="birdPrepSection" class="panel bird-prep-panel">
+        <h2>鸟类预习 PPT</h2>
+        <p class="hint">
+          选择省份、城市和可选日期范围，通过 BirdReport 查询地区鸟种，再从下拉框多选鸟种生成预习 PPT。每页左侧预留图片位置，右侧展示鸟种简介。
+        </p>
+
+        <div class="controls bird-prep-controls">
+          <div class="control bird-prep-proxy-control">
+            <label for="birdPrepProxyUrl">代理地址</label>
+            <input id="birdPrepProxyUrl" type="text" value="http://127.0.0.1:8787" />
+          </div>
+          <div class="control">
+            <label for="birdPrepProvince">省</label>
+            <select id="birdPrepProvince">
+              <option value="">请选择省</option>
+            </select>
+          </div>
+          <div class="control">
+            <label for="birdPrepCity">市</label>
+            <select id="birdPrepCity">
+              <option value="">请选择市</option>
+            </select>
+          </div>
+          <div class="control">
+            <label for="birdPrepStartDate">开始日期</label>
+            <input id="birdPrepStartDate" type="date" />
+          </div>
+          <div class="control">
+            <label for="birdPrepEndDate">结束日期</label>
+            <input id="birdPrepEndDate" type="date" />
+          </div>
+        </div>
+
+        <div class="actions bird-prep-actions">
+          <button id="queryBirdPrepSpeciesBtn">查询地区鸟种</button>
+          <button id="selectAllBirdPrepSpeciesBtn" class="ghost" type="button">全选当前列表</button>
+          <button id="clearBirdPrepSpeciesBtn" class="ghost" type="button">清空选择</button>
+          <button id="generateBirdPrepPptBtn" type="button">生成 PPT</button>
+        </div>
+
+        <div class="bird-prep-picker">
+          <div class="control">
+            <label for="birdPrepSpeciesSearch">搜索鸟种</label>
+            <input id="birdPrepSpeciesSearch" type="text" placeholder="输入中文名、学名、目或科过滤" autocomplete="off" />
+          </div>
+          <div class="control">
+            <label for="birdPrepSpeciesOptions">鸟种多选列表</label>
+            <div id="birdPrepSpeciesOptions" class="bird-prep-species-options" role="listbox" aria-multiselectable="true" tabindex="0"></div>
+          </div>
+        </div>
+
+        <p class="hint compact">如果选中的鸟种在 <code>china_bird_results.json</code> 中没有简介，生成时会自动跳过并列出名称。</p>
+        <p id="birdPrepMessage" class="message" aria-live="polite"></p>
+        <div id="birdPrepSummary" class="stats"></div>
+      </section>
+
     </main>
     <script src="./vendor/jquery.min.js?v=20260507-0004"></script>
     <script src="./vendor/crypto-js.min.js?v=20260507-0004"></script>
@@ -240,6 +298,8 @@
     <script src="./vendor/aes.util.js?v=20260507-0004"></script>
     <script src="./data/zhejiang-birdreport-species.js?v=20260507-0004"></script>
     <script src="./ebird-seasonal-core.js?v=20260507-0004"></script>
-    <script src="./script.js?v=20260507-0004"></script>
+    <script src="./china_bird_results.js?v=20260509-0001"></script>
+    <script src="./bird-prep-ppt-core.js?v=20260509-0002"></script>
+    <script src="./script.js?v=20260509-0002"></script>
   </body>
 </html>
