@@ -22,7 +22,9 @@ const BIRDREPORT_TAXON_PAGE_URL = "https://www.birdreport.cn/home/search/taxon.h
 const BIRDREPORT_ZHEJIANG_SPECIES_DATA_URL = "./data/zhejiang-birdreport-species.json";
 const BIRDREPORT_ZHEJIANG_SPECIES_GLOBAL = "BEAUBIRD_ZHEJIANG_SPECIES_DATA";
 const CHINA_BIRD_RESULTS_DATA_URL = "./china_bird_results.json";
+const CHINA_BIRD_RESULTS_SCRIPT_URL = "./china_bird_results.js";
 const CHINA_BIRD_RESULTS_GLOBAL = "BEAUBIRD_CHINA_BIRD_RESULTS";
+const BIRD_PREP_LOGIN_EXPIRED_MESSAGE = "登录已过期，请重新登录后再生成 PPT。";
 const BIRDREPORT_VERSION = "CH4";
 const ANDROID_APP_USER_AGENT_TOKEN = "BeauBirdAndroidApp";
 const BIRDREPORT_PARAM_PUBLIC_KEY = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCvxXa98E1uWXnBzXkS2yHUfnBM6n3PCwLdfIox03T91joBvjtoDqiQ5x3tTOfpHs3LtiqMMEafls6b0YWtgB1dse1W5m+FpeusVkCOkQxB4SZDH6tuerIknnmB/Hsq5wgEkIvO5Pff9biig6AyoAkdWpSek/1/B7zYIepYY0lxKQIDAQAB";
@@ -30,6 +32,7 @@ const BIRDREPORT_AES_KEY_SOURCE = "675669665353495265705365686866575266505048556
 const BIRDREPORT_AES_IV_SOURCE = "53536868555767547048526949655455";
 const DEFAULT_BIRDREPORT_PROXY_URL = "http://127.0.0.1:8787";
 const ANDROID_BIRDREPORT_PROXY_URL = "http://127.0.0.1:8787";
+const LOCAL_BIRDREPORT_PROXY_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 const BIRDREPORT_RARE_SPECIES_PROVINCE = "浙江省";
 const BIRDREPORT_RARE_SPECIES_THRESHOLD = 500;
 const BIRDREPORT_MONITOR_INTERVAL_MS = 60 * 60 * 1000;
@@ -349,6 +352,10 @@ const state = {
   birdPrepLastQueryPayload: null,
   birdPrepSpeciesResults: [],
   birdPrepSelectedSpeciesKeys: new Set(),
+  birdPrepUnlockedSpeciesCache: new Map(),
+  birdPrepUnlockedFilterUsername: "",
+  birdPrepUnlockedFilteredCount: 0,
+  birdPrepUnlockedFilterWarning: "",
   birdPrepProfileIndex: null,
   birdPrepProfileIndexLoading: null,
   birdPrepLoading: false,
@@ -398,6 +405,9 @@ const elements = {
   birdPrepProxyUrl: document.querySelector("#birdPrepProxyUrl"),
   birdPrepProvince: document.querySelector("#birdPrepProvince"),
   birdPrepCity: document.querySelector("#birdPrepCity"),
+  birdPrepDistrict: document.querySelector("#birdPrepDistrict"),
+  birdPrepPointName: document.querySelector("#birdPrepPointName"),
+  birdPrepUnlockedUsername: document.querySelector("#birdPrepUnlockedUsername"),
   birdPrepStartDate: document.querySelector("#birdPrepStartDate"),
   birdPrepEndDate: document.querySelector("#birdPrepEndDate"),
   queryBirdPrepSpeciesBtn: document.querySelector("#queryBirdPrepSpeciesBtn"),
@@ -576,7 +586,10 @@ function bindEvents() {
   bindIfPresent(elements.zhejiangRareSpeciesDetailBackdrop, "click", closeZhejiangRareSpeciesDetail);
   bindIfPresent(elements.birdPrepProxyUrl, "change", persistBirdPrepProxySettings);
   bindIfPresent(elements.birdPrepProvince, "change", handleBirdPrepProvinceChange);
-  bindIfPresent(elements.birdPrepCity, "change", clearBirdPrepSpeciesResults);
+  bindIfPresent(elements.birdPrepCity, "change", handleBirdPrepCityChange);
+  bindIfPresent(elements.birdPrepDistrict, "change", clearBirdPrepSpeciesResults);
+  bindIfPresent(elements.birdPrepPointName, "input", clearBirdPrepSpeciesResults);
+  bindIfPresent(elements.birdPrepUnlockedUsername, "input", clearBirdPrepSpeciesResults);
   bindIfPresent(elements.birdPrepStartDate, "change", clearBirdPrepSpeciesResults);
   bindIfPresent(elements.birdPrepEndDate, "change", clearBirdPrepSpeciesResults);
   bindIfPresent(elements.queryBirdPrepSpeciesBtn, "click", queryBirdPrepSpecies);
@@ -1986,7 +1999,13 @@ function isEmbeddedAndroidApp() {
 }
 
 function getDefaultBirdreportProxyUrl() {
-  return isEmbeddedAndroidApp() ? ANDROID_BIRDREPORT_PROXY_URL : DEFAULT_BIRDREPORT_PROXY_URL;
+  if (isEmbeddedAndroidApp()) {
+    return ANDROID_BIRDREPORT_PROXY_URL;
+  }
+  if (window.location.protocol === "file:") {
+    return DEFAULT_BIRDREPORT_PROXY_URL;
+  }
+  return window.location.origin;
 }
 
 function applyRuntimeEnvironment() {
@@ -2028,8 +2047,29 @@ function lockEmbeddedAndroidViewport() {
 
 function hydrateBirdreportProxyInputs() {
   const stored = localStorage.getItem(BIRDREPORT_PROXY_URL_STORAGE);
-  const value = isEmbeddedAndroidApp() ? getDefaultBirdreportProxyUrl() : stored || getDefaultBirdreportProxyUrl();
+  const value = isEmbeddedAndroidApp()
+    ? getDefaultBirdreportProxyUrl()
+    : getUsableStoredBirdreportProxyUrl(stored) || getDefaultBirdreportProxyUrl();
   setSharedBirdreportProxyUrl(value);
+}
+
+function getUsableStoredBirdreportProxyUrl(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+  if (window.location.protocol === "file:") {
+    return trimmed;
+  }
+  try {
+    const url = new URL(trimmed, window.location.href);
+    if (LOCAL_BIRDREPORT_PROXY_HOSTS.has(url.hostname) && url.port === "8787") {
+      return "";
+    }
+  } catch {
+    return trimmed;
+  }
+  return trimmed;
 }
 
 function persistBirdreportProxySettings() {
@@ -3675,6 +3715,7 @@ async function loadBirdreportProvinces() {
   resetSelectOptions(elements.birdreportDistrict, "请选择区");
   resetSelectOptions(elements.birdPrepProvince, "省份加载中...");
   resetSelectOptions(elements.birdPrepCity, "请选择市");
+  resetSelectOptions(elements.birdPrepDistrict, "请选择区");
   const response = await birdreportProxyPost("/api/birdreport/province");
   renderBirdreportRegionOptions(elements.birdreportProvince, response.data || [], "province_name", "province_code", "请选择省");
   renderBirdreportRegionOptions(elements.birdPrepProvince, response.data || [], "province_name", "province_code", "请选择省");
@@ -3684,6 +3725,7 @@ async function loadBirdreportProvinces() {
 
 async function handleBirdPrepProvinceChange() {
   resetSelectOptions(elements.birdPrepCity, "请选择市");
+  resetSelectOptions(elements.birdPrepDistrict, "请选择区");
   clearBirdPrepSpeciesResults();
 
   const province = elements.birdPrepProvince.value;
@@ -3707,6 +3749,31 @@ async function handleBirdPrepProvinceChange() {
   }
 }
 
+async function handleBirdPrepCityChange() {
+  resetSelectOptions(elements.birdPrepDistrict, "请选择区");
+  clearBirdPrepSpeciesResults();
+
+  const city = elements.birdPrepCity.value;
+  if (!city) {
+    return;
+  }
+
+  if (!canUseBirdreportProxy(setBirdPrepMessage)) {
+    return;
+  }
+
+  syncBirdPrepProxyToSharedProxy();
+  try {
+    const selectedOption = elements.birdPrepCity.selectedOptions[0];
+    const cityCode = selectedOption?.dataset.code || "";
+    const response = await birdreportProxyPost("/api/birdreport/district", { city_code: cityCode });
+    renderBirdreportRegionOptions(elements.birdPrepDistrict, response.data || [], "district_name", null, "请选择区");
+    setBirdPrepMessage(`已加载 ${city} 的区县列表。`);
+  } catch (error) {
+    setBirdPrepMessage(`加载区县失败：${error.message}`, true);
+  }
+}
+
 async function queryBirdPrepSpecies() {
   const payload = buildBirdPrepQueryPayload();
   if (!payload) {
@@ -3723,20 +3790,49 @@ async function queryBirdPrepSpecies() {
   state.birdPrepSpeciesResults = [];
   state.birdPrepSelectedSpeciesKeys.clear();
   state.birdPrepLastQueryPayload = null;
+  state.birdPrepUnlockedFilterUsername = "";
+  state.birdPrepUnlockedFilteredCount = 0;
+  state.birdPrepUnlockedFilterWarning = "";
   renderBirdPrepSpeciesOptions();
 
   try {
+    const username = getBirdPrepUnlockedUsername();
+    let unlockedLookup = null;
+    let unlockedWarning = "";
+    if (username) {
+      try {
+        const unlockedSpecies = await getBirdPrepUnlockedSpeciesForUser(username, {
+          onProgress: (message) => setBirdPrepMessage(message)
+        });
+        if (unlockedSpecies.length) {
+          unlockedLookup = buildBirdPrepUnlockedTaxonLookup(unlockedSpecies);
+          state.birdPrepUnlockedFilterUsername = username;
+        } else {
+          unlockedWarning = `没有查到「${username}」的全国已解锁鸟种，当前列表未过滤。`;
+        }
+      } catch (filterError) {
+        console.warn("Failed to filter BirdPrep species by unlocked user:", filterError);
+        unlockedWarning = `记录用户「${username}」已解锁鸟种查询失败：${filterError.message}，当前列表未过滤。`;
+      }
+    }
+
+    setBirdPrepMessage("正在通过 BirdReport 查询地区鸟种...");
     const results = await fetchAllBirdreportTaxa(payload, {
       onProgress: (message) => setBirdPrepMessage(message)
     });
-    const sortedResults = sortBirdreportTaxaByRecordCount(results);
+    const filterResult = unlockedLookup
+      ? filterBirdPrepSpeciesByUnlocked(results, unlockedLookup)
+      : { species: results, removedCount: 0 };
+    const sortedResults = sortBirdreportTaxaByRecordCount(filterResult.species);
     state.birdPrepSpeciesResults = sortedResults;
     state.birdPrepLastQueryPayload = { ...payload };
+    state.birdPrepUnlockedFilteredCount = filterResult.removedCount;
+    state.birdPrepUnlockedFilterWarning = unlockedWarning;
     if (elements.birdPrepSpeciesSearch) {
       elements.birdPrepSpeciesSearch.value = "";
     }
     renderBirdPrepSpeciesOptions();
-    setBirdPrepMessage(`地区鸟种查询完成：${formatBirdPrepQuerySummary(payload)} 共 ${sortedResults.length} 个鸟种。`);
+    setBirdPrepMessage(formatBirdPrepQueryCompleteMessage(payload, results.length, sortedResults.length, username, filterResult.removedCount, unlockedWarning));
   } catch (error) {
     clearBirdPrepSpeciesResults();
     setBirdPrepMessage(`地区鸟种查询失败：${error.message}`, true);
@@ -3750,9 +3846,11 @@ function buildBirdPrepQueryPayload() {
   const endTime = normalizeDateInput(elements.birdPrepEndDate?.value);
   const province = String(elements.birdPrepProvince?.value || "").trim();
   const city = String(elements.birdPrepCity?.value || "").trim();
+  const district = String(elements.birdPrepDistrict?.value || "").trim();
+  const pointname = String(elements.birdPrepPointName?.value || "").trim();
 
   if (!province) {
-    setBirdPrepMessage("请先选择省份；城市和日期可以留空。", true);
+    setBirdPrepMessage("请先选择省份；城市、区县、观测地点和日期可以留空。", true);
     elements.birdPrepProvince?.focus();
     return null;
   }
@@ -3763,13 +3861,99 @@ function buildBirdPrepQueryPayload() {
     return null;
   }
 
-  return createBirdreportPayload({ startTime, endTime, province, city });
+  return createBirdreportPayload({ startTime, endTime, province, city, district, pointname });
 }
 
 function formatBirdPrepQuerySummary(payload) {
-  const areaText = [payload.province, payload.city || payload.district].filter(Boolean).join(" / ");
+  const areaText = [payload.province, payload.city, payload.district].filter(Boolean).join(" / ");
+  const pointText = payload.pointname ? `观测地点“${payload.pointname}”` : "";
   const dateText = [payload.startTime, payload.endTime].filter(Boolean).join(" 至 ");
-  return [areaText, dateText].filter(Boolean).join(" · ") || "当前筛选条件";
+  return [areaText, pointText, dateText].filter(Boolean).join(" · ") || "当前筛选条件";
+}
+
+function formatBirdPrepQueryCompleteMessage(payload, originalCount, filteredCount, username, removedCount, warning) {
+  const queryText = formatBirdPrepQuerySummary(payload);
+  if (!username) {
+    return `地区鸟种查询完成：${queryText} 共 ${filteredCount} 个鸟种。`;
+  }
+  if (warning) {
+    return `地区鸟种查询完成：${queryText} 共 ${filteredCount} 个鸟种。${warning}`;
+  }
+  return `地区鸟种查询完成：${queryText} 原始 ${originalCount} 个鸟种，已剔除「${username}」已解锁 ${removedCount} 种，剩余 ${filteredCount} 个。`;
+}
+
+function getBirdPrepUnlockedUsername() {
+  return String(elements.birdPrepUnlockedUsername?.value || "").trim();
+}
+
+async function fetchUserNationalBirdPrepSpecies(username, options = {}) {
+  const { onProgress } = options;
+  const primary = await fetchAllBirdreportTaxa(
+    createBirdreportPayload({ username, mode: 1 }),
+    {
+      onProgress: (message) => onProgress?.(message.replace("BirdReport 鸟种", "用户全国已解锁鸟种"))
+    }
+  );
+  if (primary.length) {
+    return primary;
+  }
+
+  onProgress?.("按兼容模式重新核对记录用户全国已解锁鸟种...");
+  return fetchAllBirdreportTaxa(
+    createBirdreportPayload({ username }),
+    {
+      onProgress: (message) => onProgress?.(message.replace("BirdReport 鸟种", "用户全国已解锁鸟种"))
+    }
+  );
+}
+
+async function getBirdPrepUnlockedSpeciesForUser(username, options = {}) {
+  username = String(username || "").trim();
+  if (!username) {
+    return [];
+  }
+  if (state.birdPrepUnlockedSpeciesCache.has(username)) {
+    return state.birdPrepUnlockedSpeciesCache.get(username);
+  }
+
+  const species = normalizeBirdreportTaxa(await fetchUserNationalBirdPrepSpecies(username, options));
+  state.birdPrepUnlockedSpeciesCache.set(username, species);
+  return species;
+}
+
+function buildBirdPrepUnlockedTaxonLookup(items) {
+  const lookup = {
+    keys: new Set(),
+    names: new Set()
+  };
+
+  getBirdreportTaxaArray(items).forEach((item) => {
+    const key = getBirdreportTaxonKey(item);
+    const name = getBirdPrepTaxonName(item);
+    if (key) {
+      lookup.keys.add(key);
+    }
+    if (name) {
+      lookup.names.add(name);
+    }
+  });
+
+  return lookup;
+}
+
+function getBirdPrepTaxonName(item) {
+  return String(item?.taxonname || item?.name || "").trim();
+}
+
+function filterBirdPrepSpeciesByUnlocked(species, lookup) {
+  const sourceSpecies = getBirdreportTaxaArray(species);
+  const filteredSpecies = sourceSpecies.filter(
+    (item) => !lookup.keys.has(getBirdreportTaxonKey(item)) && !lookup.names.has(getBirdPrepTaxonName(item))
+  );
+  return {
+    species: filteredSpecies,
+    removedCount: sourceSpecies.length - filteredSpecies.length
+  };
 }
 
 function renderBirdPrepSpeciesOptions() {
@@ -3905,6 +4089,9 @@ function clearBirdPrepSpeciesResults() {
   state.birdPrepSpeciesResults = [];
   state.birdPrepSelectedSpeciesKeys.clear();
   state.birdPrepLastQueryPayload = null;
+  state.birdPrepUnlockedFilterUsername = "";
+  state.birdPrepUnlockedFilteredCount = 0;
+  state.birdPrepUnlockedFilterWarning = "";
   if (elements.birdPrepSpeciesSearch) {
     elements.birdPrepSpeciesSearch.value = "";
   }
@@ -3945,7 +4132,9 @@ async function generateBirdPrepPpt() {
     });
     const filename = window.BeauBirdPrepPpt.buildBirdPrepPptxFilename({
       province: state.birdPrepLastQueryPayload?.province || elements.birdPrepProvince?.value || "",
-      city: state.birdPrepLastQueryPayload?.city || state.birdPrepLastQueryPayload?.district || elements.birdPrepCity?.value || ""
+      city: state.birdPrepLastQueryPayload?.city || elements.birdPrepCity?.value || "",
+      district: state.birdPrepLastQueryPayload?.district || elements.birdPrepDistrict?.value || "",
+      pointname: state.birdPrepLastQueryPayload?.pointname || elements.birdPrepPointName?.value || ""
     });
     const blob = new Blob([bytes], {
       type: "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -3967,14 +4156,9 @@ async function loadBirdPrepProfileIndex() {
     return state.birdPrepProfileIndex;
   }
 
-  const embeddedPayload = window[CHINA_BIRD_RESULTS_GLOBAL];
-  if (Array.isArray(embeddedPayload)) {
-    const index = window.BeauBirdPrepPpt.buildBirdProfileIndex(embeddedPayload);
-    if (!index.size) {
-      throw new Error("本地鸟类简介数据中没有可用鸟种。");
-    }
-    state.birdPrepProfileIndex = index;
-    return index;
+  const existingIndex = buildBirdPrepProfileIndexFromEmbeddedData();
+  if (existingIndex) {
+    return existingIndex;
   }
 
   if (state.birdPrepProfileIndexLoading) {
@@ -3983,9 +4167,7 @@ async function loadBirdPrepProfileIndex() {
 
   state.birdPrepProfileIndexLoading = fetch(CHINA_BIRD_RESULTS_DATA_URL, { cache: "no-store" })
     .then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      assertBirdPrepProfileResponse(response);
       return response.json();
     })
     .then((payload) => {
@@ -3996,11 +4178,16 @@ async function loadBirdPrepProfileIndex() {
       state.birdPrepProfileIndex = index;
       return index;
     })
-    .catch((error) => {
-      if (window.location.protocol === "file:") {
+    .catch(async (error) => {
+      if (window.location.protocol !== "file:") {
+        throw error;
+      }
+      await loadBirdPrepEmbeddedDataScript();
+      const fallbackIndex = buildBirdPrepProfileIndexFromEmbeddedData();
+      if (!fallbackIndex) {
         throw new Error("读取本地鸟类简介失败。请确认 china_bird_results.js 与 index.html 在同一目录后刷新页面。");
       }
-      throw error;
+      return fallbackIndex;
     })
     .finally(() => {
       state.birdPrepProfileIndexLoading = null;
@@ -4009,13 +4196,92 @@ async function loadBirdPrepProfileIndex() {
   return state.birdPrepProfileIndexLoading;
 }
 
+function assertBirdPrepProfileResponse(response) {
+  const responseUrl = String(response.url || "");
+  const isLoginResponse = response.redirected || /\/login(?:[?#]|$)/.test(responseUrl);
+  if (isLoginResponse) {
+    throw new Error(BIRD_PREP_LOGIN_EXPIRED_MESSAGE);
+  }
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
+  if (!contentType || !contentType.includes("application/json")) {
+    throw new Error(BIRD_PREP_LOGIN_EXPIRED_MESSAGE);
+  }
+}
+
+function buildBirdPrepProfileIndexFromEmbeddedData() {
+  const embeddedPayload = window[CHINA_BIRD_RESULTS_GLOBAL];
+  if (Array.isArray(embeddedPayload)) {
+    const index = window.BeauBirdPrepPpt.buildBirdProfileIndex(embeddedPayload);
+    if (!index.size) {
+      throw new Error("本地鸟类简介数据中没有可用鸟种。");
+    }
+    state.birdPrepProfileIndex = index;
+    return index;
+  }
+
+  return null;
+}
+
+function loadBirdPrepEmbeddedDataScript() {
+  if (Array.isArray(window[CHINA_BIRD_RESULTS_GLOBAL])) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    let existingScript = document.querySelector(`script[data-bird-prep-data-script="${CHINA_BIRD_RESULTS_GLOBAL}"]`);
+    if (existingScript) {
+      if (existingScript.dataset.loaded === "true") {
+        resolve();
+        return;
+      }
+      if (existingScript.dataset.failed === "true") {
+        existingScript.remove();
+        existingScript = null;
+      }
+    }
+
+    if (existingScript) {
+      existingScript.addEventListener("load", resolve, { once: true });
+      existingScript.addEventListener("error", () => reject(new Error("鸟类简介数据脚本加载失败。")), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = CHINA_BIRD_RESULTS_SCRIPT_URL;
+    script.async = true;
+    script.dataset.birdPrepDataScript = CHINA_BIRD_RESULTS_GLOBAL;
+    script.addEventListener(
+      "load",
+      () => {
+        script.dataset.loaded = "true";
+        resolve();
+      },
+      { once: true }
+    );
+    script.addEventListener(
+      "error",
+      () => {
+        script.dataset.failed = "true";
+        reject(new Error("鸟类简介数据脚本加载失败。"));
+      },
+      { once: true }
+    );
+    document.head.append(script);
+  });
+}
+
 function setBirdPrepLoading(isLoading) {
   state.birdPrepLoading = isLoading;
   if (elements.queryBirdPrepSpeciesBtn) {
     elements.queryBirdPrepSpeciesBtn.disabled = isLoading;
     elements.queryBirdPrepSpeciesBtn.textContent = isLoading ? "查询中..." : "查询地区鸟种";
   }
-  [elements.birdPrepProvince, elements.birdPrepCity, elements.birdPrepStartDate, elements.birdPrepEndDate].forEach((element) => {
+  [elements.birdPrepProvince, elements.birdPrepCity, elements.birdPrepDistrict, elements.birdPrepPointName, elements.birdPrepUnlockedUsername, elements.birdPrepStartDate, elements.birdPrepEndDate].forEach((element) => {
     if (element) {
       element.disabled = isLoading;
     }

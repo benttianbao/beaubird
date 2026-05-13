@@ -125,4 +125,15 @@ test("buildBirdPrepPptxFilename includes location and timestamp-safe suffix", ()
     buildBirdPrepPptxFilename({ province: "浙江省", city: "杭州市", date: new Date("2026-05-09T08:07:06") }),
     /^浙江省-杭州市-鸟类预习-20260509-080706\.pptx$/
   );
+
+  assert.match(
+    buildBirdPrepPptxFilename({
+      province: "Zhejiang",
+      city: "Hangzhou",
+      district: "Xihu",
+      pointname: "Xixi Wetland",
+      date: new Date("2026-06-01T09:10:11")
+    }),
+    /^Zhejiang-Hangzhou-Xihu-Xixi Wetland-鸟类预习-20260601-091011\.pptx$/
+  );
 });

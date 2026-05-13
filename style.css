@@ -212,7 +212,9 @@ textarea {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.bird-prep-proxy-control {
+.bird-prep-proxy-control,
+.bird-prep-point-control,
+.bird-prep-unlocked-user-control {
   grid-column: span 2;
 }
 
@@ -1733,7 +1735,9 @@ canvas {
     grid-template-columns: 1fr;
   }
 
-  .bird-prep-proxy-control {
+  .bird-prep-proxy-control,
+  .bird-prep-point-control,
+  .bird-prep-unlocked-user-control {
     grid-column: auto;
   }
 

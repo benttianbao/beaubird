@@ -1,10 +1,44 @@
 const assert = require("assert");
+const fs = require("fs");
+const path = require("path");
 
 const {
   aggregateEbirdSeasonalPrediction,
   buildEbirdSeasonalDateRequests,
   getEbirdSeasonalHistoricalYears
 } = require("../ebird-seasonal-core.js");
+
+const repoRoot = path.resolve(__dirname, "..");
+const scriptSource = fs.readFileSync(path.join(repoRoot, "script.js"), "utf8");
+const indexSource = fs.readFileSync(path.join(repoRoot, "index.html"), "utf8");
+const readmeSource = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
+
+assert.match(
+  scriptSource,
+  /const EBIRD_SEASONAL_REGION_CODE = "CN-33";/,
+  "uses the eBird Zhejiang subnational region code"
+);
+
+assert.ok(
+  indexSource.includes("固定分析 <code>CN-33</code>") && !indexSource.includes("固定分析 <code>CN-ZJ</code>"),
+  "documents the fixed Zhejiang eBird region code in the UI"
+);
+
+assert.ok(
+  readmeSource.includes("`CN-33`") && !readmeSource.includes("`CN-ZJ`"),
+  "documents the fixed Zhejiang eBird region code in README"
+);
+
+assert.match(
+  scriptSource,
+  /if \(observations\.length\) \{[\s\S]*?setCachedEbirdSeasonalDay\(cache, request\.date, observations\);[\s\S]*?\}/,
+  "does not cache empty seasonal history responses"
+);
+
+assert.ok(
+  scriptSource.includes("nonEmptyDays") && scriptSource.includes("historicalObservationCount"),
+  "tracks successful days separately from days with historical observations"
+);
 
 assert.deepStrictEqual(
   getEbirdSeasonalHistoricalYears("2026-05-07", 10),
@@ -107,5 +141,23 @@ const lowProbability = aggregateEbirdSeasonalPrediction({
 });
 
 assert.strictEqual(lowProbability[0].probabilityLevel, "低概率", "keeps single-year historical species as low probability");
+
+const emptySuccessfulHistory = aggregateEbirdSeasonalPrediction({
+  dailyEntries: Array.from({ length: 29 }, (_, index) => ({
+    anchorYear: 2025,
+    date: `2025-05-${String(index + 1).padStart(2, "0")}`,
+    observations: []
+  })),
+  recentObservations: [],
+  taxonomyMap: new Map(),
+  historicalYearCount: 1,
+  totalHistoricalDays: 29
+});
+
+assert.strictEqual(
+  emptySuccessfulHistory.length,
+  0,
+  "empty successful history days produce no candidates, so callers must surface the empty-data signal"
+);
 
 console.log("eBird seasonal prediction contract OK");

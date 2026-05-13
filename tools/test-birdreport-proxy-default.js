@@ -4,18 +4,31 @@ const { test } = require("node:test");
 
 const script = readFileSync("script.js", "utf8");
 
-test("web BirdReport defaults to the local proxy for direct index.html usage", () => {
+test("direct file usage keeps the local BirdReport proxy default", () => {
   assert.match(
     script,
-    /const DEFAULT_BIRDREPORT_PROXY_URL = "http:\/\/127\.0\.0\.1:8787";/,
+    /window\.location\.protocol === "file:"[\s\S]*?return DEFAULT_BIRDREPORT_PROXY_URL;/,
     "direct webpage usage should prefill the local BirdReport proxy"
   );
 });
 
-test("stored local proxy URL is not discarded as legacy", () => {
-  assert.doesNotMatch(
+test("hosted web usage defaults to same-origin BirdReport proxy", () => {
+  assert.match(
     script,
-    /stored !== LEGACY_WEB_BIRDREPORT_PROXY_URL/,
-    "the saved http://127.0.0.1:8787 proxy should remain valid"
+    /return window\.location\.origin;/,
+    "hosted pages should use the current site origin for /api/birdreport requests"
+  );
+});
+
+test("hosted web usage ignores stale local proxy storage", () => {
+  assert.match(
+    script,
+    /getUsableStoredBirdreportProxyUrl\(stored\) \|\| getDefaultBirdreportProxyUrl\(\)/,
+    "hydration should filter stale local proxy values before falling back"
+  );
+  assert.match(
+    script,
+    /LOCAL_BIRDREPORT_PROXY_HOSTS\.has\(url\.hostname\) && url\.port === "8787"[\s\S]*?return "";/,
+    "stored http://127.0.0.1:8787 should not break hosted deployments"
   );
 });

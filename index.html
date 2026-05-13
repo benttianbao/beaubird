@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <title>BeauBird 观鸟助手</title>
-    <link rel="stylesheet" href="./style.css?v=20260509-0002" />
+    <link rel="stylesheet" href="./style.css?v=20260512-0002" />
   </head>
   <body>
     <header class="hero">
@@ -238,7 +238,7 @@
       <section id="birdPrepSection" class="panel bird-prep-panel">
         <h2>鸟类预习 PPT</h2>
         <p class="hint">
-          选择省份、城市和可选日期范围，通过 BirdReport 查询地区鸟种，再从下拉框多选鸟种生成预习 PPT。每页左侧预留图片位置，右侧展示鸟种简介。
+          选择省份、城市、区县、观测地点和可选日期范围，通过 BirdReport 查询地区鸟种，再从下拉框多选鸟种生成预习 PPT。每页左侧预留图片位置，右侧展示鸟种简介。
         </p>
 
         <div class="controls bird-prep-controls">
@@ -257,6 +257,20 @@
             <select id="birdPrepCity">
               <option value="">请选择市</option>
             </select>
+          </div>
+          <div class="control">
+            <label for="birdPrepDistrict">区</label>
+            <select id="birdPrepDistrict">
+              <option value="">请选择区</option>
+            </select>
+          </div>
+          <div class="control bird-prep-point-control">
+            <label for="birdPrepPointName">观测地点</label>
+            <input id="birdPrepPointName" type="text" placeholder="例如 西溪湿地、鄱阳湖、某公园" autocomplete="off" />
+          </div>
+          <div class="control bird-prep-unlocked-user-control">
+            <label for="birdPrepUnlockedUsername">记录用户</label>
+            <input id="birdPrepUnlockedUsername" type="text" placeholder="可选：输入记录中心用户名，自动剔除已解锁鸟种" autocomplete="off" />
           </div>
           <div class="control">
             <label for="birdPrepStartDate">开始日期</label>
@@ -298,8 +312,7 @@
     <script src="./vendor/aes.util.js?v=20260507-0004"></script>
     <script src="./data/zhejiang-birdreport-species.js?v=20260507-0004"></script>
     <script src="./ebird-seasonal-core.js?v=20260507-0004"></script>
-    <script src="./china_bird_results.js?v=20260509-0001"></script>
     <script src="./bird-prep-ppt-core.js?v=20260509-0002"></script>
-    <script src="./script.js?v=20260509-0002"></script>
+    <script src="./script.js?v=20260512-0002"></script>
   </body>
 </html>

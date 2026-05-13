@@ -136,8 +136,8 @@
     return createStoredZip(entries);
   }
 
-  function buildBirdPrepPptxFilename({ province = "", city = "", date = new Date() } = {}) {
-    const area = [province, city].map(sanitizeFilenamePart).filter(Boolean).join("-") || "地区";
+  function buildBirdPrepPptxFilename({ province = "", city = "", district = "", pointname = "", date = new Date() } = {}) {
+    const area = [province, city, district, pointname].map(sanitizeFilenamePart).filter(Boolean).join("-") || "地区";
     return `${area}-鸟类预习-${formatTimestamp(date)}.pptx`;
   }
 
