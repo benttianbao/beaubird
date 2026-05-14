@@ -39,6 +39,38 @@ function listStoredZipEntries(bytes) {
   return entries;
 }
 
+function readStoredZipEntry(bytes, entryName) {
+  let offset = 0;
+  while (offset < bytes.length - 4) {
+    const signature =
+      bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24);
+    if (signature !== 0x04034b50) {
+      break;
+    }
+
+    const compressedSize =
+      bytes[offset + 18] |
+      (bytes[offset + 19] << 8) |
+      (bytes[offset + 20] << 16) |
+      (bytes[offset + 21] << 24);
+    const nameLength = bytes[offset + 26] | (bytes[offset + 27] << 8);
+    const extraLength = bytes[offset + 28] | (bytes[offset + 29] << 8);
+    const nameStart = offset + 30;
+    const nameEnd = nameStart + nameLength;
+    const name = Buffer.from(bytes.slice(nameStart, nameEnd)).toString("utf8");
+    const dataStart = nameEnd + extraLength;
+    const dataEnd = dataStart + compressedSize;
+    if (name === entryName) {
+      return Buffer.from(bytes.slice(dataStart, dataEnd));
+    }
+    offset = dataEnd;
+  }
+  throw new Error(`Missing zip entry ${entryName}`);
+}
+
 test("buildBirdProfileIndex matches Chinese names with light normalization", () => {
   const index = buildBirdProfileIndex([
     {
@@ -48,12 +80,17 @@ test("buildBirdProfileIndex matches Chinese names with light normalization", () 
       habits: "常在潮间带、河口和浅水湿地觅食。",
       breeding: "繁殖于岛屿或海岸附近。",
       identification: "匙形长嘴是关键识别点。",
-      distribution: "东亚沿海迁徙。"
+      distribution: "东亚沿海迁徙。",
+      english_name: "Black-faced Spoonbill",
+      scientific_name: "Platalea minor",
+      overview: "黑脸琵鹭是东亚沿海湿地中易受关注的大型白色涉禽。"
     }
   ]);
 
   assert.equal(index.get("黑脸琵鹭").name, "黑脸琵鹭");
   assert.equal(index.get(normalizeBirdName(" 黑 脸 琵 鹭 ")).identification, "匙形长嘴是关键识别点。");
+  assert.equal(index.get("黑脸琵鹭").overview, "黑脸琵鹭是东亚沿海湿地中易受关注的大型白色涉禽。");
+  assert.equal(index.get("黑脸琵鹭").scientificName, "Platalea minor");
 });
 
 test("buildBirdPrepSlides creates slides for matched taxa and reports skipped names", () => {
@@ -65,13 +102,15 @@ test("buildBirdPrepSlides creates slides for matched taxa and reports skipped na
       habits: "浅水湿地觅食。",
       breeding: "繁殖于沿海岛屿。",
       identification: "黑脸和匙形嘴。",
-      distribution: "东亚沿海。"
+      distribution: "东亚沿海。",
+      scientific_name: "Platalea minor",
+      overview: "黑脸琵鹭是依赖潮间带和河口湿地的珍稀涉禽。"
     }
   ]);
 
   const result = buildBirdPrepSlides(
     [
-      { taxonname: "黑脸琵鹭", latinname: "Platalea minor", recordcount: 12 },
+      { taxonname: "黑脸琵鹭", recordcount: 12 },
       { taxonname: "不存在鸟", latinname: "Missing bird", recordcount: 1 }
     ],
     index
@@ -79,6 +118,8 @@ test("buildBirdPrepSlides creates slides for matched taxa and reports skipped na
 
   assert.equal(result.slides.length, 1);
   assert.equal(result.slides[0].speciesName, "黑脸琵鹭");
+  assert.equal(result.slides[0].latinName, "Platalea minor");
+  assert.equal(result.slides[0].overview, "黑脸琵鹭是依赖潮间带和河口湿地的珍稀涉禽。");
   assert.deepEqual(
     result.slides[0].sections.map((section) => section.title),
     ["外形", "识别", "习性生境", "分布 / 繁殖 / 叫声"]
@@ -118,6 +159,73 @@ test("createBirdPrepPptx generates a pptx package with one slide per bird", () =
   assert.ok(entries.some((entry) => entry.name === "ppt/slides/slide2.xml"));
   assert.ok(entries.some((entry) => entry.name === "ppt/presentation.xml"));
   assert.ok(!entries.some((entry) => entry.name === "ppt/slides/slide3.xml"));
+});
+
+test("createBirdPrepPptx renders overview above the existing right-column sections", () => {
+  const bytes = createBirdPrepPptx([
+    {
+      speciesName: "黑脸琵鹭",
+      latinName: "Platalea minor",
+      overview: "黑脸琵鹭是依赖潮间带和河口湿地的珍稀涉禽。",
+      sections: [
+        { title: "外形", body: "大型白色涉禽。" },
+        { title: "识别", body: "黑脸和匙形嘴。" },
+        { title: "习性生境", body: "浅水湿地觅食。" },
+        { title: "分布 / 繁殖 / 叫声", body: "东亚沿海迁徙。" }
+      ]
+    }
+  ]);
+
+  const slideXml = readStoredZipEntry(bytes, "ppt/slides/slide1.xml").toString("utf8");
+  const overviewIndex = slideXml.indexOf("简介");
+  const appearanceIndex = slideXml.indexOf("外形");
+
+  assert.notEqual(overviewIndex, -1);
+  assert.match(slideXml, /黑脸琵鹭是依赖潮间带和河口湿地的珍稀涉禽。/);
+  assert.ok(overviewIndex < appearanceIndex);
+});
+
+test("createBirdPrepPptx embeds bird photos with media relationships and attribution", () => {
+  const photoBytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00, 0xff, 0xd9]);
+  const bytes = createBirdPrepPptx([
+    {
+      speciesName: "白鹭",
+      latinName: "Egretta garzetta",
+      photo: {
+        bytes: photoBytes,
+        contentType: "image/jpeg",
+        extension: "jpg",
+        width: 1600,
+        height: 1000,
+        attribution: "Macaulay Library ML123456789 · Jane Birder",
+        sourceUrl: "https://macaulaylibrary.org/asset/123456789",
+        mlId: "ML123456789"
+      },
+      sections: [
+        { title: "外形", body: "通体白色。" },
+        { title: "识别", body: "黑嘴黑脚。" },
+        { title: "习性生境", body: "水边觅食。" },
+        { title: "分布 / 繁殖 / 叫声", body: "常见留鸟。" }
+      ]
+    }
+  ]);
+
+  const entries = listStoredZipEntries(bytes);
+  assert.ok(entries.some((entry) => entry.name === "ppt/media/image1.jpg"));
+  assert.equal(readStoredZipEntry(bytes, "ppt/media/image1.jpg").length, photoBytes.length);
+
+  const contentTypes = readStoredZipEntry(bytes, "[Content_Types].xml").toString("utf8");
+  assert.match(contentTypes, /Extension="jpg" ContentType="image\/jpeg"/);
+
+  const slideXml = readStoredZipEntry(bytes, "ppt/slides/slide1.xml").toString("utf8");
+  assert.match(slideXml, /<p:pic>/);
+  assert.match(slideXml, /r:embed="rId2"/);
+  assert.match(slideXml, /Macaulay Library ML123456789/);
+  assert.match(slideXml, /https:\/\/macaulaylibrary\.org\/asset\/123456789/);
+
+  const slideRels = readStoredZipEntry(bytes, "ppt/slides/_rels/slide1.xml.rels").toString("utf8");
+  assert.match(slideRels, /Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/image"/);
+  assert.match(slideRels, /Target="\.\.\/media\/image1\.jpg"/);
 });
 
 test("buildBirdPrepPptxFilename includes location and timestamp-safe suffix", () => {

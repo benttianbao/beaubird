@@ -166,7 +166,8 @@ function Invoke-BirdreportCurlRequest {
     [string] $Body = "",
     [string] $ContentType = "application/json; charset=UTF-8",
     [hashtable] $Headers = @{},
-    [string] $Accept = "application/json, text/plain, */*"
+    [string] $Accept = "application/json, text/plain, */*",
+    [switch] $FollowRedirects
   )
 
   $tempRoot = [System.IO.Path]::GetTempPath()
@@ -190,6 +191,10 @@ function Invoke-BirdreportCurlRequest {
       "--header", "Referer: $Referer",
       "--header", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
     )
+
+    if ($FollowRedirects) {
+      $curlArgs += @("--location")
+    }
 
     $cookieHeader = Get-BirdreportCookieHeader
     if ($cookieHeader) {
@@ -411,6 +416,176 @@ function Invoke-BirdreportPlainRequest {
   }
 }
 
+function Invoke-MacaulayCurlRequest {
+  param(
+    [Parameter(Mandatory = $true)] [string] $RemotePath,
+    [string] $Accept = "text/html,application/xhtml+xml"
+  )
+
+  return Invoke-BirdreportCurlRequest `
+    -RemotePath $RemotePath `
+    -Referer "https://media.ebird.org/" `
+    -Method "GET" `
+    -Accept $Accept `
+    -FollowRedirects
+}
+
+function ConvertFrom-HtmlText {
+  param([string] $Value)
+  return [System.Net.WebUtility]::HtmlDecode([string]$Value).Trim()
+}
+
+function Get-MacaulayAssetId {
+  param([string] $Value)
+  $match = [regex]::Match([string]$Value, "^(?:ML)?(\d+)$", [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+  if (-not $match.Success) {
+    return ""
+  }
+  return $match.Groups[1].Value
+}
+
+function Normalize-MacaulayQuery {
+  param([string] $Value)
+  return ([string]$Value).Trim().ToLowerInvariant() -replace "\s+", " "
+}
+
+function Get-MacaulayItemSpeciesCodes {
+  param($Item)
+
+  $codes = New-Object System.Collections.Generic.List[string]
+  foreach ($value in @($Item.speciesCode, $Item.reportAs)) {
+    $code = ([string]$value).Trim().ToLowerInvariant()
+    if ($code) {
+      $codes.Add($code)
+    }
+  }
+
+  if ($Item.subjectData) {
+    foreach ($subject in @($Item.subjectData)) {
+      $code = ([string]$subject.speciesCode).Trim().ToLowerInvariant()
+      if ($code) {
+        $codes.Add($code)
+      }
+    }
+  }
+
+  return $codes
+}
+
+function Get-MacaulayItemNames {
+  param($Item)
+
+  $names = New-Object System.Collections.Generic.List[string]
+  foreach ($value in @($Item.sciName, $Item.commonName)) {
+    $name = ([string]$value).Trim()
+    if ($name) {
+      $names.Add($name)
+    }
+  }
+
+  if ($Item.subjectData) {
+    foreach ($subject in @($Item.subjectData)) {
+      foreach ($value in @($subject.sciName, $subject.comName)) {
+        $name = ([string]$value).Trim()
+        if ($name) {
+          $names.Add($name)
+        }
+      }
+    }
+  }
+
+  return $names
+}
+
+function Test-MacaulayMediaMatch {
+  param(
+    $Item,
+    [string] $TaxonCode,
+    [string] $Query
+  )
+
+  if (([string]$Item.mediaType).Trim().ToLowerInvariant() -ne "photo") {
+    return $false
+  }
+
+  $normalizedTaxonCode = ([string]$TaxonCode).Trim().ToLowerInvariant()
+  if ($normalizedTaxonCode) {
+    return @(Get-MacaulayItemSpeciesCodes -Item $Item).Contains($normalizedTaxonCode)
+  }
+
+  $normalizedQuery = Normalize-MacaulayQuery $Query
+  if (-not $normalizedQuery) {
+    return $true
+  }
+
+  foreach ($name in Get-MacaulayItemNames -Item $Item) {
+    if ((Normalize-MacaulayQuery $name) -eq $normalizedQuery) {
+      return $true
+    }
+  }
+  return $false
+}
+
+function Get-MacaulaySearchResults {
+  param(
+    $Payload,
+    [string] $TaxonCode,
+    [string] $Query
+  )
+
+  $items = New-Object System.Collections.Generic.List[object]
+  $seen = @{}
+  $content = @()
+  if ($Payload.results -and $Payload.results.content) {
+    $content = @($Payload.results.content)
+  } elseif ($Payload.content) {
+    $content = @($Payload.content)
+  }
+
+  foreach ($entry in $content) {
+    $assetId = Get-MacaulayAssetId -Value "$(if ($entry.assetId) { $entry.assetId } else { $entry.catalogId })"
+    if (-not $assetId -or $seen.ContainsKey($assetId) -or -not (Test-MacaulayMediaMatch -Item $entry -TaxonCode $TaxonCode -Query $Query)) {
+      continue
+    }
+    $seen[$assetId] = $true
+
+    $rating = $null
+    if ($entry.rating -ne $null -and ([string]$entry.rating).Trim()) {
+      $rating = [double]$entry.rating
+    }
+
+    $previewUrl = if ($entry.largeUrl) {
+      [string]$entry.largeUrl
+    } elseif ($entry.mediaUrl) {
+      [string]$entry.mediaUrl
+    } else {
+      "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/$assetId/1200"
+    }
+
+    $sourceUrl = if ($entry.specimenUrl) {
+      [string]$entry.specimenUrl
+    } else {
+      "https://macaulaylibrary.org/asset/$assetId"
+    }
+
+    $items.Add([pscustomobject]@{
+      mlId = "ML$assetId"
+      assetId = $assetId
+      attribution = ([string]$entry.userDisplayName).Trim()
+      rating = $rating
+      checklistId = ([string]$entry.eBirdChecklistId).Trim()
+      previewUrl = $previewUrl
+      sourceUrl = $sourceUrl
+    })
+
+    if ($items.Count -ge 5) {
+      break
+    }
+  }
+
+  return $items
+}
+
 Write-Host "BirdReport proxy listening on $prefix"
 Write-Host "Allowed endpoints:"
 $endpointMap.Keys | ForEach-Object { Write-Host "  $_" }
@@ -455,6 +630,65 @@ try {
         $body = Read-RequestBody -Request $request
         $verifyResponse = Invoke-BirdreportPlainRequest -RemotePath "https://api.birdreport.cn/front/code/visited/verify" -Referer "https://www.birdreport.cn/home/code/verify.html" -Method "POST" -Body $body -ContentType "application/json; charset=UTF-8"
         Write-ByteResponse -Context $context -StatusCode $verifyResponse.StatusCode -BodyBytes $verifyResponse.BodyBytes -ContentType $verifyResponse.ContentType
+        continue
+      }
+
+      if ($path -eq "/api/media/macaulay/search") {
+        if ($request.HttpMethod -ne "GET") {
+          Write-JsonResponse -Context $context -StatusCode 405 -Body '{"success":false,"error":"Method not allowed"}'
+          continue
+        }
+
+        $taxonCode = [string]$request.QueryString["taxonCode"]
+        $query = [string]$request.QueryString["q"]
+        if (-not $taxonCode -and -not $query) {
+          Write-JsonResponse -Context $context -StatusCode 400 -Body '{"success":false,"error":"Missing Macaulay Library taxonCode or query"}'
+          continue
+        }
+
+        if ($taxonCode) {
+          $remoteUrl = "https://media.ebird.org/api/v1/search?taxonCode=$([uri]::EscapeDataString($taxonCode))&mediaType=photo&sort=rating_rank_desc&birdOnly=true&count=5"
+        } else {
+          $remoteUrl = "https://media.ebird.org/api/v1/search?q=$([uri]::EscapeDataString($query))&searchField=species&mediaType=photo&sort=rating_rank_desc&birdOnly=true&count=5"
+        }
+        $searchResponse = Invoke-MacaulayCurlRequest -RemotePath $remoteUrl -Accept "application/json"
+        $searchBytes = @($searchResponse.BodyBytes)
+        if ($searchBytes.Count -eq 0) {
+          Write-JsonResponse -Context $context -StatusCode 200 -Body '{"results":[]}'
+          continue
+        }
+
+        $searchJson = [System.Text.Encoding]::UTF8.GetString([byte[]]$searchBytes) | ConvertFrom-Json
+        $resultsJson = (Get-MacaulaySearchResults -Payload $searchJson -TaxonCode $taxonCode -Query $query | ConvertTo-Json -Depth 5 -Compress)
+        if (-not $resultsJson) {
+          $resultsJson = "[]"
+        }
+        Write-JsonResponse -Context $context -StatusCode 200 -Body "{`"results`":$resultsJson}"
+        continue
+      }
+
+      if ($path -like "/api/media/macaulay/asset/*") {
+        if ($request.HttpMethod -ne "GET") {
+          Write-JsonResponse -Context $context -StatusCode 405 -Body '{"success":false,"error":"Method not allowed"}'
+          continue
+        }
+
+        $rawAssetId = $path.Substring("/api/media/macaulay/asset/".Length)
+        $assetId = Get-MacaulayAssetId -Value $rawAssetId
+        if (-not $assetId) {
+          Write-JsonResponse -Context $context -StatusCode 400 -Body '{"success":false,"error":"Invalid Macaulay Library asset id"}'
+          continue
+        }
+
+        $assetUrl = "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/$assetId/1200"
+        $assetResponse = Invoke-MacaulayCurlRequest -RemotePath $assetUrl -Accept "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+        $assetContentType = ([string]$assetResponse.ContentType).Split(";")[0].ToLowerInvariant()
+        if ($assetContentType -notin @("image/jpeg", "image/png", "image/webp")) {
+          Write-JsonResponse -Context $context -StatusCode 502 -Body '{"success":false,"error":"Macaulay Library asset was not a supported image"}'
+          continue
+        }
+
+        Write-ByteResponse -Context $context -StatusCode $assetResponse.StatusCode -BodyBytes $assetResponse.BodyBytes -ContentType $assetContentType
         continue
       }
 

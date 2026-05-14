@@ -3,7 +3,75 @@ const { readFileSync } = require("node:fs");
 const { test } = require("node:test");
 
 const html = readFileSync("index.html", "utf8");
+const css = readFileSync("style.css", "utf8");
 const script = readFileSync("script.js", "utf8");
+
+function indexOfRequired(source, needle) {
+  const index = source.indexOf(needle);
+  assert.notEqual(index, -1, `Expected to find ${needle}`);
+  return index;
+}
+
+test("main page presents BeauBird as a compact professional workspace", () => {
+  assert.match(html, /<header class="hero workspace-hero">/);
+  assert.match(html, /BeauBird Workspace/);
+  assert.match(html, /class="hero-status-grid"/);
+  assert.match(html, /class="workspace-nav-label">工具导航<\/span>/);
+});
+
+test("web quick navigation is visible and sticky outside Android WebView", () => {
+  assert.match(css, /\.app-quicknav\s*\{[\s\S]*display: grid;[\s\S]*position: sticky;[\s\S]*top: 0;/);
+  assert.doesNotMatch(css, /\.app-quicknav\s*\{\s*display: none;\s*\}/);
+});
+
+test("main page uses the cool teal professional visual system", () => {
+  assert.match(css, /--bg: #eef3f6;/);
+  assert.match(css, /--primary: #0f766e;/);
+  assert.match(css, /--radius: 8px;/);
+  assert.match(css, /--shadow-subtle: 0 10px 28px rgba\(15, 38, 54, 0\.08\);/);
+  assert.match(css, /\.panel\s*\{[\s\S]*border-radius: var\(--radius\);[\s\S]*box-shadow: var\(--shadow-subtle\);/);
+});
+
+test("unlocked floating table toggle sticks below the workspace navigation", () => {
+  assert.match(css, /--sticky-nav-offset: 58px;/);
+  assert.match(css, /\.app-quicknav\s*\{[\s\S]*top: 0;[\s\S]*z-index: 12;/);
+  assert.match(
+    css,
+    /\.unlocked-floating-actions\s*\{[\s\S]*top: calc\(var\(--sticky-nav-offset\) \+ 8px\);[\s\S]*z-index: 10;/
+  );
+});
+
+test("main tool modules follow the monitoring-first workflow order", () => {
+  const order = [
+    indexOfRequired(html, 'id="monitorSection"'),
+    indexOfRequired(html, 'id="unlockedSection"'),
+    indexOfRequired(html, 'id="birdPrepSection"'),
+    indexOfRequired(html, 'id="ebirdSection"'),
+    indexOfRequired(html, 'id="ebirdSeasonalPanel"'),
+    indexOfRequired(html, 'id="birdreportSection"')
+  ];
+
+  assert.deepEqual([...order].sort((left, right) => left - right), order);
+});
+
+test("quick navigation follows the same monitoring-first workflow order", () => {
+  const nav = html.match(/<nav class="app-quicknav workspace-nav"[\s\S]*?<\/nav>/);
+  assert.ok(nav);
+
+  const targets = Array.from(nav[0].matchAll(/data-target="([^"]+)"/g), (match) => match[1]);
+  assert.deepEqual(targets, [
+    "monitorSection",
+    "unlockedSection",
+    "birdPrepSection",
+    "ebirdSection",
+    "birdreportSection"
+  ]);
+
+  assert.match(
+    script,
+    /const sections = \["monitorSection", "unlockedSection", "birdPrepSection", "ebirdSection", "birdreportSection"\]/
+  );
+});
 
 test("bird prep species picker uses checkboxes instead of native multi-select", () => {
   assert.match(html, /id="birdPrepSpeciesOptions"/);
@@ -23,6 +91,18 @@ test("bird prep query controls include optional unlocked username filter", () =>
   assert.match(html, /id="birdPrepUnlockedUsername"/);
   assert.match(script, /birdPrepUnlockedUsername: document\.querySelector\("#birdPrepUnlockedUsername"\)/);
   assert.match(script, /birdPrepUnlockedSpeciesCache: new Map\(\)/);
+});
+
+test("bird prep PPT can opt into Macaulay Library images with usage confirmation", () => {
+  assert.match(html, /id="birdPrepMacaulayImages"/);
+  assert.match(html, /id="birdPrepMacaulayRights"/);
+  assert.match(html, /Macaulay Library/);
+  assert.match(script, /birdPrepMacaulayImages: document\.querySelector\("#birdPrepMacaulayImages"\)/);
+  assert.match(script, /birdPrepMacaulayRights: document\.querySelector\("#birdPrepMacaulayRights"\)/);
+  assert.match(script, /loadBirdPrepMacaulayPhotos\(selectedSpecies, slides/);
+  assert.doesNotMatch(script, /if \(!apiKey\) \{\s*return new Map\(\);\s*\}/);
+  assert.match(script, /const headers = apiKey \?/);
+  assert.match(script, /正在匹配 Macaulay 图片/);
 });
 
 test("bird prep city changes load district options", () => {
@@ -72,11 +152,13 @@ test("bird prep loading state disables all query filters", () => {
 });
 
 test("bird prep profile data is lazy-loaded instead of blocking the initial page", () => {
-  assert.doesNotMatch(html, /src="\.\/china_bird_results\.js[^"]*"/);
-  assert.match(script, /const CHINA_BIRD_RESULTS_GLOBAL = "BEAUBIRD_CHINA_BIRD_RESULTS";/);
-  assert.match(script, /window\[CHINA_BIRD_RESULTS_GLOBAL\]/);
+  assert.doesNotMatch(html, /src="\.\/all_birds_full\.js[^"]*"/);
+  assert.match(script, /const ALL_BIRDS_FULL_DATA_URL = "\.\/all_birds_full\.json";/);
+  assert.match(script, /const ALL_BIRDS_FULL_SCRIPT_URL = "\.\/all_birds_full\.js";/);
+  assert.match(script, /const ALL_BIRDS_FULL_GLOBAL = "BEAUBIRD_ALL_BIRDS_FULL";/);
+  assert.match(script, /window\[ALL_BIRDS_FULL_GLOBAL\]/);
   assert.match(script, /function loadBirdPrepEmbeddedDataScript\(\)/);
-  assert.match(script, /script\.src = CHINA_BIRD_RESULTS_SCRIPT_URL;/);
+  assert.match(script, /script\.src = ALL_BIRDS_FULL_SCRIPT_URL;/);
 });
 
 test("bird prep profile fetch reports expired login before parsing HTML as JSON", () => {

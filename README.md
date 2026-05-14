@@ -2,7 +2,7 @@
 
 BeauBird 是一个面向观鸟记录查询、浙江鸟种监测和鸟类预习的轻量工具。项目同时提供可直接打开的网页版本、Android WebView APK，以及带登录和后台管理的 Node 站点版本。
 
-当前版本：1.0.3
+当前版本：1.4
 
 ## 主要功能
 
@@ -139,9 +139,11 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 可选输入 BirdReport 用户名后，页面会查询该用户已解锁鸟种，并从预习列表中排除这些鸟种。如果查询用户记录失败，页面会保留未过滤结果并给出提示。
 
-生成 PPT 时会用 BirdReport 返回的中文鸟名精确匹配 `china_bird_results.json` 中的 `name` 字段。匹配成功的鸟种会生成一页 16:9 幻灯片，左侧为图片占位区，右侧包含外形、识别、习性生境、分布、繁殖和叫声摘要；没有本地简介的鸟种会被跳过，并在页面提示中列出。
+生成 PPT 时会用 BirdReport 返回的中文鸟名精确匹配 `all_birds_full.json` 中的 `name` 字段。匹配成功的鸟种会生成一页 16:9 幻灯片，左侧为图片占位区，右侧最上方显示简介，下面包含外形、识别、习性生境、分布、繁殖和叫声摘要；没有本地简介的鸟种会被跳过，并在页面提示中列出。
 
-为了支持直接双击打开 `index.html`，项目同时提供自动生成的 `china_bird_results.js`。页面会优先懒加载该 JS 全局数据，失败时再回退读取 JSON。
+可选勾选“添加 Macaulay Library 图片”。页面会通过代理按鸟种学名 / eBird taxon code 查询 Macaulay Library，每个鸟种最多嵌入 1 张照片，并在幻灯片中保留 ML 编号、摄影者和来源链接。Macaulay Library 媒体通常需要确认使用权或授权；生成前需勾选确认，未找到图片或下载失败时会保留原图片占位区。
+
+为了支持直接双击打开 `index.html`，项目同时提供自动生成的 `all_birds_full.js`。页面会优先懒加载该 JS 全局数据，失败时再回退读取 JSON。
 
 ## 未解锁鸟种查询
 
@@ -182,8 +184,8 @@ android/app/build/outputs/apk/debug/app-debug.apk
 ├── style.css                       # 页面和 Android WebView 样式
 ├── ebird-seasonal-core.js          # eBird 浙江当季分析逻辑
 ├── bird-prep-ppt-core.js           # 鸟类预习 PPT 匹配和 PPTX 生成逻辑
-├── china_bird_results.json         # 鸟类简介原始数据
-├── china_bird_results.js           # 浏览器直读数据
+├── all_birds_full.json             # PPT 鸟类简介原始数据
+├── all_birds_full.js               # PPT 浏览器直读数据
 ├── birdreport-proxy.ps1            # 网页版本地 BirdReport 代理
 ├── start-birdreport-proxy.cmd      # 本地代理启动脚本
 ├── start-site.cmd                  # Node 站点启动脚本
@@ -221,14 +223,17 @@ node tools\test-site-birdreport-lingod.js
 
 ## 版本记录
 
-### 开发中
+### 1.4
 
 - 新增带登录保护的 Node 站点，支持登录、后台用户管理、强制改密和登录失败短时锁定。
 - 新增同源 BirdReport 代理，部署到站点后网页端默认使用 `/api/birdreport/*`。
 - 新增 Ubuntu + Nginx 示例配置，网站和企业微信机器人可共用公网域名。
 - 鸟类预习 PPT 支持区县、地点和可选用户名过滤，便于只预习某个用户未解锁的鸟种。
+- 鸟类预习 PPT 改用 `all_birds_full.json` / `all_birds_full.js`，每页右侧最上方显示鸟种简介，并移除旧版 `china_bird_results` 数据文件。
+- 鸟类预习 PPT 支持可选嵌入 Macaulay Library 图片，生成时保留 ML 编号、摄影者和来源链接。
+- Node 站点静态资源白名单支持 `all_birds_full` 数据文件，修复云端生成 PPT 时简介数据 404 的问题。
 - 鸟类简介数据改为懒加载，避免阻塞初始页面。
-- 新增站点、代理默认值、PPT 工作台和 eBird 当季分析的本地测试。
+- 新增站点、代理默认值、PPT 工作台、Macaulay 图片代理和 eBird 当季分析的本地测试。
 
 ### 1.0.3
 
@@ -275,4 +280,4 @@ node tools\test-site-birdreport-lingod.js
 - 运行 `node --check script.js`
 - 运行 README “测试”章节中的本地测试命令
 - 如发布 Android APK，运行 `.\gradlew.bat :app:assembleDebug`
-- 提交代码并按需要打版本标签，例如 `v1.0.3`
+- 提交代码并按需要打版本标签，例如 `v1.4`

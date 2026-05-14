@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { mkdtempSync, rmSync } = require("node:fs");
+const { mkdtempSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
@@ -347,6 +347,139 @@ test("proxies BirdReport endpoints through the authenticated same-origin API", a
   }
 });
 
+test("proxies Macaulay Library search results as normalized media metadata", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+    const upstreamCalls = [];
+    const searchPayload = {
+      results: {
+        content: [
+          {
+            specimenUrl: "https://macaulaylibrary.org/asset/123456789",
+            catalogId: "123456789",
+            assetId: "123456789",
+            mediaType: "Photo",
+            mediaUrl: "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/123456789/1200",
+            largeUrl: "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/123456789/1200",
+            previewUrl: "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/123456789/",
+            userDisplayName: "Jane Birder",
+            rating: "4.8",
+            eBirdChecklistId: "S12345",
+            speciesCode: "egret1",
+            reportAs: "egret1",
+            sciName: "Egretta garzetta",
+            commonName: "Little Egret"
+          }
+        ]
+      }
+    };
+
+    await withServer(
+      {
+        database: db,
+        projectRoot: process.cwd(),
+        fetchImpl: async (url, init) => {
+          upstreamCalls.push({ url, init });
+          return new Response(JSON.stringify(searchPayload), {
+            status: 200,
+            headers: { "content-type": "application/json; charset=utf-8" }
+          });
+        }
+      },
+      async ({ request }) => {
+        const login = await request("/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+        });
+        const adminCookie = cookieFrom(login);
+
+        const proxied = await request("/api/media/macaulay/search?taxonCode=egret1", {
+          headers: { cookie: adminCookie }
+        });
+        assert.equal(proxied.status, 200);
+        assert.deepEqual(await json(proxied), {
+          results: [
+            {
+              mlId: "ML123456789",
+              assetId: "123456789",
+              attribution: "Jane Birder",
+              rating: 4.8,
+              checklistId: "S12345",
+              previewUrl: "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/123456789/1200",
+              sourceUrl: "https://macaulaylibrary.org/asset/123456789"
+            }
+          ]
+        });
+        assert.equal(upstreamCalls[0].url, "https://media.ebird.org/api/v1/search?taxonCode=egret1&mediaType=photo&sort=rating_rank_desc&birdOnly=true&count=5");
+        assert.equal(upstreamCalls[0].init.headers.accept, "application/json");
+      }
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("proxies Macaulay Library assets and rejects invalid asset ids", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+    const upstreamCalls = [];
+
+    await withServer(
+      {
+        database: db,
+        projectRoot: process.cwd(),
+        fetchImpl: async (url, init) => {
+          upstreamCalls.push({ url, init });
+          return new Response(Buffer.from("jpg-bytes"), {
+            status: 200,
+            headers: { "content-type": "image/jpeg" }
+          });
+        }
+      },
+      async ({ request }) => {
+        const login = await request("/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+        });
+        const adminCookie = cookieFrom(login);
+
+        const rejected = await request("/api/media/macaulay/asset/not-a-number", {
+          headers: { cookie: adminCookie }
+        });
+        assert.equal(rejected.status, 400);
+        assert.equal((await json(rejected)).error, "Invalid Macaulay Library asset id");
+
+        const proxied = await request("/api/media/macaulay/asset/ML123456789", {
+          headers: { cookie: adminCookie }
+        });
+        assert.equal(proxied.status, 200);
+        assert.equal(proxied.headers.get("content-type"), "image/jpeg");
+        assert.equal(await proxied.text(), "jpg-bytes");
+        assert.equal(upstreamCalls[0].url, "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/123456789/1200");
+        assert.equal(upstreamCalls[0].init.headers.accept, "image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
+      }
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("does not serve server-side source files as static assets", async () => {
   const temp = createTempDatabase();
   try {
@@ -368,6 +501,37 @@ test("does not serve server-side source files as static assets", async () => {
 
       const source = await request("/server/site/store.js", { headers: { cookie: adminCookie } });
       assert.equal(source.status, 404);
+    });
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("serves the all birds profile data as a static asset", async () => {
+  const temp = createTempDatabase();
+  try {
+    writeFileSync(join(temp.dir, "all_birds_full.json"), '[{"name":"白鹭","overview":"常见涉禽。"}]', "utf8");
+
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+
+    await withServer({ database: db, projectRoot: temp.dir }, async ({ request }) => {
+      const login = await request("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+      });
+      const adminCookie = cookieFrom(login);
+
+      const profileData = await request("/all_birds_full.json", { headers: { cookie: adminCookie } });
+      assert.equal(profileData.status, 200);
+      assert.equal(profileData.headers.get("content-type"), "application/json; charset=utf-8");
+      assert.equal(await profileData.text(), '[{"name":"白鹭","overview":"常见涉禽。"}]');
     });
   } finally {
     temp.cleanup();

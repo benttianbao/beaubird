@@ -12,10 +12,11 @@
   const ZIP_UTF8_FLAG = 0x0800;
 
   const SECTION_LIMITS = {
-    appearance: 150,
-    identification: 150,
-    habits: 180,
-    merged: 230
+    overview: 230,
+    appearance: 120,
+    identification: 120,
+    habits: 130,
+    merged: 160
   };
 
   const CRC_TABLE = createCrcTable();
@@ -38,6 +39,9 @@
       }
       index.set(key, {
         name: String(item.name || "").trim(),
+        englishName: compactText(item.english_name || item.englishName),
+        scientificName: compactText(item.scientific_name || item.scientificName || item.latinname),
+        overview: compactText(item.overview),
         appearance: compactText(item.appearance),
         call: compactText(item.call),
         habits: compactText(item.habits),
@@ -68,10 +72,11 @@
 
       slides.push({
         speciesName,
-        latinName: String(taxon?.latinname || taxon?.englishname || "").trim(),
+        latinName: String(taxon?.latinname || taxon?.scientificName || taxon?.sciName || profile.scientificName || taxon?.englishname || "").trim(),
         orderName: String(taxon?.taxonordername || "").trim(),
         familyName: String(taxon?.taxonfamilyname || "").trim(),
         recordCount: Number(taxon?.recordcount) || 0,
+        overview: limitText(profile.overview, SECTION_LIMITS.overview),
         sections: [
           {
             title: "外形",
@@ -111,15 +116,37 @@
       throw new Error("没有可生成 PPT 的鸟种简介。");
     }
 
+    const mediaContentTypes = new Map();
+    let mediaIndex = 0;
+    const preparedSlides = normalizedSlides.map((slide) => {
+      const photo = normalizeSlidePhoto(slide.photo);
+      if (!photo) {
+        return slide;
+      }
+
+      mediaIndex += 1;
+      const mediaName = `image${mediaIndex}.${photo.extension}`;
+      mediaContentTypes.set(photo.extension, photo.contentType);
+      return {
+        ...slide,
+        photo: {
+          ...photo,
+          mediaPath: `ppt/media/${mediaName}`,
+          relationshipId: "rId2",
+          relationshipTarget: `../media/${mediaName}`
+        }
+      };
+    });
+
     const createdAt = options.createdAt instanceof Date ? options.createdAt : new Date();
     const title = compactText(options.title || "鸟类预习");
     const entries = [
-      { name: "[Content_Types].xml", data: contentTypesXml(normalizedSlides.length) },
+      { name: "[Content_Types].xml", data: contentTypesXml(preparedSlides.length, mediaContentTypes) },
       { name: "_rels/.rels", data: packageRelsXml() },
-      { name: "docProps/app.xml", data: appPropertiesXml(normalizedSlides.length) },
+      { name: "docProps/app.xml", data: appPropertiesXml(preparedSlides.length) },
       { name: "docProps/core.xml", data: corePropertiesXml(title, createdAt) },
-      { name: "ppt/presentation.xml", data: presentationXml(normalizedSlides.length) },
-      { name: "ppt/_rels/presentation.xml.rels", data: presentationRelsXml(normalizedSlides.length) },
+      { name: "ppt/presentation.xml", data: presentationXml(preparedSlides.length) },
+      { name: "ppt/_rels/presentation.xml.rels", data: presentationRelsXml(preparedSlides.length) },
       { name: "ppt/slideMasters/slideMaster1.xml", data: slideMasterXml() },
       { name: "ppt/slideMasters/_rels/slideMaster1.xml.rels", data: slideMasterRelsXml() },
       { name: "ppt/slideLayouts/slideLayout1.xml", data: slideLayoutXml() },
@@ -127,13 +154,69 @@
       { name: "ppt/theme/theme1.xml", data: themeXml() }
     ];
 
-    normalizedSlides.forEach((slide, index) => {
+    preparedSlides.forEach((slide, index) => {
       const slideNumber = index + 1;
-      entries.push({ name: `ppt/slides/slide${slideNumber}.xml`, data: slideXml(slide, slideNumber, normalizedSlides.length) });
-      entries.push({ name: `ppt/slides/_rels/slide${slideNumber}.xml.rels`, data: slideRelsXml() });
+      entries.push({ name: `ppt/slides/slide${slideNumber}.xml`, data: slideXml(slide, slideNumber, preparedSlides.length) });
+      entries.push({ name: `ppt/slides/_rels/slide${slideNumber}.xml.rels`, data: slideRelsXml(slide.photo) });
+      if (slide.photo) {
+        entries.push({ name: slide.photo.mediaPath, data: slide.photo.bytes });
+      }
     });
 
     return createStoredZip(entries);
+  }
+
+  function normalizeSlidePhoto(photo) {
+    if (!photo || photo.bytes == null) {
+      return null;
+    }
+
+    const bytes = toUint8Array(photo.bytes);
+    if (!bytes.length) {
+      return null;
+    }
+
+    const contentType = normalizeImageContentType(photo.contentType, photo.extension);
+    if (!contentType) {
+      return null;
+    }
+
+    return {
+      bytes,
+      contentType,
+      extension: imageExtensionForContentType(contentType, photo.extension),
+      width: Number(photo.width) || 0,
+      height: Number(photo.height) || 0,
+      attribution: compactText(photo.attribution),
+      sourceUrl: compactText(photo.sourceUrl),
+      mlId: compactText(photo.mlId)
+    };
+  }
+
+  function normalizeImageContentType(contentType, extension) {
+    const type = String(contentType || "").split(";")[0].trim().toLowerCase();
+    const ext = String(extension || "").trim().replace(/^\./, "").toLowerCase();
+    if (type === "image/jpeg" || type === "image/jpg" || ext === "jpg" || ext === "jpeg") {
+      return "image/jpeg";
+    }
+    if (type === "image/png" || ext === "png") {
+      return "image/png";
+    }
+    if (type === "image/webp" || ext === "webp") {
+      return "image/webp";
+    }
+    return "";
+  }
+
+  function imageExtensionForContentType(contentType, fallback) {
+    const ext = String(fallback || "").trim().replace(/^\./, "").toLowerCase();
+    if (contentType === "image/png") {
+      return "png";
+    }
+    if (contentType === "image/webp") {
+      return "webp";
+    }
+    return ext === "jpeg" ? "jpg" : ext || "jpg";
   }
 
   function buildBirdPrepPptxFilename({ province = "", city = "", district = "", pointname = "", date = new Date() } = {}) {
@@ -210,28 +293,52 @@
         ],
         { anchor: "ctr" }
       ),
-      textShape(20, "页脚", inch(0.58), inch(7.08), inch(12.2), inch(0.24), [
+      textShape(40, "页脚", inch(0.58), inch(7.08), inch(12.2), inch(0.24), [
         paragraph([{ text: footer, size: 850, color: "7A877C" }], { align: "r" })
       ])
     ];
 
+    if (slide.photo) {
+      const photoCredit = formatPhotoCredit(slide.photo);
+      shapes.splice(
+        4,
+        1,
+        pictureShape(6, "Macaulay Library Photo", slide.photo.relationshipId, inch(0.72), inch(1.32), inch(3.87), inch(5.18), slide.photo),
+        textShape(41, "Macaulay Library Credit", inch(0.72), inch(6.58), inch(3.87), inch(0.3), [
+          paragraph([{ text: photoCredit, size: 650, color: "5F6E61" }], { align: "ctr" })
+        ])
+      );
+    }
+
     const sectionX = inch(5.02);
     const sectionY = inch(1.18);
     const sectionWidth = inch(7.75);
-    const sectionHeight = inch(1.32);
-    const sectionGap = inch(0.15);
+    const overviewHeight = inch(1.06);
+    const sectionHeight = inch(1.05);
+    const sectionGap = inch(0.12);
+    shapes.push(rectangleShape(7, "简介 卡片", sectionX, sectionY, sectionWidth, overviewHeight, "FFFFFF", "D8E2D8"));
+    shapes.push(
+      textShape(8, "简介 标题", sectionX + inch(0.18), sectionY + inch(0.1), sectionWidth - inch(0.36), inch(0.22), [
+        paragraph([{ text: "简介", size: 1100, bold: true, color: "2F7D4A" }])
+      ])
+    );
+    shapes.push(
+      textShape(9, "简介 正文", sectionX + inch(0.18), sectionY + inch(0.36), sectionWidth - inch(0.36), overviewHeight - inch(0.46), [
+        paragraph([{ text: limitText(slide.overview, SECTION_LIMITS.overview), size: 900, color: "223024" }])
+      ])
+    );
     (Array.isArray(slide.sections) ? slide.sections : []).slice(0, 4).forEach((section, index) => {
-      const y = sectionY + index * (sectionHeight + sectionGap);
-      const shapeId = 7 + index * 3;
+      const y = sectionY + overviewHeight + sectionGap + index * (sectionHeight + sectionGap);
+      const shapeId = 10 + index * 3;
       shapes.push(rectangleShape(shapeId, `${section.title} 卡片`, sectionX, y, sectionWidth, sectionHeight, "FFFFFF", "D8E2D8"));
       shapes.push(
-        textShape(shapeId + 1, `${section.title} 标题`, sectionX + inch(0.18), y + inch(0.12), sectionWidth - inch(0.36), inch(0.25), [
-          paragraph([{ text: section.title, size: 1200, bold: true, color: "2F7D4A" }])
+        textShape(shapeId + 1, `${section.title} 标题`, sectionX + inch(0.18), y + inch(0.1), sectionWidth - inch(0.36), inch(0.22), [
+          paragraph([{ text: section.title, size: 1100, bold: true, color: "2F7D4A" }])
         ])
       );
       shapes.push(
-        textShape(shapeId + 2, `${section.title} 正文`, sectionX + inch(0.18), y + inch(0.43), sectionWidth - inch(0.36), sectionHeight - inch(0.54), [
-          paragraph([{ text: limitText(section.body, 170), size: 1050, color: "223024" }])
+        textShape(shapeId + 2, `${section.title} 正文`, sectionX + inch(0.18), y + inch(0.36), sectionWidth - inch(0.36), sectionHeight - inch(0.46), [
+          paragraph([{ text: limitText(section.body, 135), size: 900, color: "223024" }])
         ])
       );
     });
@@ -282,6 +389,70 @@
 </p:sp>`;
   }
 
+  function pictureShape(id, name, relationshipId, x, y, cx, cy, photo) {
+    const crop = imageCropXml(photo, cx, cy);
+    return `\
+<p:pic>
+  <p:nvPicPr>
+    <p:cNvPr id="${id}" name="${xmlEscape(name)}"/>
+    <p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>
+    <p:nvPr/>
+  </p:nvPicPr>
+  <p:blipFill>
+    <a:blip r:embed="${xmlEscape(relationshipId)}"/>
+    ${crop}
+    <a:stretch><a:fillRect/></a:stretch>
+  </p:blipFill>
+  <p:spPr>
+    <a:xfrm>
+      <a:off x="${x}" y="${y}"/>
+      <a:ext cx="${cx}" cy="${cy}"/>
+    </a:xfrm>
+    <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+    <a:ln w="9525"><a:solidFill><a:srgbClr val="A8C7B0"/></a:solidFill></a:ln>
+  </p:spPr>
+</p:pic>`;
+  }
+
+  function imageCropXml(photo, cx, cy) {
+    const width = Number(photo?.width) || 0;
+    const height = Number(photo?.height) || 0;
+    if (!width || !height || !cx || !cy) {
+      return "";
+    }
+
+    const targetAspect = cx / cy;
+    const imageAspect = width / height;
+    if (!Number.isFinite(targetAspect) || !Number.isFinite(imageAspect) || targetAspect <= 0 || imageAspect <= 0) {
+      return "";
+    }
+
+    if (imageAspect > targetAspect) {
+      const crop = Math.round(((1 - targetAspect / imageAspect) / 2) * 100000);
+      return `<a:srcRect l="${crop}" r="${crop}"/>`;
+    }
+    if (imageAspect < targetAspect) {
+      const crop = Math.round(((1 - imageAspect / targetAspect) / 2) * 100000);
+      return `<a:srcRect t="${crop}" b="${crop}"/>`;
+    }
+    return "";
+  }
+
+  function formatPhotoCredit(photo) {
+    const parts = [];
+    if (photo?.attribution) {
+      parts.push(photo.attribution);
+    } else if (photo?.mlId) {
+      parts.push(`Macaulay Library ${photo.mlId}`);
+    } else {
+      parts.push("Macaulay Library");
+    }
+    if (photo?.sourceUrl) {
+      parts.push(photo.sourceUrl);
+    }
+    return parts.filter(Boolean).join(" · ");
+  }
+
   function textShape(id, name, x, y, cx, cy, paragraphs, options = {}) {
     const anchor = options.anchor ? ` anchor="${options.anchor}"` : "";
     return `\
@@ -322,18 +493,25 @@
     return `<a:r><a:rPr lang="zh-CN" sz="${size}"${bold} dirty="0"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:latin typeface="Microsoft YaHei"/><a:ea typeface="Microsoft YaHei"/></a:rPr><a:t>${xmlEscape(run.text)}</a:t></a:r>`;
   }
 
-  function contentTypesXml(slideCount) {
+  function contentTypesXml(slideCount, mediaContentTypes = new Map()) {
     const slideTypes = [];
     for (let index = 1; index <= slideCount; index += 1) {
       slideTypes.push(
         `<Override PartName="/ppt/slides/slide${index}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`
       );
     }
+    const mediaTypes = [];
+    if (mediaContentTypes && typeof mediaContentTypes.forEach === "function") {
+      mediaContentTypes.forEach((contentType, extension) => {
+        mediaTypes.push(`<Default Extension="${xmlEscape(extension)}" ContentType="${xmlEscape(contentType)}"/>`);
+      });
+    }
 
     return xmlDocument(`\
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
+  ${mediaTypes.join("\n  ")}
   <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
   <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
@@ -444,10 +622,14 @@
 </Relationships>`);
   }
 
-  function slideRelsXml() {
+  function slideRelsXml(photo) {
+    const imageRelationship = photo
+      ? `\n  <Relationship Id="${xmlEscape(photo.relationshipId)}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="${xmlEscape(photo.relationshipTarget)}"/>`
+      : "";
     return xmlDocument(`\
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+  ${imageRelationship}
 </Relationships>`);
   }
 

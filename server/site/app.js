@@ -45,8 +45,8 @@ const PUBLIC_ROOT_FILES = new Set([
   "style.css",
   "ebird-seasonal-core.js",
   "bird-prep-ppt-core.js",
-  "china_bird_results.js",
-  "china_bird_results.json"
+  "all_birds_full.js",
+  "all_birds_full.json"
 ]);
 const PUBLIC_PREFIXES = ["data/", "vendor/"];
 
@@ -169,6 +169,13 @@ async function routeRequest(context) {
   }
   if (pathname.startsWith("/api/birdreport/")) {
     return proxyBirdreport(context, pathname);
+  }
+  if (request.method === "GET" && pathname === "/api/media/macaulay/search") {
+    return proxyMacaulaySearch(context, url);
+  }
+  const macaulayAssetMatch = pathname.match(/^\/api\/media\/macaulay\/asset\/([^/]+)$/);
+  if (request.method === "GET" && macaulayAssetMatch) {
+    return proxyMacaulayAsset(context, macaulayAssetMatch[1]);
   }
   if (request.method === "GET" || request.method === "HEAD") {
     return serveStatic(context, pathname);
@@ -294,6 +301,140 @@ async function proxyBirdreport(context, pathname) {
     "content-type": upstream.headers.get("content-type") || "application/json; charset=utf-8"
   });
   context.response.end(Buffer.from(await upstream.arrayBuffer()));
+}
+
+async function proxyMacaulaySearch(context, url) {
+  const taxonCode = String(url.searchParams.get("taxonCode") || "").trim();
+  const query = String(url.searchParams.get("q") || "").trim();
+  if (!taxonCode && !query) {
+    return json(context.response, 400, { error: "Missing Macaulay Library taxonCode or query" });
+  }
+
+  const upstreamUrl = new URL("https://media.ebird.org/api/v1/search");
+  if (taxonCode) {
+    upstreamUrl.searchParams.set("taxonCode", taxonCode);
+  } else {
+    upstreamUrl.searchParams.set("q", query);
+    upstreamUrl.searchParams.set("searchField", "species");
+  }
+  upstreamUrl.searchParams.set("mediaType", "photo");
+  upstreamUrl.searchParams.set("sort", "rating_rank_desc");
+  upstreamUrl.searchParams.set("birdOnly", "true");
+  upstreamUrl.searchParams.set("count", "5");
+
+  const upstream = await context.fetchImpl(upstreamUrl.toString(), {
+    headers: {
+      accept: "application/json",
+      "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
+    }
+  });
+
+  if (!upstream.ok) {
+    return json(context.response, upstream.status, { error: `Macaulay Library search returned HTTP ${upstream.status}` });
+  }
+
+  const payload = await upstream.json();
+  return json(context.response, 200, { results: normalizeMacaulaySearchResults(payload, { taxonCode, query }) });
+}
+
+async function proxyMacaulayAsset(context, rawAssetId) {
+  const assetId = normalizeMacaulayAssetId(rawAssetId);
+  if (!assetId) {
+    return json(context.response, 400, { error: "Invalid Macaulay Library asset id" });
+  }
+
+  const upstreamUrl = `https://cdn.download.ams.birds.cornell.edu/api/v1/asset/${assetId}/1200`;
+  const upstream = await context.fetchImpl(upstreamUrl, {
+    headers: {
+      accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
+    }
+  });
+  const contentType = String(upstream.headers.get("content-type") || "").split(";")[0].toLowerCase();
+  if (!upstream.ok) {
+    return json(context.response, upstream.status, { error: `Macaulay Library asset returned HTTP ${upstream.status}` });
+  }
+  if (!["image/jpeg", "image/png", "image/webp"].includes(contentType)) {
+    return json(context.response, 502, { error: "Macaulay Library asset was not a supported image" });
+  }
+
+  context.response.writeHead(200, {
+    "content-type": contentType,
+    "x-content-type-options": "nosniff"
+  });
+  context.response.end(Buffer.from(await upstream.arrayBuffer()));
+}
+
+function normalizeMacaulayAssetId(value) {
+  const match = String(value || "").trim().match(/^(?:ML)?(\d+)$/i);
+  return match ? match[1] : "";
+}
+
+function normalizeMacaulaySearchResults(payload, criteria = {}) {
+  const content = Array.isArray(payload?.results?.content)
+    ? payload.results.content
+    : Array.isArray(payload?.content)
+      ? payload.content
+      : [];
+  const seen = new Set();
+  const results = [];
+
+  for (const item of content) {
+    const assetId = normalizeMacaulayAssetId(item?.assetId || item?.catalogId);
+    if (!assetId || seen.has(assetId) || !isMacaulayMediaMatch(item, criteria)) {
+      continue;
+    }
+    seen.add(assetId);
+    const previewUrl = item?.largeUrl || item?.mediaUrl || `https://cdn.download.ams.birds.cornell.edu/api/v1/asset/${assetId}/1200`;
+    results.push({
+      mlId: `ML${assetId}`,
+      assetId,
+      attribution: String(item?.userDisplayName || item?.recorder || "").trim(),
+      rating: item?.rating == null || item.rating === "" ? null : Number(item.rating),
+      checklistId: String(item?.eBirdChecklistId || "").trim(),
+      previewUrl,
+      sourceUrl: item?.specimenUrl || `https://macaulaylibrary.org/asset/${assetId}`
+    });
+  }
+
+  return results.slice(0, 5);
+}
+
+function isMacaulayMediaMatch(item, criteria = {}) {
+  if (String(item?.mediaType || "").toLowerCase() !== "photo") {
+    return false;
+  }
+  const taxonCode = String(criteria.taxonCode || "").trim().toLowerCase();
+  if (taxonCode) {
+    return getMacaulayItemSpeciesCodes(item).some((code) => code === taxonCode);
+  }
+  const query = normalizeMacaulayQuery(criteria.query);
+  if (!query) {
+    return true;
+  }
+  return getMacaulayItemNames(item).some((name) => normalizeMacaulayQuery(name) === query);
+}
+
+function getMacaulayItemSpeciesCodes(item) {
+  return [
+    item?.speciesCode,
+    item?.reportAs,
+    ...(Array.isArray(item?.subjectData) ? item.subjectData.map((subject) => subject?.speciesCode) : [])
+  ]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function getMacaulayItemNames(item) {
+  return [
+    item?.sciName,
+    item?.commonName,
+    ...(Array.isArray(item?.subjectData) ? item.subjectData.flatMap((subject) => [subject?.sciName, subject?.comName]) : [])
+  ].filter(Boolean);
+}
+
+function normalizeMacaulayQuery(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function serveStatic(context, pathname) {

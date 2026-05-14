@@ -21,10 +21,11 @@ const BIRDREPORT_SEARCH_PAGE_URL = "https://www.birdreport.cn/home/search/page.h
 const BIRDREPORT_TAXON_PAGE_URL = "https://www.birdreport.cn/home/search/taxon.html";
 const BIRDREPORT_ZHEJIANG_SPECIES_DATA_URL = "./data/zhejiang-birdreport-species.json";
 const BIRDREPORT_ZHEJIANG_SPECIES_GLOBAL = "BEAUBIRD_ZHEJIANG_SPECIES_DATA";
-const CHINA_BIRD_RESULTS_DATA_URL = "./china_bird_results.json";
-const CHINA_BIRD_RESULTS_SCRIPT_URL = "./china_bird_results.js";
-const CHINA_BIRD_RESULTS_GLOBAL = "BEAUBIRD_CHINA_BIRD_RESULTS";
+const ALL_BIRDS_FULL_DATA_URL = "./all_birds_full.json";
+const ALL_BIRDS_FULL_SCRIPT_URL = "./all_birds_full.js";
+const ALL_BIRDS_FULL_GLOBAL = "BEAUBIRD_ALL_BIRDS_FULL";
 const BIRD_PREP_LOGIN_EXPIRED_MESSAGE = "登录已过期，请重新登录后再生成 PPT。";
+const BIRD_PREP_MACAULAY_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const BIRDREPORT_VERSION = "CH4";
 const ANDROID_APP_USER_AGENT_TOKEN = "BeauBirdAndroidApp";
 const BIRDREPORT_PARAM_PUBLIC_KEY = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCvxXa98E1uWXnBzXkS2yHUfnBM6n3PCwLdfIox03T91joBvjtoDqiQ5x3tTOfpHs3LtiqMMEafls6b0YWtgB1dse1W5m+FpeusVkCOkQxB4SZDH6tuerIknnmB/Hsq5wgEkIvO5Pff9biig6AyoAkdWpSek/1/B7zYIepYY0lxKQIDAQAB";
@@ -358,6 +359,9 @@ const state = {
   birdPrepUnlockedFilterWarning: "",
   birdPrepProfileIndex: null,
   birdPrepProfileIndexLoading: null,
+  birdPrepMacaulayPhotoCache: new Map(),
+  birdPrepMacaulayTaxonomyBySciName: null,
+  birdPrepMacaulayTaxonomyLoading: null,
   birdPrepLoading: false,
   birdPrepGenerating: false
 };
@@ -410,6 +414,8 @@ const elements = {
   birdPrepUnlockedUsername: document.querySelector("#birdPrepUnlockedUsername"),
   birdPrepStartDate: document.querySelector("#birdPrepStartDate"),
   birdPrepEndDate: document.querySelector("#birdPrepEndDate"),
+  birdPrepMacaulayImages: document.querySelector("#birdPrepMacaulayImages"),
+  birdPrepMacaulayRights: document.querySelector("#birdPrepMacaulayRights"),
   queryBirdPrepSpeciesBtn: document.querySelector("#queryBirdPrepSpeciesBtn"),
   selectAllBirdPrepSpeciesBtn: document.querySelector("#selectAllBirdPrepSpeciesBtn"),
   clearBirdPrepSpeciesBtn: document.querySelector("#clearBirdPrepSpeciesBtn"),
@@ -464,6 +470,7 @@ function bootstrap() {
   hydrateBirdreportProxyInputs();
   hydrateZhejiangRareMonitorInputs();
   bindEvents();
+  syncBirdPrepMacaulayOptions();
   initBirdreportProxy();
   initEmbeddedAndroidQuickNav();
   renderRegionQueryResults();
@@ -592,6 +599,7 @@ function bindEvents() {
   bindIfPresent(elements.birdPrepUnlockedUsername, "input", clearBirdPrepSpeciesResults);
   bindIfPresent(elements.birdPrepStartDate, "change", clearBirdPrepSpeciesResults);
   bindIfPresent(elements.birdPrepEndDate, "change", clearBirdPrepSpeciesResults);
+  bindIfPresent(elements.birdPrepMacaulayImages, "change", syncBirdPrepMacaulayOptions);
   bindIfPresent(elements.queryBirdPrepSpeciesBtn, "click", queryBirdPrepSpecies);
   bindIfPresent(elements.birdPrepSpeciesSearch, "input", renderBirdPrepSpeciesOptions);
   bindIfPresent(elements.birdPrepSpeciesOptions, "change", handleBirdPrepSpeciesSelectionChange);
@@ -630,7 +638,7 @@ function initEmbeddedAndroidQuickNav() {
     return;
   }
 
-  const sections = ["ebirdSection", "birdreportSection", "birdPrepSection", "unlockedSection", "monitorSection"]
+  const sections = ["monitorSection", "unlockedSection", "birdPrepSection", "ebirdSection", "birdreportSection"]
     .map((id) => document.getElementById(id))
     .filter(Boolean);
 
@@ -4116,6 +4124,12 @@ async function generateBirdPrepPpt() {
     return;
   }
 
+  if (shouldUseBirdPrepMacaulayImages() && !elements.birdPrepMacaulayRights?.checked) {
+    setBirdPrepMessage("请先确认 Macaulay Library 图片仅用于你有权使用的 PPT，并保留署名。", true);
+    elements.birdPrepMacaulayRights?.focus();
+    return;
+  }
+
   setBirdPrepGenerating(true);
   setBirdPrepMessage("正在读取鸟类简介并生成 PPT...");
 
@@ -4126,6 +4140,10 @@ async function generateBirdPrepPpt() {
       const skippedText = skippedNames.length ? `已跳过：${skippedNames.join("、")}` : "";
       throw new Error(`所选鸟种在本地简介中都没有匹配项。${skippedText}`);
     }
+
+    const photoResult = shouldUseBirdPrepMacaulayImages()
+      ? await loadBirdPrepMacaulayPhotos(selectedSpecies, slides)
+      : { attachedCount: 0, missingCount: 0 };
 
     const bytes = window.BeauBirdPrepPpt.createBirdPrepPptx(slides, {
       title: `${formatBirdPrepQuerySummary(state.birdPrepLastQueryPayload || {})} 鸟类预习`
@@ -4143,12 +4161,253 @@ async function generateBirdPrepPpt() {
     triggerFileDownload(filename, url, () => URL.revokeObjectURL(url));
 
     const skippedText = skippedNames.length ? `；跳过 ${skippedNames.length} 个无简介鸟种：${skippedNames.join("、")}` : "";
-    setBirdPrepMessage(`已生成 ${slides.length} 页鸟类预习 PPT：${filename}${skippedText}`);
+    const photoText = photoResult.attachedCount
+      ? `；已添加 ${photoResult.attachedCount} 张 Macaulay Library 图片`
+      : shouldUseBirdPrepMacaulayImages()
+        ? "；没有匹配到可嵌入的 Macaulay Library 图片"
+        : "";
+    setBirdPrepMessage(`已生成 ${slides.length} 页鸟类预习 PPT：${filename}${photoText}${skippedText}`);
   } catch (error) {
     setBirdPrepMessage(`生成 PPT 失败：${error.message}`, true);
   } finally {
     setBirdPrepGenerating(false);
   }
+}
+
+function shouldUseBirdPrepMacaulayImages() {
+  return Boolean(elements.birdPrepMacaulayImages?.checked);
+}
+
+async function loadBirdPrepMacaulayPhotos(selectedSpecies, slides) {
+  const taxaByName = new Map();
+  selectedSpecies.forEach((taxon) => {
+    const name = getBirdPrepTaxonName(taxon);
+    if (name) {
+      taxaByName.set(window.BeauBirdPrepPpt.normalizeBirdName(name), taxon);
+    }
+  });
+
+  const scientificNames = slides
+    .map((slide) => getBirdPrepTaxonScientificName(taxaByName.get(window.BeauBirdPrepPpt.normalizeBirdName(slide.speciesName))))
+    .filter(Boolean);
+  const taxonomyBySciName = await loadBirdPrepMacaulayTaxonomyBySciName(scientificNames);
+  let attachedCount = 0;
+  let missingCount = 0;
+
+  for (let index = 0; index < slides.length; index += 1) {
+    const slide = slides[index];
+    const taxon = taxaByName.get(window.BeauBirdPrepPpt.normalizeBirdName(slide.speciesName));
+    setBirdPrepMessage(`正在匹配 Macaulay 图片 ${index + 1}/${slides.length}：${slide.speciesName}`);
+    try {
+      const photo = await fetchBirdPrepMacaulayPhoto(taxon, taxonomyBySciName);
+      if (photo) {
+        slide.photo = photo;
+        attachedCount += 1;
+      } else {
+        missingCount += 1;
+      }
+    } catch (error) {
+      console.warn("Failed to attach Macaulay Library photo:", slide.speciesName, error);
+      missingCount += 1;
+    }
+  }
+
+  return { attachedCount, missingCount };
+}
+
+async function loadBirdPrepMacaulayTaxonomyBySciName(scientificNames) {
+  const wanted = new Set((scientificNames || []).map(normalizeScientificName).filter(Boolean));
+  if (!wanted.size) {
+    return new Map();
+  }
+  if (state.birdPrepMacaulayTaxonomyBySciName) {
+    return state.birdPrepMacaulayTaxonomyBySciName;
+  }
+  if (state.birdPrepMacaulayTaxonomyLoading) {
+    return state.birdPrepMacaulayTaxonomyLoading;
+  }
+
+  const apiKey = getStoredEbirdApiKey();
+  state.birdPrepMacaulayTaxonomyLoading = fetchBirdPrepEbirdTaxonomy(apiKey)
+    .then((items) => {
+      const lookup = new Map();
+      items.forEach((item) => {
+        const sciName = normalizeScientificName(item?.sciName);
+        if (sciName && (!wanted.size || wanted.has(sciName))) {
+          lookup.set(sciName, String(item.speciesCode || "").trim());
+        }
+      });
+      state.birdPrepMacaulayTaxonomyBySciName = lookup;
+      return lookup;
+    })
+    .catch((error) => {
+      console.warn("Failed to load eBird taxonomy for Macaulay Library lookup:", error);
+      return new Map();
+    })
+    .finally(() => {
+      state.birdPrepMacaulayTaxonomyLoading = null;
+    });
+
+  return state.birdPrepMacaulayTaxonomyLoading;
+}
+
+async function fetchBirdPrepEbirdTaxonomy(apiKey) {
+  const url = new URL("https://api.ebird.org/v2/ref/taxonomy/ebird");
+  url.searchParams.set("fmt", "json");
+  url.searchParams.set("locale", EBIRD_SPECIES_LOCALE);
+  url.searchParams.set("cat", "species");
+
+  const headers = apiKey ? { "X-eBirdApiToken": apiKey } : {};
+  const response = await fetch(url, {
+    headers
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`taxonomy 返回 ${response.status}：${errorText || "请求失败"}`);
+  }
+  return response.json();
+}
+
+async function fetchBirdPrepMacaulayPhoto(taxon, taxonomyBySciName) {
+  const scientificName = getBirdPrepTaxonScientificName(taxon);
+  const taxonCode = getBirdPrepMacaulayTaxonCode(taxon, taxonomyBySciName, scientificName);
+  const cacheKey = taxonCode || scientificName || getBirdPrepTaxonName(taxon);
+  if (!cacheKey) {
+    return null;
+  }
+  if (state.birdPrepMacaulayPhotoCache.has(cacheKey)) {
+    return state.birdPrepMacaulayPhotoCache.get(cacheKey);
+  }
+
+  const searchPath = taxonCode
+    ? `/api/media/macaulay/search?taxonCode=${encodeURIComponent(taxonCode)}`
+    : `/api/media/macaulay/search?q=${encodeURIComponent(scientificName || getBirdPrepTaxonName(taxon))}`;
+  const searchPayload = await birdreportProxyGetJson(searchPath);
+  const media = Array.isArray(searchPayload?.results) ? searchPayload.results[0] : null;
+  if (!media?.assetId && !media?.mlId) {
+    state.birdPrepMacaulayPhotoCache.set(cacheKey, null);
+    return null;
+  }
+
+  const assetId = media.mlId || media.assetId;
+  const image = await birdreportProxyGetImage(`/api/media/macaulay/asset/${encodeURIComponent(assetId)}`);
+  const photo = {
+    bytes: image.bytes,
+    contentType: image.contentType,
+    extension: getImageExtensionFromContentType(image.contentType),
+    width: image.width,
+    height: image.height,
+    attribution: formatBirdPrepMacaulayAttribution(media),
+    sourceUrl: media.sourceUrl || `https://macaulaylibrary.org/asset/${String(assetId).replace(/^ML/i, "")}`,
+    mlId: media.mlId || `ML${String(assetId).replace(/^ML/i, "")}`
+  };
+  state.birdPrepMacaulayPhotoCache.set(cacheKey, photo);
+  return photo;
+}
+
+function getBirdPrepMacaulayTaxonCode(taxon, taxonomyBySciName, scientificName) {
+  const directCode = String(taxon?.taxonCode || taxon?.speciesCode || taxon?.species_code || taxon?.ebirdCode || "").trim();
+  if (directCode) {
+    return directCode;
+  }
+  const key = normalizeScientificName(scientificName);
+  return key ? String(taxonomyBySciName?.get?.(key) || "").trim() : "";
+}
+
+function getBirdPrepTaxonScientificName(taxon) {
+  return String(taxon?.latinname || taxon?.scientificName || taxon?.sciName || "").trim();
+}
+
+function normalizeScientificName(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function getStoredEbirdApiKey() {
+  return String(elements.ebirdApiKey?.value || localStorage.getItem(EBIRD_API_KEY_STORAGE) || "").trim();
+}
+
+async function birdreportProxyGetJson(path) {
+  const response = await birdreportProxyGet(path);
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if (response.ok) {
+    return payload;
+  }
+  throw new Error(payload?.error || payload?.msg || `HTTP ${response.status}`);
+}
+
+async function birdreportProxyGetImage(path) {
+  const response = await birdreportProxyGet(path);
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`;
+    try {
+      const payload = await response.json();
+      message = payload?.error || payload?.msg || message;
+    } catch {
+      // Keep the HTTP status message.
+    }
+    throw new Error(message);
+  }
+
+  const contentType = String(response.headers.get("content-type") || "").split(";")[0].toLowerCase();
+  if (!["image/jpeg", "image/png", "image/webp"].includes(contentType)) {
+    throw new Error(`Macaulay Library 返回了不支持的图片类型：${contentType || "unknown"}`);
+  }
+  const blob = await response.blob();
+  if (!blob.size || blob.size > BIRD_PREP_MACAULAY_MAX_IMAGE_BYTES) {
+    throw new Error("Macaulay Library 图片为空或超过大小限制。");
+  }
+  const dimensions = await readImageDimensions(blob);
+  return {
+    bytes: new Uint8Array(await blob.arrayBuffer()),
+    contentType,
+    width: dimensions.width,
+    height: dimensions.height
+  };
+}
+
+function birdreportProxyGet(path) {
+  const baseUrl = normalizeProxyBaseUrl(elements.birdPrepProxyUrl?.value || elements.birdreportProxyUrl?.value);
+  persistBirdPrepProxySettings();
+  return fetch(`${baseUrl}${path}`, { method: "GET" });
+}
+
+function readImageDimensions(blob) {
+  if (typeof Image !== "function" || !window.URL?.createObjectURL) {
+    return Promise.resolve({ width: 0, height: 0 });
+  }
+
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = () => {
+      const dimensions = { width: image.naturalWidth || 0, height: image.naturalHeight || 0 };
+      URL.revokeObjectURL(url);
+      resolve(dimensions);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: 0, height: 0 });
+    };
+    image.src = url;
+  });
+}
+
+function getImageExtensionFromContentType(contentType) {
+  if (contentType === "image/png") {
+    return "png";
+  }
+  if (contentType === "image/webp") {
+    return "webp";
+  }
+  return "jpg";
+}
+
+function formatBirdPrepMacaulayAttribution(media) {
+  const mlId = media?.mlId || (media?.assetId ? `ML${media.assetId}` : "");
+  return [`Macaulay Library ${mlId}`.trim(), media?.attribution || "", media?.checklistId || ""]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 async function loadBirdPrepProfileIndex() {
@@ -4165,7 +4424,7 @@ async function loadBirdPrepProfileIndex() {
     return state.birdPrepProfileIndexLoading;
   }
 
-  state.birdPrepProfileIndexLoading = fetch(CHINA_BIRD_RESULTS_DATA_URL, { cache: "no-store" })
+  state.birdPrepProfileIndexLoading = fetch(ALL_BIRDS_FULL_DATA_URL, { cache: "no-store" })
     .then(async (response) => {
       assertBirdPrepProfileResponse(response);
       return response.json();
@@ -4185,7 +4444,7 @@ async function loadBirdPrepProfileIndex() {
       await loadBirdPrepEmbeddedDataScript();
       const fallbackIndex = buildBirdPrepProfileIndexFromEmbeddedData();
       if (!fallbackIndex) {
-        throw new Error("读取本地鸟类简介失败。请确认 china_bird_results.js 与 index.html 在同一目录后刷新页面。");
+        throw new Error("读取本地鸟类简介失败。请确认 all_birds_full.js 与 index.html 在同一目录后刷新页面。");
       }
       return fallbackIndex;
     })
@@ -4214,7 +4473,7 @@ function assertBirdPrepProfileResponse(response) {
 }
 
 function buildBirdPrepProfileIndexFromEmbeddedData() {
-  const embeddedPayload = window[CHINA_BIRD_RESULTS_GLOBAL];
+  const embeddedPayload = window[ALL_BIRDS_FULL_GLOBAL];
   if (Array.isArray(embeddedPayload)) {
     const index = window.BeauBirdPrepPpt.buildBirdProfileIndex(embeddedPayload);
     if (!index.size) {
@@ -4228,12 +4487,12 @@ function buildBirdPrepProfileIndexFromEmbeddedData() {
 }
 
 function loadBirdPrepEmbeddedDataScript() {
-  if (Array.isArray(window[CHINA_BIRD_RESULTS_GLOBAL])) {
+  if (Array.isArray(window[ALL_BIRDS_FULL_GLOBAL])) {
     return Promise.resolve();
   }
 
   return new Promise((resolve, reject) => {
-    let existingScript = document.querySelector(`script[data-bird-prep-data-script="${CHINA_BIRD_RESULTS_GLOBAL}"]`);
+    let existingScript = document.querySelector(`script[data-bird-prep-data-script="${ALL_BIRDS_FULL_GLOBAL}"]`);
     if (existingScript) {
       if (existingScript.dataset.loaded === "true") {
         resolve();
@@ -4252,9 +4511,9 @@ function loadBirdPrepEmbeddedDataScript() {
     }
 
     const script = document.createElement("script");
-    script.src = CHINA_BIRD_RESULTS_SCRIPT_URL;
+    script.src = ALL_BIRDS_FULL_SCRIPT_URL;
     script.async = true;
-    script.dataset.birdPrepDataScript = CHINA_BIRD_RESULTS_GLOBAL;
+    script.dataset.birdPrepDataScript = ALL_BIRDS_FULL_GLOBAL;
     script.addEventListener(
       "load",
       () => {
@@ -4275,6 +4534,14 @@ function loadBirdPrepEmbeddedDataScript() {
   });
 }
 
+function syncBirdPrepMacaulayOptions() {
+  if (!elements.birdPrepMacaulayRights) {
+    return;
+  }
+  const enabled = Boolean(elements.birdPrepMacaulayImages?.checked);
+  elements.birdPrepMacaulayRights.disabled = !enabled || state.birdPrepGenerating;
+}
+
 function setBirdPrepLoading(isLoading) {
   state.birdPrepLoading = isLoading;
   if (elements.queryBirdPrepSpeciesBtn) {
@@ -4286,6 +4553,12 @@ function setBirdPrepLoading(isLoading) {
       element.disabled = isLoading;
     }
   });
+  [elements.birdPrepMacaulayImages].forEach((element) => {
+    if (element) {
+      element.disabled = isLoading;
+    }
+  });
+  syncBirdPrepMacaulayOptions();
   updateBirdPrepPptButton();
 }
 
@@ -4294,6 +4567,7 @@ function setBirdPrepGenerating(isGenerating) {
   if (elements.generateBirdPrepPptBtn) {
     elements.generateBirdPrepPptBtn.textContent = isGenerating ? "生成中..." : "生成 PPT";
   }
+  syncBirdPrepMacaulayOptions();
   updateBirdPrepPptButton();
 }
 
