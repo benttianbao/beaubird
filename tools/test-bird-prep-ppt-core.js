@@ -8,6 +8,7 @@ const {
   createBirdPrepPptx,
   normalizeBirdName
 } = require("../bird-prep-ppt-core");
+const { formatCompactTimestamp } = require("../beaubird-utils");
 
 function listStoredZipEntries(bytes) {
   const entries = [];
@@ -244,4 +245,8 @@ test("buildBirdPrepPptxFilename includes location and timestamp-safe suffix", ()
     }),
     /^Zhejiang-Hangzhou-Xihu-Xixi Wetland-鸟类预习-20260601-091011\.pptx$/
   );
+});
+
+test("shared timestamp formatter matches PPT filename suffixes", () => {
+  assert.equal(formatCompactTimestamp(new Date("2026-05-09T08:07:06")), "20260509-080706");
 });

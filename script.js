@@ -37,53 +37,24 @@ const LOCAL_BIRDREPORT_PROXY_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]",
 const BIRDREPORT_RARE_SPECIES_PROVINCE = "浙江省";
 const BIRDREPORT_RARE_SPECIES_THRESHOLD = 500;
 const BIRDREPORT_MONITOR_INTERVAL_MS = 60 * 60 * 1000;
-const BIRDREPORT_MUNICIPALITY_AREAS = [
-  "湖北省神农架林区",
-  "新疆维吾尔自治区北屯市",
-  "河南省济源市",
-  "海南省五指山市",
-  "新疆维吾尔自治区五家渠市",
-  "湖北省仙桃市",
-  "湖北省潜江市",
-  "湖北省天门市",
-  "新疆维吾尔自治区石河子市",
-  "海南省文昌市",
-  "海南省琼海市",
-  "海南省东方市",
-  "新疆维吾尔自治区可克达拉市",
-  "海南省万宁市",
-  "海南省乐东黎族自治县",
-  "新疆维吾尔自治区双河市",
-  "新疆维吾尔自治区图木舒克市",
-  "新疆维吾尔自治区昆玉市",
-  "新疆维吾尔自治区胡杨河市",
-  "新疆维吾尔自治区铁门关市",
-  "新疆维吾尔自治区阿拉尔市",
-  "海南省临高县",
-  "海南省保亭黎族苗族自治县",
-  "海南省定安县",
-  "海南省屯昌县",
-  "海南省昌江黎族自治县",
-  "海南省澄迈县",
-  "海南省琼中黎族苗族自治县",
-  "海南省白沙黎族自治县",
-  "海南省陵水黎族自治县",
-  "青海省海西蒙古族藏族自治州",
-  "台湾省云林县",
-  "台湾省南投县",
-  "台湾省台东县",
-  "台湾省嘉义县",
-  "台湾省嘉义市",
-  "台湾省基隆市",
-  "台湾省宜兰县",
-  "台湾省屏东县",
-  "台湾省彰化县",
-  "台湾省新竹县",
-  "台湾省新竹市",
-  "台湾省澎湖县",
-  "台湾省花莲县",
-  "台湾省苗栗县"
-];
+const BEAUBIRD_UTILS = window.BeauBirdUtils || {};
+const BEAUBIRD_DATA = window.BeauBirdData || {};
+const formatCompactTimestamp = typeof BEAUBIRD_UTILS.formatCompactTimestamp === "function"
+  ? BEAUBIRD_UTILS.formatCompactTimestamp
+  : (date) => {
+      const value = date instanceof Date ? date : new Date(date);
+      const year = value.getFullYear();
+      const month = String(value.getMonth() + 1).padStart(2, "0");
+      const day = String(value.getDate()).padStart(2, "0");
+      const hours = String(value.getHours()).padStart(2, "0");
+      const minutes = String(value.getMinutes()).padStart(2, "0");
+      const seconds = String(value.getSeconds()).padStart(2, "0");
+      return `${year}${month}${day}-${hours}${minutes}${seconds}`;
+    };
+const BIRDREPORT_MUNICIPALITY_AREAS = BEAUBIRD_DATA.birdreportMunicipalityAreas || [];
+const TRADITIONAL_PHRASE_REPLACEMENTS = BEAUBIRD_DATA.traditionalPhraseReplacements || [];
+const TRADITIONAL_CHAR_MAP = BEAUBIRD_DATA.traditionalCharMap || {};
+const COMMON_BIRD_TAXONOMY = BEAUBIRD_DATA.commonBirdTaxonomy || {};
 const SAMPLE_RECORDS = [
   { date: "2026-03-01", species: "白鹭", location: "杭州西溪湿地", lat: 30.271, lng: 120.123, notes: "芦苇边活动频繁" },
   { date: "2026-03-02", species: "麻雀", location: "上海人民公园", lat: 31.231, lng: 121.47, notes: "晨间群聚觅食" },
@@ -98,148 +69,6 @@ const ROOT_CLASS_LABEL = "鸟纲";
 const UNKNOWN_ORDER_LABEL = "未分类目";
 const UNKNOWN_FAMILY_LABEL = "未分类科";
 const UNKNOWN_GENUS_LABEL = "未分类属";
-const TRADITIONAL_PHRASE_REPLACEMENTS = [
-  ["臺灣", "台湾"],
-  ["鶺鴒", "鹡鸰"],
-  ["鸕鶿", "鸬鹚"],
-  ["鷦鷯", "鹪鹩"],
-  ["鷺鷥", "鹭鸶"]
-];
-const TRADITIONAL_CHAR_MAP = {
-  "萬": "万",
-  "東": "东",
-  "絲": "丝",
-  "個": "个",
-  "豐": "丰",
-  "麗": "丽",
-  "舉": "举",
-  "義": "义",
-  "烏": "乌",
-  "樂": "乐",
-  "習": "习",
-  "鄉": "乡",
-  "書": "书",
-  "買": "买",
-  "亂": "乱",
-  "爭": "争",
-  "於": "于",
-  "虧": "亏",
-  "亞": "亚",
-  "產": "产",
-  "畝": "亩",
-  "親": "亲",
-  "褻": "亵",
-  "嚴": "严",
-  "喪": "丧",
-  "個": "个",
-  "豔": "艳",
-  "鳳": "凤",
-  "麼": "么",
-  "義": "义",
-  "廣": "广",
-  "門": "门",
-  "飛": "飞",
-  "馬": "马",
-  "魚": "鱼",
-  "鳥": "鸟",
-  "鳧": "凫",
-  "鳩": "鸠",
-  "鳶": "鸢",
-  "鴉": "鸦",
-  "鴒": "鸰",
-  "鴕": "鸵",
-  "鴛": "鸳",
-  "鴞": "鸮",
-  "鴝": "鸲",
-  "鴣": "鸪",
-  "鴦": "鸯",
-  "鴨": "鸭",
-  "鴯": "鸸",
-  "鴴": "鸻",
-  "鴿": "鸽",
-  "鵂": "鸺",
-  "鵑": "鹃",
-  "鵒": "鹆",
-  "鵓": "鹁",
-  "鵜": "鹈",
-  "鵐": "鹀",
-  "鵑": "鹃",
-  "鵝": "鹅",
-  "鵠": "鹄",
-  "鵡": "鹉",
-  "鵪": "鹌",
-  "鵯": "鹎",
-  "鵰": "雕",
-  "鵲": "鹊",
-  "鵷": "鹓",
-  "鶁": "鹑",
-  "鶇": "鸫",
-  "鶉": "鹑",
-  "鶘": "鹕",
-  "鶚": "鹗",
-  "鶡": "鹖",
-  "鶥": "鹛",
-  "鶩": "鹜",
-  "鶯": "莺",
-  "鶲": "鹟",
-  "鶴": "鹤",
-  "鶺": "鹡",
-  "鶼": "鹣",
-  "鶿": "鹚",
-  "鷂": "鹞",
-  "鷓": "鹧",
-  "鷗": "鸥",
-  "鷙": "鸷",
-  "鷚": "鹨",
-  "鷥": "鸶",
-  "鷦": "鹪",
-  "鷯": "鹩",
-  "鷲": "鹫",
-  "鷳": "鹇",
-  "鷹": "鹰",
-  "鷺": "鹭",
-  "鸕": "鸬",
-  "鸚": "鹦",
-  "鸛": "鹳",
-  "鸝": "鹂",
-  "麥": "麦",
-  "黃": "黄",
-  "點": "点",
-  "龍": "龙",
-  "紅": "红",
-  "綠": "绿",
-  "藍": "蓝",
-  "黑": "黑",
-  "頭": "头",
-  "頸": "颈",
-  "頰": "颊",
-  "顏": "颜",
-  "體": "体",
-  "側": "侧",
-  "長": "长",
-  "腳": "脚",
-  "翅": "翅",
-  "翹": "翘",
-  "線": "线",
-  "紋": "纹",
-  "斑": "斑",
-  "細": "细",
-  "闊": "阔",
-  "雙": "双",
-  "蒼": "苍",
-  "臺": "台",
-  "灣": "湾",
-  "裏": "里",
-  "啄": "啄",
-  "鸌": "鹱",
-  "鸏": "鹲",
-  "鸌": "鹱",
-  "鸛": "鹳",
-  "鷸": "鹬",
-  "鸌": "鹱",
-  "鱗": "鳞",
-  "鸌": "鹱"
-};
 const TAXON_ZH_MAP = {
   order: {
     Accipitriformes: "鹰形",
@@ -284,23 +113,6 @@ const TAXON_ZH_MAP = {
     Upupidae: "戴胜"
   }
 };
-const COMMON_BIRD_TAXONOMY = {
-  "白鹭": { sciName: "Egretta garzetta", orderName: "Pelecaniformes", familyName: "Ardeidae", familyCommonName: "鹭", genusName: "Egretta" },
-  "苍鹭": { sciName: "Ardea cinerea", orderName: "Pelecaniformes", familyName: "Ardeidae", familyCommonName: "鹭", genusName: "Ardea" },
-  "夜鹭": { sciName: "Nycticorax nycticorax", orderName: "Pelecaniformes", familyName: "Ardeidae", familyCommonName: "鹭", genusName: "Nycticorax" },
-  "麻雀": { sciName: "Passer montanus", orderName: "Passeriformes", familyName: "Passeridae", familyCommonName: "雀", genusName: "Passer" },
-  "乌鸫": { sciName: "Turdus merula", orderName: "Passeriformes", familyName: "Turdidae", familyCommonName: "鸫", genusName: "Turdus" },
-  "喜鹊": { sciName: "Pica pica", orderName: "Passeriformes", familyName: "Corvidae", familyCommonName: "鸦", genusName: "Pica" },
-  "红嘴蓝鹊": { sciName: "Urocissa erythroryncha", orderName: "Passeriformes", familyName: "Corvidae", familyCommonName: "鸦", genusName: "Urocissa" },
-  "戴胜": { sciName: "Upupa epops", orderName: "Bucerotiformes", familyName: "Upupidae", familyCommonName: "戴胜", genusName: "Upupa" },
-  "翠鸟": { sciName: "Alcedo atthis", orderName: "Coraciiformes", familyName: "Alcedinidae", familyCommonName: "翠鸟", genusName: "Alcedo" },
-  "珠颈斑鸠": { sciName: "Spilopelia chinensis", orderName: "Columbiformes", familyName: "Columbidae", familyCommonName: "鸠鸽", genusName: "Spilopelia" },
-  "斑鸠": { sciName: "Streptopelia orientalis", orderName: "Columbiformes", familyName: "Columbidae", familyCommonName: "鸠鸽", genusName: "Streptopelia" },
-  "白头鹎": { sciName: "Pycnonotus sinensis", orderName: "Passeriformes", familyName: "Pycnonotidae", familyCommonName: "鹎", genusName: "Pycnonotus" },
-  "大山雀": { sciName: "Parus major", orderName: "Passeriformes", familyName: "Paridae", familyCommonName: "山雀", genusName: "Parus" },
-  "白鹡鸰": { sciName: "Motacilla alba", orderName: "Passeriformes", familyName: "Motacillidae", familyCommonName: "鹡鸰", genusName: "Motacilla" }
-};
-
 const unlockedSpeciesCache = loadUnlockedSpeciesCache();
 
 const state = {
@@ -2829,50 +2641,23 @@ async function fetchBirdreportRecordWindowByTaxon(taxonQuery, windowRange, optio
   const taxonId = String(taxonQuery?.taxonId || taxonQuery || "").trim();
   const taxonName = String(taxonQuery?.taxonName || "").trim();
   const displayLimit = Math.max(1, Math.min(20, Number(options.displayLimit) || 8));
-  const pageLimit = 100;
   const maxPages = Math.max(1, Math.min(8, Number(options.maxPages) || 4));
-  const stateCandidates = [""];
+  const basePayload = createBirdreportPayload({
+    province: BIRDREPORT_RARE_SPECIES_PROVINCE,
+    startTime: windowRange.startTime,
+    endTime: windowRange.endTime,
+    state: ""
+  });
+  const recordPayload = createBirdreportRecordSearchPayload(basePayload, { taxonId, taxonName });
+  const records = await fetchBirdreportRecordPages(recordPayload, {
+    maxPages,
+    displayLimit,
+    stopAtDisplayLimit: true,
+    checkCaptcha: true,
+    filterRecord: isPublicBirdreportLocationRecord
+  });
 
-  for (const stateFilter of stateCandidates) {
-    const basePayload = createBirdreportPayload({
-      province: BIRDREPORT_RARE_SPECIES_PROVINCE,
-      startTime: windowRange.startTime,
-      endTime: windowRange.endTime,
-      state: stateFilter
-    });
-    const recordPayload = createBirdreportRecordSearchPayload(basePayload, { taxonId, taxonName });
-    const firstPage = await birdreportProxyPost("/api/birdreport/record", {
-      ...recordPayload,
-      page: 1,
-      limit: pageLimit
-    });
-    if (isBirdreportCaptchaResponse(firstPage)) {
-      throw createBirdreportCaptchaError();
-    }
-    const firstItems = normalizeBirdreportRecordPage(firstPage);
-    const total = Math.max(Number(firstPage?.count) || firstItems.length, firstItems.length);
-    const totalPages = Math.max(1, Math.ceil(total / pageLimit));
-    const pagesToFetch = Math.min(totalPages, maxPages);
-    const records = firstItems.filter((record) => record.isPublic && !record.isHiddenLocation);
-
-    for (let page = 2; page <= pagesToFetch && records.length < displayLimit; page += 1) {
-      const response = await birdreportProxyPost("/api/birdreport/record", {
-        ...recordPayload,
-        page,
-        limit: pageLimit
-      });
-      if (isBirdreportCaptchaResponse(response)) {
-        throw createBirdreportCaptchaError();
-      }
-      records.push(...normalizeBirdreportRecordPage(response).filter((record) => record.isPublic && !record.isHiddenLocation));
-    }
-
-    if (records.length || !stateFilter) {
-      return records.sort(sortBirdreportRecordsByObservationTimeDesc).slice(0, displayLimit);
-    }
-  }
-
-  return [];
+  return records.sort(sortBirdreportRecordsByObservationTimeDesc).slice(0, displayLimit);
 }
 
 function isBirdreportCaptchaResponse(response) {
@@ -3004,18 +2789,8 @@ function buildUnlockedSpeciesExportRows() {
 
 function buildUnlockedSpeciesExportFilename(extension = "csv") {
   const username = String(state.unlockedTargetUsername || "未命名用户").trim().replace(/[\\/:*?"<>|]/g, "_");
-  const stamp = formatExportTimestamp(new Date());
+  const stamp = formatCompactTimestamp(new Date());
   return `${username}-未解锁鸟种-${stamp}.${extension}`;
-}
-
-function formatExportTimestamp(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  const seconds = String(date.getSeconds()).padStart(2, "0");
-  return `${year}${month}${day}-${hours}${minutes}${seconds}`;
 }
 
 function toCsvText(rows) {
@@ -3070,87 +2845,6 @@ async function saveTextFile(filename, mimeType, content) {
   const url = URL.createObjectURL(blob);
   triggerFileDownload(filename, url, () => URL.revokeObjectURL(url));
   return filename;
-}
-
-function renderUnlockedSpeciesExportOverlay(rows) {
-  document.querySelector("[data-unlocked-export-overlay]")?.remove();
-
-  const username = escapeHtml(state.unlockedTargetUsername || "未命名用户");
-  const exportedAt = escapeHtml(formatDateTime(new Date().toISOString()));
-  const tsvText = `鸟类名称\t目\t科\n${rows.map((row) => row.join("\t")).join("\n")}`;
-  const tableRows = rows
-    .map(
-      (row, index) => `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(row[0])}</td>
-          <td>${escapeHtml(row[1])}</td>
-          <td>${escapeHtml(row[2])}</td>
-        </tr>
-      `
-    )
-    .join("");
-
-  const overlay = document.createElement("div");
-  overlay.setAttribute("data-unlocked-export-overlay", "true");
-  overlay.innerHTML = `
-    <div class="unlocked-export-backdrop"></div>
-    <div class="unlocked-export-panel" role="dialog" aria-modal="true" aria-label="未解锁鸟种导出表格">
-      <div class="unlocked-export-header">
-        <div>
-          <h3>${username} 的未解锁鸟种导出表</h3>
-          <p>字段：鸟类名称、目、科。可直接打印、复制，或手动另存页面。</p>
-        </div>
-        <button type="button" class="ghost unlocked-export-close-btn">关闭</button>
-      </div>
-      <div class="unlocked-export-meta">记录用户：${username} · 未解锁 ${rows.length} 种 · 导出时间：${exportedAt}</div>
-      <div class="unlocked-export-actions">
-        <button type="button" class="unlocked-export-print-btn">打印 / 另存为 PDF</button>
-        <button type="button" class="ghost unlocked-export-copy-btn">复制为表格文本</button>
-      </div>
-      <div class="unlocked-export-table-wrap">
-        <table class="unlocked-export-table">
-          <thead>
-            <tr>
-              <th style="width:72px;">序号</th>
-              <th>鸟类名称</th>
-              <th>目</th>
-              <th>科</th>
-            </tr>
-          </thead>
-          <tbody>${tableRows}</tbody>
-        </table>
-      </div>
-      <textarea class="unlocked-export-copy-source" spellcheck="false">${escapeHtml(tsvText)}</textarea>
-    </div>
-  `;
-  document.body.append(overlay);
-  document.body.classList.add("unlocked-export-open");
-
-  const close = () => {
-    overlay.remove();
-    document.body.classList.remove("unlocked-export-open");
-  };
-
-  overlay.querySelector(".unlocked-export-close-btn")?.addEventListener("click", close);
-  overlay.querySelector(".unlocked-export-backdrop")?.addEventListener("click", close);
-  overlay.querySelector(".unlocked-export-print-btn")?.addEventListener("click", () => window.print());
-  overlay.querySelector(".unlocked-export-copy-btn")?.addEventListener("click", async () => {
-    const source = tsvText;
-    try {
-      if (navigator.clipboard && window.isSecureContext) {
-        await navigator.clipboard.writeText(source);
-      } else {
-        const textarea = overlay.querySelector(".unlocked-export-copy-source");
-        textarea.focus();
-        textarea.select();
-        document.execCommand("copy");
-      }
-      setUnlockedSpeciesMessage("未解锁鸟种表格文本已复制，可直接粘贴到 Excel / WPS。");
-    } catch (error) {
-      setUnlockedSpeciesMessage("自动复制失败，请在弹窗里手动复制表格内容。", true);
-    }
-  });
 }
 
 function triggerFileDownload(filename, href, cleanup) {
@@ -4665,40 +4359,22 @@ async function fetchBirdreportRecordsByTaxon(species, targetDate, options = {}) 
   }
 
   const { onProgress } = options;
-  const limit = 100;
   const basePayload = createBirdreportPayload({
     province: BIRDREPORT_RARE_SPECIES_PROVINCE,
     startTime: targetDate,
     endTime: targetDate,
     state: "2"
   });
-  const firstPage = await birdreportProxyPost("/api/birdreport/record", {
-    ...basePayload,
-    taxonid: taxonId,
-    page: 1,
-    limit
-  });
-  const firstItems = normalizeBirdreportRecordPage(firstPage);
-  const total = Math.max(Number(firstPage?.count) || firstItems.length, firstItems.length);
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-
-  if (totalPages === 1) {
-    return firstItems;
-  }
-
-  const rest = [];
-  for (let page = 2; page <= totalPages; page += 1) {
-    onProgress?.(`正在加载观测地点... 第 ${page}/${totalPages} 页`);
-    const response = await birdreportProxyPost("/api/birdreport/record", {
+  return fetchBirdreportRecordPages(
+    {
       ...basePayload,
-      taxonid: taxonId,
-      page,
-      limit
-    });
-    rest.push(...normalizeBirdreportRecordPage(response));
-  }
-
-  return [...firstItems, ...rest];
+      taxonid: taxonId
+    },
+    {
+      onProgress,
+      progressLabel: "正在加载观测地点..."
+    }
+  );
 }
 
 async function fetchBirdreportRecordsForCurrentQuery(species, payload, options = {}) {
@@ -4713,7 +4389,6 @@ async function fetchBirdreportRecordsForCurrentQuery(species, payload, options =
   }
 
   const { onProgress } = options;
-  const limit = 100;
   const displayLimit = Math.max(1, Math.min(20, Number(options.limit) || 10));
   const maxPages = Math.max(1, Math.min(8, Number(options.maxPages) || 4));
   const basePayload = {
@@ -4723,35 +4398,67 @@ async function fetchBirdreportRecordsForCurrentQuery(species, payload, options =
     state: "2"
   };
 
+  const records = await fetchBirdreportRecordPages(basePayload, {
+    onProgress,
+    progressLabel: "正在加载公开地点...",
+    maxPages,
+    displayLimit,
+    stopAtDisplayLimit: true,
+    checkCaptcha: true,
+    filterRecord: isPublicBirdreportLocationRecord
+  });
+
+  return records.sort(sortBirdreportRecordsByObservationTimeDesc).slice(0, displayLimit);
+}
+
+async function fetchBirdreportRecordPages(recordPayload, options = {}) {
+  const {
+    onProgress,
+    pageLimit = 100,
+    maxPages = Number.POSITIVE_INFINITY,
+    displayLimit = Number.POSITIVE_INFINITY,
+    stopAtDisplayLimit = false,
+    checkCaptcha = false,
+    progressLabel = "正在加载观测地点...",
+    filterRecord = () => true
+  } = options;
+  const limit = Math.max(1, Number(pageLimit) || 100);
   const firstPage = await birdreportProxyPost("/api/birdreport/record", {
-    ...basePayload,
+    ...recordPayload,
     page: 1,
     limit
   });
-  if (isBirdreportCaptchaResponse(firstPage)) {
+  if (checkCaptcha && isBirdreportCaptchaResponse(firstPage)) {
     throw createBirdreportCaptchaError();
   }
 
-  const firstItems = normalizeBirdreportRecordPage(firstPage).filter((record) => record.isPublic && !record.isHiddenLocation);
+  const firstItems = normalizeBirdreportRecordPage(firstPage).filter(filterRecord);
   const total = Math.max(Number(firstPage?.count) || firstItems.length, firstItems.length);
   const totalPages = Math.max(1, Math.ceil(total / limit));
-  const pagesToFetch = Math.min(totalPages, maxPages);
+  const pagesToFetch = Math.min(totalPages, Math.max(1, Number(maxPages) || 1));
   const records = [...firstItems];
 
-  for (let page = 2; page <= pagesToFetch && records.length < displayLimit; page += 1) {
-    onProgress?.(`正在加载公开地点... 第 ${page}/${pagesToFetch} 页`);
+  for (let page = 2; page <= pagesToFetch; page += 1) {
+    if (stopAtDisplayLimit && records.length >= displayLimit) {
+      break;
+    }
+    onProgress?.(`${progressLabel} 第 ${page}/${pagesToFetch} 页`);
     const response = await birdreportProxyPost("/api/birdreport/record", {
-      ...basePayload,
+      ...recordPayload,
       page,
       limit
     });
-    if (isBirdreportCaptchaResponse(response)) {
+    if (checkCaptcha && isBirdreportCaptchaResponse(response)) {
       throw createBirdreportCaptchaError();
     }
-    records.push(...normalizeBirdreportRecordPage(response).filter((record) => record.isPublic && !record.isHiddenLocation));
+    records.push(...normalizeBirdreportRecordPage(response).filter(filterRecord));
   }
 
-  return records.sort(sortBirdreportRecordsByObservationTimeDesc).slice(0, displayLimit);
+  return records;
+}
+
+function isPublicBirdreportLocationRecord(record) {
+  return record.isPublic && !record.isHiddenLocation;
 }
 
 function normalizeBirdreportTaxonPage(response) {

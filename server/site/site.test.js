@@ -347,6 +347,120 @@ test("proxies BirdReport endpoints through the authenticated same-origin API", a
   }
 });
 
+test("rejects request bodies over the configured limit", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    await withServer(
+      {
+        database: db,
+        projectRoot: process.cwd(),
+        requestLimits: { maxBodyBytes: 16, bodyTimeoutMs: 15_000 }
+      },
+      async ({ request }) => {
+        const rejected = await request("/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+        });
+        assert.equal(rejected.status, 413);
+        assert.equal((await json(rejected)).error, "请求体过大。");
+      }
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("rate limits authenticated BirdReport proxy requests", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+    const upstreamCalls = [];
+
+    await withServer(
+      {
+        database: db,
+        projectRoot: process.cwd(),
+        birdreportRateLimit: { windowMs: 60_000, maxRequests: 1 },
+        fetchImpl: async (url, init) => {
+          upstreamCalls.push({ url, init });
+          return new Response(JSON.stringify({ success: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          });
+        }
+      },
+      async ({ request }) => {
+        const login = await request("/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+        });
+        const adminCookie = cookieFrom(login);
+
+        const first = await request("/api/birdreport/province", {
+          method: "POST",
+          headers: { "content-type": "application/json", cookie: adminCookie },
+          body: JSON.stringify({ ping: true })
+        });
+        assert.equal(first.status, 200);
+
+        const limited = await request("/api/birdreport/province", {
+          method: "POST",
+          headers: { "content-type": "application/json", cookie: adminCookie },
+          body: JSON.stringify({ ping: true })
+        });
+        assert.equal(limited.status, 429);
+        assert.equal((await json(limited)).error, "BirdReport 请求过于频繁，请稍后再试。");
+        assert.equal(upstreamCalls.length, 1);
+      }
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("logout cookie includes explicit expiry for broad browser compatibility", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+
+    await withServer({ database: db, projectRoot: process.cwd() }, async ({ request }) => {
+      const login = await request("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+      });
+      const adminCookie = cookieFrom(login);
+      const csrf = (await json(login)).csrfToken;
+
+      const logout = await request("/api/auth/logout", {
+        method: "POST",
+        headers: { cookie: adminCookie, "x-csrf-token": csrf }
+      });
+      assert.equal(logout.status, 200);
+      const setCookie = logout.headers.get("set-cookie") || "";
+      assert.match(setCookie, /Max-Age=0/);
+      assert.match(setCookie, /Expires=Thu, 01 Jan 1970 00:00:00 GMT/);
+    });
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("proxies Macaulay Library search results as normalized media metadata", async () => {
   const temp = createTempDatabase();
   try {

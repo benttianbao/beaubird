@@ -6,6 +6,7 @@
     root.BeauBirdPrepPpt = api;
   }
 })(typeof globalThis !== "undefined" ? globalThis : window, function createBirdPrepPptCore() {
+  const sharedUtils = getSharedUtils();
   const EMU_PER_INCH = 914400;
   const PPT_WIDTH = 12192000;
   const PPT_HEIGHT = 6858000;
@@ -256,14 +257,32 @@
   }
 
   function formatTimestamp(date) {
-    const value = date instanceof Date ? date : new Date(date);
-    const year = value.getFullYear();
-    const month = String(value.getMonth() + 1).padStart(2, "0");
-    const day = String(value.getDate()).padStart(2, "0");
-    const hours = String(value.getHours()).padStart(2, "0");
-    const minutes = String(value.getMinutes()).padStart(2, "0");
-    const seconds = String(value.getSeconds()).padStart(2, "0");
-    return `${year}${month}${day}-${hours}${minutes}${seconds}`;
+    return sharedUtils.formatCompactTimestamp(date);
+  }
+
+  function getSharedUtils() {
+    if (typeof globalThis !== "undefined" && globalThis.BeauBirdUtils?.formatCompactTimestamp) {
+      return globalThis.BeauBirdUtils;
+    }
+    if (typeof require === "function") {
+      try {
+        return require("./beaubird-utils");
+      } catch (_error) {
+        // Browser builds load the shared utility before this file; this fallback keeps older bundles usable.
+      }
+    }
+    return {
+      formatCompactTimestamp(date) {
+        const value = date instanceof Date ? date : new Date(date);
+        const year = value.getFullYear();
+        const month = String(value.getMonth() + 1).padStart(2, "0");
+        const day = String(value.getDate()).padStart(2, "0");
+        const hours = String(value.getHours()).padStart(2, "0");
+        const minutes = String(value.getMinutes()).padStart(2, "0");
+        const seconds = String(value.getSeconds()).padStart(2, "0");
+        return `${year}${month}${day}-${hours}${minutes}${seconds}`;
+      }
+    };
   }
 
   function slideXml(slide, slideNumber, totalSlides) {

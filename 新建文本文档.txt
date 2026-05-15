@@ -1,4 +1,0 @@
-powershell -ExecutionPolicy Bypass -File .\birdreport-proxy.ps1
-
---更新鸟种
-node .\tools\fetch-zhejiang-birdreport-species.mjs

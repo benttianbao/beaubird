@@ -1,10 +1,13 @@
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
+const { existsSync, readFileSync } = require("node:fs");
 const { test } = require("node:test");
 
 const html = readFileSync("index.html", "utf8");
 const css = readFileSync("style.css", "utf8");
 const script = readFileSync("script.js", "utf8");
+const androidBuildGradle = readFileSync("android/app/build.gradle", "utf8");
+const androidBuildGradleKts = readFileSync("android/app/build.gradle.kts", "utf8");
+const androidLocalServer = readFileSync("android/app/src/main/java/cn/beaubird/app/BeauBirdLocalServer.kt", "utf8");
 
 function indexOfRequired(source, needle) {
   const index = source.indexOf(needle);
@@ -175,4 +178,47 @@ test("bird prep embedded data script can retry after a failed load", () => {
   assert.match(script, /existingScript\.dataset\.failed === "true"[\s\S]*existingScript\.remove\(\)/);
   assert.match(script, /script\.dataset\.loaded = "true";/);
   assert.match(script, /script\.dataset\.failed = "true";/);
+});
+
+test("shared data and utility modules load before the app script", () => {
+  assert.ok(existsSync("beaubird-utils.js"));
+  assert.ok(existsSync("beaubird-data.js"));
+  const utils = readFileSync("beaubird-utils.js", "utf8");
+  const data = readFileSync("beaubird-data.js", "utf8");
+
+  const utilsIndex = indexOfRequired(html, 'src="./beaubird-utils.js');
+  const dataIndex = indexOfRequired(html, 'src="./beaubird-data.js');
+  const scriptIndex = indexOfRequired(html, 'src="./script.js');
+  assert.ok(utilsIndex < scriptIndex);
+  assert.ok(dataIndex < scriptIndex);
+  assert.match(utils, /formatCompactTimestamp/);
+  assert.match(data, /birdreportMunicipalityAreas/);
+  assert.match(data, /traditionalPhraseReplacements/);
+  assert.match(data, /traditionalCharMap/);
+  assert.match(data, /commonBirdTaxonomy/);
+});
+
+test("main script consumes shared data and removes the unused unlocked export overlay", () => {
+  assert.match(script, /window\.BeauBirdUtils/);
+  assert.match(script, /window\.BeauBirdData/);
+  assert.doesNotMatch(script, /const BIRDREPORT_MUNICIPALITY_AREAS = \[/);
+  assert.doesNotMatch(script, /const TRADITIONAL_CHAR_MAP = \{/);
+  assert.doesNotMatch(script, /const COMMON_BIRD_TAXONOMY = \{/);
+  assert.doesNotMatch(script, /function renderUnlockedSpeciesExportOverlay/);
+});
+
+test("Android assets include current shared modules and all birds profile data", () => {
+  for (const source of [androidBuildGradle, androidBuildGradleKts, androidLocalServer]) {
+    assert.match(source, /beaubird-utils\.js/);
+    assert.match(source, /beaubird-data\.js/);
+    assert.match(source, /all_birds_full\.json/);
+    assert.match(source, /all_birds_full\.js/);
+    assert.doesNotMatch(source, /china_bird_results\.js/);
+  }
+});
+
+test("Android local server rejects oversized request bodies", () => {
+  assert.match(androidLocalServer, /MAX_REQUEST_BODY_BYTES = 1024 \* 1024/);
+  assert.match(androidLocalServer, /Request body too large/);
+  assert.match(androidLocalServer, /413 -> "Payload Too Large"/);
 });

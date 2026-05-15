@@ -8,7 +8,8 @@ def generatedWebAssetsDir = layout.buildDirectory.dir('generated/beaubird-assets
 
 tasks.register('syncWebAssets', Sync) {
     from(webRootDir) {
-        include 'index.html', 'style.css', 'script.js', 'ebird-seasonal-core.js', 'bird-prep-ppt-core.js', 'china_bird_results.js'
+        include 'index.html', 'style.css', 'script.js', 'beaubird-utils.js', 'beaubird-data.js', 'ebird-seasonal-core.js', 'bird-prep-ppt-core.js'
+        include 'all_birds_full.json', 'all_birds_full.js'
         include 'vendor/jquery.min.js', 'vendor/crypto-js.min.js', 'vendor/jqueryAjax.js', 'vendor/aes.util.js'
         include 'data/zhejiang-birdreport-species.json', 'data/zhejiang-birdreport-species.js'
     }

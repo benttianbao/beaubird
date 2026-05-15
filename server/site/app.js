@@ -28,6 +28,14 @@ const DEFAULT_SECURITY = {
   maxLoginFailures: 5,
   sessionTtlMs: 12 * 60 * 60 * 1000
 };
+const DEFAULT_REQUEST_LIMITS = {
+  maxBodyBytes: 1024 * 1024,
+  bodyTimeoutMs: 15_000
+};
+const DEFAULT_BIRDREPORT_RATE_LIMIT = {
+  windowMs: 60_000,
+  maxRequests: 120
+};
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -43,6 +51,8 @@ const PUBLIC_ROOT_FILES = new Set([
   "index.html",
   "script.js",
   "style.css",
+  "beaubird-utils.js",
+  "beaubird-data.js",
   "ebird-seasonal-core.js",
   "bird-prep-ppt-core.js",
   "all_birds_full.js",
@@ -82,6 +92,11 @@ function createSiteServer(options = {}) {
   const database =
     options.database || initializeSiteDatabase(options.databasePath || join(projectRoot, "data", "site.sqlite"));
   const security = { ...DEFAULT_SECURITY, ...(options.security || {}) };
+  const requestLimits = { ...DEFAULT_REQUEST_LIMITS, ...(options.requestLimits || {}) };
+  const birdreportRateLimiter = createFixedWindowRateLimiter({
+    ...DEFAULT_BIRDREPORT_RATE_LIMIT,
+    ...(options.birdreportRateLimit || {})
+  });
   const secureCookies = Boolean(options.secureCookies || process.env.NODE_ENV === "production");
   const fetchImpl = options.fetchImpl || fetch;
 
@@ -89,14 +104,22 @@ function createSiteServer(options = {}) {
     try {
       await routeRequest({
         database,
+        birdreportRateLimiter,
         fetchImpl,
         projectRoot,
         request,
+        requestLimits,
         response,
         secureCookies,
         security
       });
     } catch (error) {
+      if (error instanceof RequestBodyTooLargeError) {
+        return json(response, 413, { error: "请求体过大。" });
+      }
+      if (error instanceof RequestBodyTimeoutError) {
+        return json(response, 408, { error: "请求体读取超时。" });
+      }
       console.error(error);
       json(response, 500, { error: "服务器内部错误。" });
     }
@@ -186,7 +209,7 @@ async function routeRequest(context) {
 
 async function handleLogin(context) {
   const { database, request, response, security } = context;
-  const body = await readJson(request);
+  const body = await readJson(request, context.requestLimits);
   const username = String(body.username || "").trim();
   const ip = getClientIp(request);
 
@@ -218,7 +241,7 @@ async function handleChangePassword(context) {
   if (!verifyCsrf(context, request)) {
     return json(response, 403, { error: "请求校验失败。" });
   }
-  const body = await readJson(request);
+  const body = await readJson(request, context.requestLimits);
   const user = getUserById(database, session.user.id);
   if (String(body.newPassword || "") !== String(body.confirmPassword || "")) {
     return json(response, 400, { error: "两次输入的新密码不一致。" });
@@ -242,7 +265,7 @@ async function handleAdminApi(context, pathname) {
     return json(response, 200, { users: listUsers(database) });
   }
   if (request.method === "POST" && pathname === "/api/admin/users") {
-    const body = await readJson(request);
+    const body = await readJson(request, context.requestLimits);
     let created;
     try {
       created = createUser(database, { username: body.username, role: body.role || "user" });
@@ -282,7 +305,13 @@ async function proxyBirdreport(context, pathname) {
   if (!endpoint) {
     return json(context.response, 404, { error: "Unknown BirdReport endpoint" });
   }
-  const body = context.request.method === "GET" || context.request.method === "HEAD" ? undefined : await readRaw(context.request);
+  if (!context.birdreportRateLimiter.consume(getBirdreportRateLimitKey(context))) {
+    return json(context.response, 429, { error: "BirdReport 请求过于频繁，请稍后再试。" });
+  }
+  const body =
+    context.request.method === "GET" || context.request.method === "HEAD"
+      ? undefined
+      : await readRaw(context.request, context.requestLimits);
   const upstream = await context.fetchImpl(endpoint.remote, {
     method: context.request.method,
     headers: {
@@ -462,6 +491,9 @@ function verifyCsrf(context, request) {
 
 function setSessionCookie(response, value, secure, maxAgeMs) {
   const parts = [`bb_session=${value}`, "Path=/", "HttpOnly", "SameSite=Lax", `Max-Age=${Math.floor(maxAgeMs / 1000)}`];
+  if (maxAgeMs <= 0) {
+    parts.push("Expires=Thu, 01 Jan 1970 00:00:00 GMT");
+  }
   if (secure) {
     parts.push("Secure");
   }
@@ -483,21 +515,108 @@ function getClientIp(request) {
   return String(request.headers["x-forwarded-for"] || request.socket.remoteAddress || "").split(",")[0].trim();
 }
 
-async function readRaw(request) {
-  const chunks = [];
-  for await (const chunk of request) {
-    chunks.push(chunk);
+async function readRaw(request, limits = DEFAULT_REQUEST_LIMITS) {
+  const maxBodyBytes = Math.max(1, Number(limits.maxBodyBytes) || DEFAULT_REQUEST_LIMITS.maxBodyBytes);
+  const bodyTimeoutMs = Math.max(1, Number(limits.bodyTimeoutMs) || DEFAULT_REQUEST_LIMITS.bodyTimeoutMs);
+  const declaredLength = Number(request.headers["content-length"]);
+  if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
+    throw new RequestBodyTooLargeError();
   }
-  return Buffer.concat(chunks);
+
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    let settled = false;
+    const timeout = setTimeout(() => {
+      finish(new RequestBodyTimeoutError());
+      request.destroy();
+    }, bodyTimeoutMs);
+
+    function finish(error, value) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      request.off("data", onData);
+      request.off("end", onEnd);
+      request.off("error", onError);
+      if (error) {
+        reject(error);
+      } else {
+        resolve(value);
+      }
+    }
+
+    function onData(chunk) {
+      total += chunk.length;
+      if (total > maxBodyBytes) {
+        finish(new RequestBodyTooLargeError());
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    }
+
+    function onEnd() {
+      finish(null, Buffer.concat(chunks));
+    }
+
+    function onError(error) {
+      finish(error);
+    }
+
+    request.on("data", onData);
+    request.on("end", onEnd);
+    request.on("error", onError);
+  });
 }
 
-async function readJson(request) {
-  const raw = await readRaw(request);
+async function readJson(request, limits) {
+  const raw = await readRaw(request, limits);
   if (!raw.length) {
     return {};
   }
   return JSON.parse(raw.toString("utf8"));
 }
+
+function getBirdreportRateLimitKey(context) {
+  return context.session?.sessionId || getClientIp(context.request) || "anonymous";
+}
+
+function createFixedWindowRateLimiter(config) {
+  const windowMs = Math.max(1, Number(config.windowMs) || DEFAULT_BIRDREPORT_RATE_LIMIT.windowMs);
+  const maxRequests = Math.max(1, Number(config.maxRequests) || DEFAULT_BIRDREPORT_RATE_LIMIT.maxRequests);
+  const buckets = new Map();
+
+  return {
+    consume(key) {
+      const now = Date.now();
+      const bucketKey = String(key || "anonymous");
+      let bucket = buckets.get(bucketKey);
+      if (!bucket || bucket.resetAt <= now) {
+        bucket = { count: 0, resetAt: now + windowMs };
+        buckets.set(bucketKey, bucket);
+      }
+      bucket.count += 1;
+      if (buckets.size > 1000) {
+        cleanupRateLimitBuckets(buckets, now);
+      }
+      return bucket.count <= maxRequests;
+    }
+  };
+}
+
+function cleanupRateLimitBuckets(buckets, now) {
+  for (const [key, bucket] of buckets.entries()) {
+    if (bucket.resetAt <= now) {
+      buckets.delete(key);
+    }
+  }
+}
+
+class RequestBodyTooLargeError extends Error {}
+class RequestBodyTimeoutError extends Error {}
 
 function setBaseHeaders(response, contentType) {
   response.setHeader("Content-Type", contentType);

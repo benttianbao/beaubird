@@ -181,6 +181,8 @@ android/app/build/outputs/apk/debug/app-debug.apk
 .
 ├── index.html                      # 主页面
 ├── script.js                       # 页面逻辑、BirdReport/eBird 查询、缓存和监测逻辑
+├── beaubird-utils.js               # 浏览器和 Node 共用的小工具函数
+├── beaubird-data.js                # 页面共用静态数据
 ├── style.css                       # 页面和 Android WebView 样式
 ├── ebird-seasonal-core.js          # eBird 浙江当季分析逻辑
 ├── bird-prep-ppt-core.js           # 鸟类预习 PPT 匹配和 PPTX 生成逻辑
@@ -197,6 +199,20 @@ android/app/build/outputs/apk/debug/app-debug.apk
 ├── tools/                          # 数据、测试和辅助工具
 ├── vendor/                         # 本地前端依赖
 └── android/                        # Android WebView 应用
+```
+
+## 维护命令
+
+如果 PowerShell 执行策略阻止直接启动本地 BirdReport 代理，可以临时绕过当前命令：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\birdreport-proxy.ps1
+```
+
+刷新浙江 BirdReport 鸟种名录数据：
+
+```powershell
+node .\tools\fetch-zhejiang-birdreport-species.mjs
 ```
 
 ## 测试

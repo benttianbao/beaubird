@@ -117,6 +117,8 @@ class BeauBirdLocalServer(private val context: Context) {
           else -> jsonResponse(404, """{"success":false,"error":"Unknown endpoint"}""")
         }
         writeResponse(client.getOutputStream(), response)
+      } catch (_: RequestBodyTooLargeException) {
+        writeResponse(client.getOutputStream(), jsonResponse(413, """{"success":false,"error":"Request body too large"}"""))
       } catch (error: Exception) {
         Log.e(TAG, "Failed to handle local request", error)
         writeResponse(client.getOutputStream(), jsonResponse(500, """{"success":false,"error":"${escapeJson(error.message ?: "Internal server error")}"}"""))
@@ -154,6 +156,9 @@ class BeauBirdLocalServer(private val context: Context) {
     }
 
     val contentLength = headers["content-length"]?.toIntOrNull() ?: 0
+    if (contentLength > MAX_REQUEST_BODY_BYTES) {
+      throw RequestBodyTooLargeException()
+    }
     val bodyChars = CharArray(contentLength)
     var readTotal = 0
     while (readTotal < contentLength) {
@@ -377,6 +382,7 @@ class BeauBirdLocalServer(private val context: Context) {
     return when (statusCode) {
       200 -> "OK"
       400 -> "Bad Request"
+      413 -> "Payload Too Large"
       404 -> "Not Found"
       405 -> "Method Not Allowed"
       500 -> "Internal Server Error"
@@ -410,19 +416,25 @@ class BeauBirdLocalServer(private val context: Context) {
     val body: ByteArray
   )
 
+  private class RequestBodyTooLargeException : RuntimeException()
+
   companion object {
     private const val TAG = "BeauBirdLocalServer"
     private const val HOST = "127.0.0.1"
     private const val PORT = 8787
+    private const val MAX_REQUEST_BODY_BYTES = 1024 * 1024
 
     private val STATIC_ASSET_PATHS = mapOf(
       "/" to "index.html",
       "/index.html" to "index.html",
       "/style.css" to "style.css",
       "/script.js" to "script.js",
+      "/beaubird-utils.js" to "beaubird-utils.js",
+      "/beaubird-data.js" to "beaubird-data.js",
       "/ebird-seasonal-core.js" to "ebird-seasonal-core.js",
       "/bird-prep-ppt-core.js" to "bird-prep-ppt-core.js",
-      "/china_bird_results.js" to "china_bird_results.js",
+      "/all_birds_full.json" to "all_birds_full.json",
+      "/all_birds_full.js" to "all_birds_full.js",
       "/vendor/jquery.min.js" to "vendor/jquery.min.js",
       "/vendor/crypto-js.min.js" to "vendor/crypto-js.min.js",
       "/vendor/jqueryAjax.js" to "vendor/jqueryAjax.js",
@@ -436,9 +448,12 @@ class BeauBirdLocalServer(private val context: Context) {
       "/index.html" to "text/html; charset=UTF-8",
       "/style.css" to "text/css; charset=UTF-8",
       "/script.js" to "application/javascript; charset=UTF-8",
+      "/beaubird-utils.js" to "application/javascript; charset=UTF-8",
+      "/beaubird-data.js" to "application/javascript; charset=UTF-8",
       "/ebird-seasonal-core.js" to "application/javascript; charset=UTF-8",
       "/bird-prep-ppt-core.js" to "application/javascript; charset=UTF-8",
-      "/china_bird_results.js" to "application/javascript; charset=UTF-8",
+      "/all_birds_full.json" to "application/json; charset=UTF-8",
+      "/all_birds_full.js" to "application/javascript; charset=UTF-8",
       "/vendor/jquery.min.js" to "application/javascript; charset=UTF-8",
       "/vendor/crypto-js.min.js" to "application/javascript; charset=UTF-8",
       "/vendor/jqueryAjax.js" to "application/javascript; charset=UTF-8",
