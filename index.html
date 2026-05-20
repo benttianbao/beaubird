@@ -4,57 +4,34 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <title>BeauBird 观鸟助手</title>
-    <link rel="stylesheet" href="./style.css?v=20260513-0001" />
+    <link rel="stylesheet" href="./style.css?v=20260520-0001" />
   </head>
   <body>
-    <header class="hero workspace-hero">
-      <div class="hero-main">
-        <div class="hero-title-block">
-          <p class="hero-kicker">BeauBird Workspace</p>
-          <h1>BeauBird 观鸟助手</h1>
-          <p class="hero-subtitle">面向观鸟查询、预习和监测的专业工作台，集中处理 eBird 区域记录、BirdReport 检索、课件生成和浙江稀有鸟检查。</p>
-        </div>
-        <div class="hero-status-grid" aria-label="工作台能力概览">
-          <div class="hero-stat">
-            <strong>同源代理</strong>
-            <span>站点部署可直连 BirdReport</span>
+    <div class="workspace-shell">
+      <aside class="workspace-sidebar" aria-label="工作台工具导航">
+        <header class="hero workspace-hero">
+          <div class="hero-title-block">
+            <p class="hero-kicker">BeauBird Workspace</p>
+            <h1>BeauBird 观鸟助手</h1>
+            <p class="hero-subtitle">面向观鸟查询、预习和监测的专业工作台。</p>
           </div>
-          <div class="hero-stat">
-            <strong>预习 PPT</strong>
-            <span>地区鸟种筛选后生成课件</span>
-          </div>
-          <div class="hero-stat">
-            <strong>浙江监测</strong>
-            <span>稀有记录按日期检查</span>
-          </div>
-        </div>
-      </div>
-      <div class="hero-badges" aria-label="核心模块">
-        <span class="hero-badge">eBird 区域</span>
-        <span class="hero-badge">BirdReport 查询</span>
-        <span class="hero-badge">预习 PPT</span>
-        <span class="hero-badge">未解锁核对</span>
-        <span class="hero-badge">稀有鸟监测</span>
-      </div>
-    </header>
+        </header>
 
-    <nav class="app-quicknav workspace-nav" aria-label="首页快捷导航">
-      <span class="workspace-nav-label">工具导航</span>
-      <div class="workspace-nav-items">
-        <button class="app-quicknav-btn is-active" data-target="monitorSection" type="button">监测</button>
-        <button class="app-quicknav-btn" data-target="unlockedSection" type="button">未解锁</button>
-        <button class="app-quicknav-btn" data-target="birdPrepSection" type="button">预习 PPT</button>
-        <button class="app-quicknav-btn" data-target="ebirdSection" type="button">eBird</button>
-        <button class="app-quicknav-btn" data-target="birdreportSection" type="button">BirdReport</button>
-      </div>
-    </nav>
+        <nav class="app-quicknav workspace-nav" aria-label="首页快捷导航">
+          <span class="workspace-nav-label">工具导航</span>
+          <div class="workspace-nav-items">
+            <button class="app-quicknav-btn is-active" data-target="monitorSection" type="button">监测</button>
+            <button class="app-quicknav-btn" data-target="unlockedSection" type="button">未解锁</button>
+            <button class="app-quicknav-btn" data-target="birdPrepSection" type="button">预习 PPT</button>
+            <button class="app-quicknav-btn" data-target="ebirdSection" type="button">eBird</button>
+            <button class="app-quicknav-btn" data-target="birdreportSection" type="button">BirdReport</button>
+          </div>
+        </nav>
+      </aside>
 
-    <main class="container">
+      <main class="container workspace-content">
       <section id="monitorSection" class="panel birdreport-monitor-panel">
         <h2>浙江稀有鸟种监测</h2>
-        <p class="hint">
-          基线规则固定为“仅浙江省、不限日期、记录次数小于等于 500”。名单会保存在当前浏览器中；页面保持打开时，会每隔 1 小时自动检查一次所选日期的浙江数据。
-        </p>
         <div class="controls birdreport-monitor-controls">
           <div class="control">
             <label for="zhejiangRareMonitorDate">检查日期</label>
@@ -82,9 +59,6 @@
 
       <section id="unlockedSection" class="panel birdreport-unlocked-panel">
         <h2>未解锁鸟种查询</h2>
-        <p class="hint">
-          输入记录用户姓名，按浙江 588 种鸟种名录核对该用户还缺哪些鸟种。缺口列表按浙江历史记录数从多到少排列，地点按报告编号顺序快速加载。
-        </p>
         <div class="controls birdreport-unlocked-controls">
           <div class="control birdreport-unlocked-user-control">
             <label for="birdreportUnlockedUsername">记录用户</label>
@@ -108,10 +82,6 @@
         </p>
 
         <div class="controls bird-prep-controls">
-          <div class="control bird-prep-proxy-control">
-            <label for="birdPrepProxyUrl">代理地址</label>
-            <input id="birdPrepProxyUrl" type="text" value="http://127.0.0.1:8787" />
-          </div>
           <div class="control">
             <label for="birdPrepProvince">省</label>
             <select id="birdPrepProvince">
@@ -255,16 +225,12 @@
       </section>
 
       <section id="birdreportSection" class="panel">
-        <h2>BirdReport 代理查询</h2>
+        <h2>BirdReport 查询</h2>
         <p class="hint">
-          通过代理请求 BirdReport，按省 / 市 / 区、观测地点和时间范围查看符合条件的鸟种。网页版可连接本地代理，Android APK 版可直接使用内置代理。
+          按省 / 市 / 区、观测地点和时间范围查看符合条件的鸟种。
         </p>
 
         <div class="controls birdreport-controls">
-          <div class="control birdreport-proxy-control">
-            <label for="birdreportProxyUrl">代理地址</label>
-            <input id="birdreportProxyUrl" type="text" value="http://127.0.0.1:8787" />
-          </div>
           <div class="control">
             <label for="birdreportStartDate">开始日期</label>
             <input id="birdreportStartDate" type="date" />
@@ -298,11 +264,10 @@
         </div>
 
         <div class="actions birdreport-actions">
-          <button id="queryBirdreportProxyBtn">通过代理查询鸟种</button>
+          <button id="queryBirdreportProxyBtn">查询鸟种</button>
           <button id="openBirdreportTaxonBtn" class="ghost">打开 BirdReport 结果页</button>
           <button id="openBirdreportSearchBtn" class="ghost">打开 BirdReport 查询页</button>
         </div>
-        <p id="birdreportProxyHint" class="hint compact">网页版需要先在本机运行代理脚本；Android APK 版会自动启用应用内代理。</p>
         <p id="birdreportMessage" class="message" aria-live="polite"></p>
         <div id="birdreportSpeciesSummary" class="stats"></div>
         <div id="birdreportSpeciesContainer" class="records cards"></div>
@@ -318,7 +283,8 @@
 
       </section>
 
-    </main>
+      </main>
+    </div>
     <script src="./vendor/jquery.min.js?v=20260507-0004"></script>
     <script src="./vendor/crypto-js.min.js?v=20260507-0004"></script>
     <script src="./vendor/jqueryAjax.js?v=20260507-0004"></script>
@@ -327,7 +293,7 @@
     <script src="./beaubird-utils.js?v=20260515-0002"></script>
     <script src="./beaubird-data.js?v=20260515-0002"></script>
     <script src="./ebird-seasonal-core.js?v=20260507-0004"></script>
-    <script src="./bird-prep-ppt-core.js?v=20260515-0001"></script>
-    <script src="./script.js?v=20260515-0001"></script>
+    <script src="./bird-prep-ppt-core.js?v=20260517-0001"></script>
+    <script src="./script.js?v=20260520-0001"></script>
   </body>
 </html>

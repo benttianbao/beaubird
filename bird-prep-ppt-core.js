@@ -343,7 +343,7 @@
     );
     shapes.push(
       textShape(9, "简介 正文", sectionX + inch(0.18), sectionY + inch(0.36), sectionWidth - inch(0.36), overviewHeight - inch(0.46), [
-        paragraph([{ text: limitText(slide.overview, SECTION_LIMITS.overview), size: 900, color: "223024" }])
+        paragraph([{ text: limitText(slide.overview, SECTION_LIMITS.overview), size: 1200, color: "223024" }])
       ])
     );
     (Array.isArray(slide.sections) ? slide.sections : []).slice(0, 4).forEach((section, index) => {
@@ -357,7 +357,7 @@
       );
       shapes.push(
         textShape(shapeId + 2, `${section.title} 正文`, sectionX + inch(0.18), y + inch(0.36), sectionWidth - inch(0.36), sectionHeight - inch(0.46), [
-          paragraph([{ text: limitText(section.body, 135), size: 900, color: "223024" }])
+          paragraph([{ text: limitText(section.body, 135), size: 1200, color: "223024" }])
         ])
       );
     });

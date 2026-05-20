@@ -4,15 +4,15 @@ const { test } = require("node:test");
 
 const script = readFileSync("script.js", "utf8");
 
-test("direct file usage keeps the local BirdReport proxy default", () => {
+test("direct file usage keeps the local BirdReport backend default", () => {
   assert.match(
     script,
     /window\.location\.protocol === "file:"[\s\S]*?return DEFAULT_BIRDREPORT_PROXY_URL;/,
-    "direct webpage usage should prefill the local BirdReport proxy"
+    "direct webpage usage should keep the local BirdReport backend fallback"
   );
 });
 
-test("hosted web usage defaults to same-origin BirdReport proxy", () => {
+test("hosted web usage defaults to same-origin BirdReport backend", () => {
   assert.match(
     script,
     /return window\.location\.origin;/,
@@ -20,17 +20,15 @@ test("hosted web usage defaults to same-origin BirdReport proxy", () => {
   );
 });
 
-test("hosted web usage ignores stale local proxy storage", () => {
+test("birdreport requests always use the default backend instead of proxy address inputs", () => {
   assert.match(
     script,
-    /getUsableStoredBirdreportProxyUrl\(stored\) \|\| getDefaultBirdreportProxyUrl\(\)/,
-    "hydration should filter stale local proxy values before falling back"
+    /function getBirdreportProxyBaseUrl\(\) \{[\s\S]*?return normalizeProxyBaseUrl\(getDefaultBirdreportProxyUrl\(\)\);[\s\S]*?\}/,
+    "BirdReport requests should resolve their base URL from the default backend"
   );
-  assert.match(
-    script,
-    /LOCAL_BIRDREPORT_PROXY_HOSTS\.has\(url\.hostname\) && url\.port === "8787"[\s\S]*?return "";/,
-    "stored http://127.0.0.1:8787 should not break hosted deployments"
-  );
+  assert.doesNotMatch(script, /getUsableStoredBirdreportProxyUrl/);
+  assert.doesNotMatch(script, /elements\.birdreportProxyUrl\.value/);
+  assert.doesNotMatch(script, /elements\.birdPrepProxyUrl\.value/);
 });
 
 test("local proxy exposes read-only Macaulay Library media endpoints", () => {

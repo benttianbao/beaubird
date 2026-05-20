@@ -6,28 +6,33 @@ function pageShell(title, body, extraScript = "") {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${title}</title>
     <style>
-      :root { color-scheme: light; --ink:#17211b; --muted:#5f6f67; --line:#d9e4de; --brand:#1f7a5a; --bg:#f6faf8; --danger:#b3261e; }
+      :root { color-scheme: light; --bg:oklch(96.8% 0.006 190); --surface:oklch(99% 0.004 190); --sidebar:oklch(94.8% 0.008 190); --ink:oklch(24% 0.018 215); --muted:oklch(47% 0.018 215); --line:oklch(87% 0.01 205); --line-strong:oklch(76% 0.014 205); --brand:oklch(43% 0.075 178); --brand-strong:oklch(31% 0.062 178); --brand-soft:oklch(93.5% 0.028 178); --danger:oklch(45% 0.13 28); --radius:8px; --shadow-subtle:0 1px 2px rgba(24,36,38,.06); }
       * { box-sizing: border-box; }
-      body { margin:0; min-height:100vh; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color:var(--ink); background:var(--bg); }
-      main { width:min(1080px, calc(100vw - 32px)); margin:0 auto; padding:48px 0; }
-      .auth { width:min(420px, calc(100vw - 32px)); margin:8vh auto; background:#fff; border:1px solid var(--line); border-radius:8px; padding:28px; box-shadow:0 18px 48px rgba(20,50,36,.08); }
-      h1 { margin:0 0 8px; font-size:28px; letter-spacing:0; }
-      h2 { margin:0 0 16px; font-size:22px; }
+      body { margin:0; min-height:100vh; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; color:var(--ink); background:var(--bg); }
+      .auth-shell { min-height:100vh; display:grid; place-items:center; padding:32px 16px; }
+      .auth-card { width:min(420px, 100%); background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:28px; box-shadow:var(--shadow-subtle); }
+      .admin-shell { width:min(1120px, calc(100vw - 32px)); margin:0 auto; padding:28px 0 40px; }
+      h1 { margin:0 0 8px; font-size:1.45rem; line-height:1.18; letter-spacing:0; }
+      h2 { margin:0 0 14px; font-size:1.05rem; line-height:1.25; }
       p { color:var(--muted); line-height:1.6; }
-      label { display:block; margin:16px 0 6px; font-weight:650; }
-      input, select { width:100%; height:42px; border:1px solid var(--line); border-radius:6px; padding:0 12px; font:inherit; background:#fff; }
-      button { min-height:40px; border:0; border-radius:6px; padding:0 14px; font:inherit; font-weight:700; color:#fff; background:var(--brand); cursor:pointer; }
-      button.secondary { color:var(--brand); background:#e6f3ed; }
-      button.danger { background:var(--danger); }
-      .topbar { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:24px; }
-      .panel { background:#fff; border:1px solid var(--line); border-radius:8px; padding:20px; margin-bottom:18px; }
-      .grid { display:grid; grid-template-columns:1fr 160px auto; gap:12px; align-items:end; }
-      table { width:100%; border-collapse:collapse; background:#fff; }
-      th, td { padding:12px; border-bottom:1px solid var(--line); text-align:left; }
-      th { font-size:13px; color:var(--muted); }
+      label { display:block; margin:16px 0 6px; font-weight:700; font-size:.86rem; }
+      input, select { width:100%; height:40px; border:1px solid var(--line); border-radius:6px; padding:0 11px; font:inherit; color:var(--ink); background:var(--surface); }
+      input:focus, select:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px color-mix(in oklch, var(--brand) 18%, transparent); }
+      button { min-height:38px; border:1px solid transparent; border-radius:6px; padding:0 13px; font:inherit; font-weight:700; color:var(--surface); background:var(--brand); cursor:pointer; box-shadow:var(--shadow-subtle); }
+      button.secondary { color:var(--brand-strong); background:var(--brand-soft); border-color:color-mix(in oklch, var(--brand) 18%, var(--line)); box-shadow:none; }
+      button.danger { background:oklch(96% 0.018 28); color:var(--danger); border-color:oklch(82% 0.052 28); box-shadow:none; }
+      button:focus-visible { outline:none; box-shadow:0 0 0 3px color-mix(in oklch, var(--brand) 18%, transparent); }
+      .topbar { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; padding-bottom:16px; border-bottom:1px solid var(--line); }
+      .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:18px; margin-bottom:14px; box-shadow:none; }
+      .grid { display:grid; grid-template-columns:minmax(0, 1fr) 160px auto; gap:12px; align-items:end; }
+      .admin-table-wrap { overflow:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); }
+      table { width:100%; min-width:720px; border-collapse:collapse; background:var(--surface); }
+      th, td { padding:11px 12px; border-bottom:1px solid var(--line); text-align:left; }
+      th { font-size:13px; color:var(--muted); background:var(--sidebar); }
+      tr:last-child td { border-bottom:0; }
       .actions { display:flex; gap:8px; flex-wrap:wrap; }
       .message { min-height:24px; margin-top:14px; color:var(--danger); }
-      .secret { margin-top:14px; padding:12px; border:1px solid #b8dccd; border-radius:6px; background:#edf8f3; color:#184b38; font-family:ui-monospace, SFMono-Regular, Consolas, monospace; overflow:auto; }
+      .secret { margin-top:14px; padding:12px; border:1px solid color-mix(in oklch, var(--brand) 24%, var(--line)); border-radius:6px; background:var(--brand-soft); color:var(--brand-strong); font-family:ui-monospace, SFMono-Regular, Consolas, monospace; overflow:auto; }
       @media (max-width: 720px) { .grid { grid-template-columns:1fr; } .topbar { align-items:flex-start; flex-direction:column; } }
     </style>
   </head>
@@ -38,16 +43,18 @@ function pageShell(title, body, extraScript = "") {
 function loginPage() {
   return pageShell(
     "登录 BeauBird",
-    `<form class="auth" id="loginForm">
-      <h1>BeauBird 登录</h1>
-      <p>请输入管理员分配的账号和密码。</p>
-      <label for="username">用户名</label>
-      <input id="username" name="username" autocomplete="username" required />
-      <label for="password">密码</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required />
-      <button type="submit">登录</button>
-      <p class="message" id="message" role="status"></p>
-    </form>`,
+    `<main class="auth-shell">
+      <form class="auth-card" id="loginForm">
+        <h1>BeauBird 登录</h1>
+        <p>请输入管理员分配的账号和密码。</p>
+        <label for="username">用户名</label>
+        <input id="username" name="username" autocomplete="username" required />
+        <label for="password">密码</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <button type="submit">登录</button>
+        <p class="message" id="message" role="status"></p>
+      </form>
+    </main>`,
     `<script>
       document.querySelector("#loginForm").addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -76,16 +83,18 @@ function loginPage() {
 function changePasswordPage() {
   return pageShell(
     "修改密码",
-    `<form class="auth" id="changeForm">
-      <h1>修改密码</h1>
-      <p>首次登录或密码被重置后，需要先设置新密码。</p>
-      <label for="newPassword">新密码</label>
-      <input id="newPassword" type="password" autocomplete="new-password" required />
-      <label for="confirmPassword">再次输入新密码</label>
-      <input id="confirmPassword" type="password" autocomplete="new-password" required />
-      <button type="submit">保存新密码</button>
-      <p class="message" id="message" role="status"></p>
-    </form>`,
+    `<main class="auth-shell">
+      <form class="auth-card" id="changeForm">
+        <h1>修改密码</h1>
+        <p>首次登录或密码被重置后，需要先设置新密码。</p>
+        <label for="newPassword">新密码</label>
+        <input id="newPassword" type="password" autocomplete="new-password" required />
+        <label for="confirmPassword">再次输入新密码</label>
+        <input id="confirmPassword" type="password" autocomplete="new-password" required />
+        <button type="submit">保存新密码</button>
+        <p class="message" id="message" role="status"></p>
+      </form>
+    </main>`,
     `<script>
       document.querySelector("#changeForm").addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -111,7 +120,7 @@ function changePasswordPage() {
 function adminPage(csrfToken = "") {
   return pageShell(
     "BeauBird 后台",
-    `<main>
+    `<main class="admin-shell">
       <div class="topbar">
         <div>
           <h1>BeauBird 后台</h1>
@@ -122,7 +131,7 @@ function adminPage(csrfToken = "") {
           <button class="secondary" id="logoutBtn" type="button">退出</button>
         </div>
       </div>
-      <section class="panel">
+      <section class="panel admin-panel">
         <h2>新增用户</h2>
         <form class="grid" id="createForm">
           <div>
@@ -141,12 +150,14 @@ function adminPage(csrfToken = "") {
         <div id="secret" class="secret" hidden></div>
         <p id="message" class="message"></p>
       </section>
-      <section class="panel">
+      <section class="panel admin-panel">
         <h2>用户列表</h2>
-        <table>
-          <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>状态</th><th>下次登录</th><th>操作</th></tr></thead>
-          <tbody id="users"></tbody>
-        </table>
+        <div class="admin-table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>状态</th><th>下次登录</th><th>操作</th></tr></thead>
+            <tbody id="users"></tbody>
+          </table>
+        </div>
       </section>
     </main>`,
     `<script>

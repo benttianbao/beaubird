@@ -20,13 +20,28 @@ assert(
   "top-level unlocked table toggle styles should be removed"
 );
 assert(
-  script.includes("unlocked-floating-table-toggle"),
-  "floating unlocked table toggle should remain in the module"
+  script.includes("unlocked-module-toggle"),
+  "unlocked table toggle should move into the module header"
 );
 assert(
-  style.includes(".unlocked-floating-actions") &&
-    style.includes("position: sticky"),
-  "floating unlocked table toggle should remain sticky"
+  !script.includes("unlocked-floating-table-toggle"),
+  "floating unlocked table toggle should be removed from rendering"
+);
+assert(
+  !style.includes(".unlocked-floating-actions") &&
+    !style.includes(".unlocked-floating-table-toggle"),
+  "floating unlocked table toggle styles should be removed"
+);
+assert(
+  script.includes("unlocked-species-module") &&
+    script.includes("unlocked-species-scroll"),
+  "unlocked species list should render as a contained scroll module"
+);
+assert(
+  style.includes(".unlocked-species-scroll") &&
+    style.includes("overflow-y: auto") &&
+    style.includes("overscroll-behavior: contain"),
+  "unlocked species module should have an internal scroll region"
 );
 
 console.log("Unlocked toggle UI contract OK");

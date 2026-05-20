@@ -186,6 +186,28 @@ test("createBirdPrepPptx renders overview above the existing right-column sectio
   assert.ok(overviewIndex < appearanceIndex);
 });
 
+test("createBirdPrepPptx renders card body text at 12pt", () => {
+  const bytes = createBirdPrepPptx([
+    {
+      speciesName: "黑脸琵鹭",
+      latinName: "Platalea minor",
+      overview: "黑脸琵鹭是依赖潮间带和河口湿地的珍稀涉禽。",
+      sections: [
+        { title: "外形", body: "大型白色涉禽。" },
+        { title: "识别", body: "黑脸和匙形嘴。" },
+        { title: "习性生境", body: "浅水湿地觅食。" },
+        { title: "分布 / 繁殖 / 叫声", body: "东亚沿海迁徙。" }
+      ]
+    }
+  ]);
+
+  const slideXml = readStoredZipEntry(bytes, "ppt/slides/slide1.xml").toString("utf8");
+  const cardBodyRuns = slideXml.match(/sz="1200"/g) || [];
+
+  assert.equal(cardBodyRuns.length, 5);
+  assert.doesNotMatch(slideXml, /sz="900"/);
+});
+
 test("createBirdPrepPptx embeds bird photos with media relationships and attribution", () => {
   const photoBytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0x00, 0xff, 0xd9]);
   const bytes = createBirdPrepPptx([

@@ -5,6 +5,7 @@ const { test } = require("node:test");
 const html = readFileSync("index.html", "utf8");
 const css = readFileSync("style.css", "utf8");
 const script = readFileSync("script.js", "utf8");
+const sitePages = readFileSync("server/site/pages.js", "utf8");
 const androidBuildGradle = readFileSync("android/app/build.gradle", "utf8");
 const androidBuildGradleKts = readFileSync("android/app/build.gradle.kts", "utf8");
 const androidLocalServer = readFileSync("android/app/src/main/java/cn/beaubird/app/BeauBirdLocalServer.kt", "utf8");
@@ -15,33 +16,85 @@ function indexOfRequired(source, needle) {
   return index;
 }
 
-test("main page presents BeauBird as a compact professional workspace", () => {
+test("main page presents BeauBird as a professional split workspace", () => {
   assert.match(html, /<header class="hero workspace-hero">/);
   assert.match(html, /BeauBird Workspace/);
-  assert.match(html, /class="hero-status-grid"/);
+  assert.match(html, /<div class="workspace-shell">/);
+  assert.match(html, /<aside class="workspace-sidebar" aria-label="工作台工具导航">/);
+  assert.match(html, /<main class="container workspace-content">/);
+  assert.doesNotMatch(html, /class="hero-status-grid"/);
+  assert.doesNotMatch(html, /class="hero-status-list"/);
+  assert.doesNotMatch(html, /BirdReport 同源查询/);
+  assert.doesNotMatch(html, /地区鸟种预习/);
+  assert.doesNotMatch(html, /浙江稀有记录/);
+  assert.doesNotMatch(html, /基线规则固定为/);
+  assert.doesNotMatch(html, /每隔 1 小时自动检查/);
+  assert.doesNotMatch(html, /输入记录用户姓名，按浙江 588 种鸟种名录核对该用户还缺哪些鸟种。/);
+  assert.doesNotMatch(html, /缺口列表按浙江历史记录数从多到少排列/);
   assert.match(html, /class="workspace-nav-label">工具导航<\/span>/);
 });
 
-test("web quick navigation is visible and sticky outside Android WebView", () => {
-  assert.match(css, /\.app-quicknav\s*\{[\s\S]*display: grid;[\s\S]*position: sticky;[\s\S]*top: 0;/);
+test("zhejiang rare bird monitor starts without instructional placeholder copy", () => {
+  assert.doesNotMatch(script, /先保存一次浙江稀有鸟种名单，再开启每小时监测。/);
+});
+
+test("desktop workspace uses a sticky sidebar navigation", () => {
+  assert.match(css, /\.workspace-shell\s*\{[\s\S]*grid-template-columns: 224px minmax\(0, 1fr\);/);
+  assert.match(css, /\.workspace-sidebar\s*\{[\s\S]*position: sticky;[\s\S]*top: 0;/);
+  assert.match(css, /\.app-quicknav\s*\{[\s\S]*display: grid;[\s\S]*position: static;/);
   assert.doesNotMatch(css, /\.app-quicknav\s*\{\s*display: none;\s*\}/);
 });
 
-test("main page uses the cool teal professional visual system", () => {
-  assert.match(css, /--bg: #eef3f6;/);
-  assert.match(css, /--primary: #0f766e;/);
+test("main page uses a restrained product visual system", () => {
+  assert.match(css, /--bg: oklch\(96\.8% 0\.006 190\);/);
+  assert.match(css, /--surface: oklch\(99% 0\.004 190\);/);
+  assert.match(css, /--sidebar: oklch\(94\.8% 0\.008 190\);/);
   assert.match(css, /--radius: 8px;/);
-  assert.match(css, /--shadow-subtle: 0 10px 28px rgba\(15, 38, 54, 0\.08\);/);
-  assert.match(css, /\.panel\s*\{[\s\S]*border-radius: var\(--radius\);[\s\S]*box-shadow: var\(--shadow-subtle\);/);
+  assert.match(css, /--shadow-subtle: 0 1px 2px rgba\(24, 36, 38, 0\.06\);/);
+  assert.match(css, /\.panel\s*\{[\s\S]*border-radius: var\(--radius\);[\s\S]*box-shadow: none;/);
 });
 
-test("unlocked floating table toggle sticks below the workspace navigation", () => {
-  assert.match(css, /--sticky-nav-offset: 58px;/);
-  assert.match(css, /\.app-quicknav\s*\{[\s\S]*top: 0;[\s\S]*z-index: 12;/);
+test("mobile workspace falls back to a horizontal sticky tool navigation", () => {
+  assert.match(css, /@media \(max-width: 860px\) \{[\s\S]*\.workspace-shell\s*\{[\s\S]*grid-template-columns: 1fr;/);
+  assert.match(css, /@media \(max-width: 860px\) \{[\s\S]*\.workspace-sidebar\s*\{[\s\S]*position: sticky;[\s\S]*top: 0;/);
+  assert.match(css, /@media \(max-width: 860px\) \{[\s\S]*\.workspace-nav-items\s*\{[\s\S]*grid-auto-flow: column;[\s\S]*overflow-x: auto;/);
+});
+
+test("unlocked species results render as a contained scroll module", () => {
+  assert.match(script, /const UNLOCKED_SPECIES_VISIBLE_ROW_COUNT = 15;/);
+  assert.match(script, /unlocked-species-module/);
+  assert.match(script, /unlocked-species-scroll/);
+  assert.match(script, /unlocked-module-toggle/);
+  assert.doesNotMatch(script, /unlocked-floating-table-toggle/);
+  assert.match(css, /\.unlocked-species-module\s*\{/);
+  assert.match(css, /--unlocked-visible-rows: 15;/);
   assert.match(
     css,
-    /\.unlocked-floating-actions\s*\{[\s\S]*top: calc\(var\(--sticky-nav-offset\) \+ 8px\);[\s\S]*z-index: 10;/
+    /\.unlocked-species-scroll\s*\{[\s\S]*max-height: calc\([\s\S]*overflow-y: auto;[\s\S]*overscroll-behavior: contain;/
   );
+});
+
+test("birdreport tools use the default backend without proxy address controls", () => {
+  assert.doesNotMatch(html, /birdPrepProxyUrl/);
+  assert.doesNotMatch(html, /birdreportProxyUrl/);
+  assert.doesNotMatch(html, /代理地址/);
+  assert.doesNotMatch(html, /通过代理查询鸟种/);
+  assert.doesNotMatch(html, /网页版需要先在本机运行代理脚本/);
+  assert.doesNotMatch(html, /BirdReport 代理查询/);
+  assert.doesNotMatch(script, /elements\.birdreportProxyUrl\.value/);
+  assert.doesNotMatch(script, /elements\.birdPrepProxyUrl\.value/);
+  assert.doesNotMatch(script, /通过代理查询鸟种/);
+  assert.match(script, /function getBirdreportProxyBaseUrl\(\)/);
+});
+
+test("site auth and admin pages share the BeauBird product shell", () => {
+  assert.match(sitePages, /auth-shell/);
+  assert.match(sitePages, /auth-card/);
+  assert.match(sitePages, /admin-shell/);
+  assert.match(sitePages, /admin-table-wrap/);
+  assert.match(sitePages, /--surface:oklch\(99% 0\.004 190\);/);
+  assert.match(sitePages, /--sidebar:oklch\(94\.8% 0\.008 190\);/);
+  assert.match(sitePages, /button\.danger/);
 });
 
 test("main tool modules follow the monitoring-first workflow order", () => {
