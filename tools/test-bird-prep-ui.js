@@ -5,6 +5,8 @@ const { test } = require("node:test");
 const html = readFileSync("index.html", "utf8");
 const css = readFileSync("style.css", "utf8");
 const script = readFileSync("script.js", "utf8");
+const birdreportCore = readFileSync("beaubird-birdreport-core.js", "utf8");
+const siteApp = readFileSync("server/site/app.js", "utf8");
 const sitePages = readFileSync("server/site/pages.js", "utf8");
 const androidBuildGradle = readFileSync("android/app/build.gradle", "utf8");
 const androidBuildGradleKts = readFileSync("android/app/build.gradle.kts", "utf8");
@@ -45,13 +47,88 @@ test("desktop workspace uses a sticky sidebar navigation", () => {
   assert.doesNotMatch(css, /\.app-quicknav\s*\{\s*display: none;\s*\}/);
 });
 
-test("main page uses a restrained product visual system", () => {
+test("main page uses a layered product visual system", () => {
   assert.match(css, /--bg: oklch\(96\.8% 0\.006 190\);/);
   assert.match(css, /--surface: oklch\(99% 0\.004 190\);/);
   assert.match(css, /--sidebar: oklch\(94\.8% 0\.008 190\);/);
-  assert.match(css, /--radius: 8px;/);
-  assert.match(css, /--shadow-subtle: 0 1px 2px rgba\(24, 36, 38, 0\.06\);/);
-  assert.match(css, /\.panel\s*\{[\s\S]*border-radius: var\(--radius\);[\s\S]*box-shadow: none;/);
+  assert.match(css, /--radius-panel: 12px;/);
+  assert.match(css, /--shadow-panel: 0 1px 3px rgba\(24, 36, 38, 0\.04\), 0 4px 12px rgba\(24, 36, 38, 0\.03\);/);
+  assert.match(css, /\.panel\s*\{[\s\S]*border-radius: var\(--radius-panel\);[\s\S]*box-shadow: var\(--shadow-panel\);/);
+  assert.match(css, /\.panel h2::before\s*\{/);
+  assert.match(css, /\.controls\s*\{[\s\S]*background: var\(--controls-surface\);[\s\S]*border: 1px solid var\(--controls-border\);/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+test("workspace sections expose distinct visual accents", () => {
+  assert.match(css, /#monitorSection\s*\{[\s\S]*--section-accent: var\(--accent-monitor\);/);
+  assert.match(css, /#unlockedSection\s*\{[\s\S]*--section-accent: var\(--accent-unlocked\);/);
+  assert.match(css, /#birdPrepSection\s*\{[\s\S]*--section-accent: var\(--accent-ppt\);/);
+  assert.match(css, /#ebirdSection\s*\{[\s\S]*--section-accent: var\(--accent-ebird\);/);
+  assert.match(css, /#birdreportSection\s*\{[\s\S]*--section-accent: var\(--accent-birdreport\);/);
+  assert.match(css, /\.panel\.is-jump-target\s*\{/);
+});
+
+test("quick navigation uses icons and stronger active affordances", () => {
+  assert.match(html, /<span class="quicknav-icon" aria-hidden="true">🔍<\/span>/);
+  assert.match(html, /<span class="quicknav-icon" aria-hidden="true">📋<\/span>/);
+  assert.match(html, /<span class="quicknav-icon" aria-hidden="true">🦅<\/span>/);
+  assert.match(html, /<span class="quicknav-icon" aria-hidden="true">🗺️<\/span>/);
+  assert.match(html, /<span class="quicknav-icon" aria-hidden="true">📊<\/span>/);
+  assert.match(css, /\.app-quicknav-btn::before\s*\{/);
+  assert.match(css, /\.app-quicknav-btn\.is-active\s*\{[\s\S]*box-shadow: var\(--shadow-nav-active\);/);
+});
+
+test("result modules add clearer empty states and summary tones", () => {
+  assert.match(css, /\.empty-state::before\s*\{[\s\S]*content: var\(--empty-icon, "•"\);/);
+  assert.match(css, /\.unlocked-summary-card::before\s*\{/);
+  assert.match(css, /\.unlocked-summary-card\.is-success\s*\{/);
+  assert.match(css, /\.unlocked-summary-card\.is-warning\s*\{/);
+  assert.match(css, /\.result-table-row:hover\s*\{/);
+  assert.match(css, /\.unlocked-species-row:hover\s*\{/);
+  assert.match(script, /renderUnlockedSpeciesSummaryCard\("已解锁", `\$\{observedCount\} 种`, "success"\)/);
+  assert.match(script, /renderUnlockedSpeciesSummaryCard\("未解锁", `\$\{missingCount\} 种`, "warning"\)/);
+  assert.match(script, /empty\.style\.setProperty\("--empty-icon", "\\\"📋\\\""\)/);
+});
+
+test("visual system replaces legacy green literals with section-aware tokens", () => {
+  assert.match(css, /--section-surface: color-mix\(in oklch, var\(--section-accent\) 3%, var\(--panel\)\);/);
+  assert.match(css, /--section-surface-strong: color-mix\(in oklch, var\(--section-accent\) 8%, var\(--panel-muted\)\);/);
+  assert.match(css, /--section-divider: color-mix\(in oklch, var\(--section-accent\) 14%, var\(--border\)\);/);
+  assert.match(css, /--section-link: color-mix\(in oklch, var\(--section-accent\) 70%, var\(--text\)\);/);
+  assert.match(css, /--state-success-bg: oklch\(94% 0\.026 148\);/);
+  assert.match(css, /--state-warning-bg: oklch\(94\.5% 0\.038 82\);/);
+  assert.match(css, /\.panel\s*\{[\s\S]*background: var\(--section-surface\);/);
+  assert.match(css, /\.workspace-content\s*\{[\s\S]*gap: 18px;/);
+  [
+    "#edf7f7",
+    "#fbfdfa",
+    "#edf4ee",
+    "#2b6f8d",
+    "#dfebe1",
+    "#bdd9c4",
+    "#dfe9df",
+    "#c9dce2",
+    "rgba(15, 118, 110, 0.24)"
+  ].forEach((legacyColor) => {
+    assert.doesNotMatch(css, new RegExp(legacyColor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  });
+});
+
+test("form controls, stats, and loading states are polished", () => {
+  assert.match(
+    css,
+    /input\[type="text"\],[\s\S]*input\[type="file"\]\s*\{[\s\S]*transition:[\s\S]*border-color 150ms var\(--ease-out-quart\),[\s\S]*box-shadow 150ms var\(--ease-out-quart\),[\s\S]*background-color 150ms var\(--ease-out-quart\);/
+  );
+  assert.match(css, /input\[type="text"\]:focus,[\s\S]*select:focus\s*\{[\s\S]*border-color: var\(--section-accent\);/);
+  assert.match(css, /\.checkbox-control\s*\{[\s\S]*background: var\(--section-surface-strong\);/);
+  assert.match(css, /\.stats\s*\{[\s\S]*background: var\(--stats-surface\);[\s\S]*border: 1px solid var\(--section-divider\);/);
+  assert.match(css, /\.message\.is-loading::before\s*\{/);
+  assert.match(css, /@keyframes button-loading-pulse/);
+  assert.match(css, /button\.is-loading\s*\{[\s\S]*animation: button-loading-pulse/);
+  assert.match(script, /function setElementLoadingClass\(element, isLoading\)/);
+  assert.match(script, /setElementLoadingClass\(elements\.queryBirdPrepSpeciesBtn, isLoading\)/);
+  assert.match(script, /setElementLoadingClass\(elements\.generateBirdPrepPptBtn, isGenerating\)/);
+  assert.match(script, /setElementLoadingClass\(elements\.ebirdMessage, isLoading\)/);
 });
 
 test("mobile workspace falls back to a horizontal sticky tool navigation", () => {
@@ -173,7 +250,7 @@ test("bird prep query payload includes district and point name", () => {
   assert.match(script, /const district = String\(elements\.birdPrepDistrict\?\.value \|\| ""\)\.trim\(\);/);
   assert.match(script, /const pointname = String\(elements\.birdPrepPointName\?\.value \|\| ""\)\.trim\(\);/);
   assert.match(script, /return createBirdreportPayload\(\{ startTime, endTime, province, city, district, pointname \}\);/);
-  assert.match(script, /payload\.pointname \? `观测地点“\$\{payload\.pointname\}”` : ""/);
+  assert.match(script, /BIRDREPORT_CORE\.formatBirdreportQuerySummary\(payload\)/);
 });
 
 test("bird prep username changes clear current species results", () => {
@@ -233,30 +310,39 @@ test("bird prep embedded data script can retry after a failed load", () => {
   assert.match(script, /script\.dataset\.failed = "true";/);
 });
 
-test("shared data and utility modules load before the app script", () => {
+test("shared data, utility, and BirdReport core modules load before the app script", () => {
   assert.ok(existsSync("beaubird-utils.js"));
   assert.ok(existsSync("beaubird-data.js"));
+  assert.ok(existsSync("beaubird-birdreport-core.js"));
   const utils = readFileSync("beaubird-utils.js", "utf8");
   const data = readFileSync("beaubird-data.js", "utf8");
 
   const utilsIndex = indexOfRequired(html, 'src="./beaubird-utils.js');
   const dataIndex = indexOfRequired(html, 'src="./beaubird-data.js');
+  const birdreportCoreIndex = indexOfRequired(html, 'src="./beaubird-birdreport-core.js');
   const scriptIndex = indexOfRequired(html, 'src="./script.js');
   assert.ok(utilsIndex < scriptIndex);
   assert.ok(dataIndex < scriptIndex);
+  assert.ok(dataIndex < birdreportCoreIndex);
+  assert.ok(birdreportCoreIndex < scriptIndex);
   assert.match(utils, /formatCompactTimestamp/);
   assert.match(data, /birdreportMunicipalityAreas/);
   assert.match(data, /traditionalPhraseReplacements/);
   assert.match(data, /traditionalCharMap/);
   assert.match(data, /commonBirdTaxonomy/);
+  assert.match(birdreportCore, /BeauBirdBirdreportCore/);
+  assert.match(birdreportCore, /createBirdreportPayload/);
+  assert.match(birdreportCore, /normalizeBirdreportTaxonPage/);
 });
 
-test("main script consumes shared data and removes the unused unlocked export overlay", () => {
+test("main script consumes shared modules and removes the unused unlocked export overlay", () => {
   assert.match(script, /window\.BeauBirdUtils/);
   assert.match(script, /window\.BeauBirdData/);
+  assert.match(script, /window\.BeauBirdBirdreportCore/);
   assert.doesNotMatch(script, /const BIRDREPORT_MUNICIPALITY_AREAS = \[/);
   assert.doesNotMatch(script, /const TRADITIONAL_CHAR_MAP = \{/);
   assert.doesNotMatch(script, /const COMMON_BIRD_TAXONOMY = \{/);
+  assert.doesNotMatch(script, /function normalizeBirdreportRecordItem/);
   assert.doesNotMatch(script, /function renderUnlockedSpeciesExportOverlay/);
 });
 
@@ -264,10 +350,15 @@ test("Android assets include current shared modules and all birds profile data",
   for (const source of [androidBuildGradle, androidBuildGradleKts, androidLocalServer]) {
     assert.match(source, /beaubird-utils\.js/);
     assert.match(source, /beaubird-data\.js/);
+    assert.match(source, /beaubird-birdreport-core\.js/);
     assert.match(source, /all_birds_full\.json/);
     assert.match(source, /all_birds_full\.js/);
     assert.doesNotMatch(source, /china_bird_results\.js/);
   }
+});
+
+test("site server serves the shared BirdReport core as a public root asset", () => {
+  assert.match(siteApp, /"beaubird-birdreport-core\.js"/);
 });
 
 test("Android local server rejects oversized request bodies", () => {

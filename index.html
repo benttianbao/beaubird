@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <title>BeauBird 观鸟助手</title>
-    <link rel="stylesheet" href="./style.css?v=20260520-0001" />
+    <link rel="stylesheet" href="./style.css?v=20260520-0002" />
   </head>
   <body>
     <div class="workspace-shell">
@@ -20,11 +20,26 @@
         <nav class="app-quicknav workspace-nav" aria-label="首页快捷导航">
           <span class="workspace-nav-label">工具导航</span>
           <div class="workspace-nav-items">
-            <button class="app-quicknav-btn is-active" data-target="monitorSection" type="button">监测</button>
-            <button class="app-quicknav-btn" data-target="unlockedSection" type="button">未解锁</button>
-            <button class="app-quicknav-btn" data-target="birdPrepSection" type="button">预习 PPT</button>
-            <button class="app-quicknav-btn" data-target="ebirdSection" type="button">eBird</button>
-            <button class="app-quicknav-btn" data-target="birdreportSection" type="button">BirdReport</button>
+            <button class="app-quicknav-btn is-active" data-target="monitorSection" type="button">
+              <span class="quicknav-icon" aria-hidden="true">🔍</span>
+              <span class="quicknav-text">监测</span>
+            </button>
+            <button class="app-quicknav-btn" data-target="unlockedSection" type="button">
+              <span class="quicknav-icon" aria-hidden="true">📋</span>
+              <span class="quicknav-text">未解锁</span>
+            </button>
+            <button class="app-quicknav-btn" data-target="birdPrepSection" type="button">
+              <span class="quicknav-icon" aria-hidden="true">🦅</span>
+              <span class="quicknav-text">预习 PPT</span>
+            </button>
+            <button class="app-quicknav-btn" data-target="ebirdSection" type="button">
+              <span class="quicknav-icon" aria-hidden="true">🗺️</span>
+              <span class="quicknav-text">eBird</span>
+            </button>
+            <button class="app-quicknav-btn" data-target="birdreportSection" type="button">
+              <span class="quicknav-icon" aria-hidden="true">📊</span>
+              <span class="quicknav-text">BirdReport</span>
+            </button>
           </div>
         </nav>
       </aside>
@@ -292,8 +307,9 @@
     <script src="./data/zhejiang-birdreport-species.js?v=20260507-0004"></script>
     <script src="./beaubird-utils.js?v=20260515-0002"></script>
     <script src="./beaubird-data.js?v=20260515-0002"></script>
+    <script src="./beaubird-birdreport-core.js?v=20260521-0001"></script>
     <script src="./ebird-seasonal-core.js?v=20260507-0004"></script>
     <script src="./bird-prep-ppt-core.js?v=20260517-0001"></script>
-    <script src="./script.js?v=20260520-0001"></script>
+    <script src="./script.js?v=20260521-0001"></script>
   </body>
 </html>

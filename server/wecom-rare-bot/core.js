@@ -1,5 +1,11 @@
-const RARE_RECORDCOUNT_THRESHOLD = 500;
-const DEFAULT_PROVINCE = "浙江省";
+const {
+  DEFAULT_PROVINCE,
+  RARE_RECORDCOUNT_THRESHOLD,
+  getBirdreportTaxonKey,
+  normalizeBirdreportRecord: normalizeSharedBirdreportRecord,
+  normalizeBirdreportTaxon: normalizeSharedBirdreportTaxon,
+  sortBirdreportTaxaByRecordCount
+} = require("../../beaubird-birdreport-core");
 
 function isValidIsoDate(value) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || "").trim());
@@ -64,35 +70,15 @@ function extractCaptchaCode(text) {
 }
 
 function getTaxonKey(item) {
-  return String(item?.taxon_id || item?.taxonid || item?.id || item?.key || item?.taxonname || item?.name || "").trim();
+  return getBirdreportTaxonKey(item);
 }
 
 function normalizeBirdreportTaxon(item) {
-  const key = getTaxonKey(item);
-  const recordcount = Number(item?.recordcount) || 0;
-  const explicitRare = typeof item?.isRare === "boolean" ? item.isRare : undefined;
-  return {
-    key,
-    taxon_id: String(item?.taxon_id || item?.taxonid || item?.id || key || "").trim(),
-    taxonname: String(item?.taxonname || item?.name || "").trim(),
-    latinname: String(item?.latinname || item?.englishname || "").trim(),
-    taxonordername: String(item?.taxonordername || "").trim(),
-    taxonfamilyname: String(item?.taxonfamilyname || "").trim(),
-    recordcount,
-    reportcount: Number(item?.reportcount ?? item?.reportCount ?? item?.report_count) || 0,
-    isRare: explicitRare ?? recordcount <= RARE_RECORDCOUNT_THRESHOLD
-  };
+  return normalizeSharedBirdreportTaxon(item);
 }
 
 function sortTaxaByRecordCount(items) {
-  return [...items].sort((left, right) => {
-    const countDiff = (Number(left?.recordcount) || 0) - (Number(right?.recordcount) || 0);
-    if (countDiff !== 0) {
-      return countDiff;
-    }
-
-    return String(left?.taxonname || left?.name || "").localeCompare(String(right?.taxonname || right?.name || ""), "zh-CN");
-  });
+  return sortBirdreportTaxaByRecordCount(items);
 }
 
 function buildRareHits(dailyTaxa, rareBaseline) {
@@ -160,43 +146,7 @@ function matchRareSpeciesByName(hits, speciesName) {
 }
 
 function normalizeBirdreportRecord(item, index = 0) {
-  if (!item || typeof item !== "object") {
-    return null;
-  }
-
-  const stateValue = Number(item.state ?? item.status);
-  const provinceName = String(item.province_name || item.provinceName || item.province || "").trim();
-  const cityName = String(item.city_name || item.cityName || item.city || "").trim();
-  const districtName = String(item.district_name || item.districtName || item.district || item.county || "").trim();
-  const pointName = String(
-    item.point_name ||
-      item.pointName ||
-      item.pointname ||
-      item.point ||
-      item.location ||
-      item.locationName ||
-      item.locality ||
-      item.address ||
-      ""
-  ).trim();
-  const locationText = `${provinceName}${cityName}${districtName}${pointName}` || pointName;
-  const hasVisibleLocation = Boolean(locationText) && !locationText.includes("*");
-  const isPublic = stateValue === 2 || hasVisibleLocation;
-  const location = isPublic ? locationText : "地点未公开";
-  const startTime = String(item.start_time || item.startTime || item.observation_time || item.observationTime || item.time || "").trim();
-  const endTime = String(item.end_time || item.endTime || item.finish_time || item.finishTime || item.time || "").trim();
-
-  return {
-    id: String(item.serial_id || item.serialId || item.serialid || item.id || `${startTime || "record"}-${index}`),
-    serialId: isPublic ? String(item.serial_id || item.serialId || item.serialid || item.id || "").trim() : "",
-    pointName: location,
-    username: isPublic ? String(item.username || item.userName || item.nickname || "未提供").trim() : "******",
-    taxonCount: Number(item.taxon_count ?? item.taxonCount ?? item.count ?? item.number) || 0,
-    isPublic,
-    isHiddenLocation: !isPublic || location.includes("*") || location === "地点未公开",
-    startTime,
-    endTime
-  };
+  return normalizeSharedBirdreportRecord(item, index);
 }
 
 function aggregateLocations(records) {

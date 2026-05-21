@@ -45,6 +45,7 @@ android {
       assets.include("script.js")
       assets.include("beaubird-utils.js")
       assets.include("beaubird-data.js")
+      assets.include("beaubird-birdreport-core.js")
       assets.include("ebird-seasonal-core.js")
       assets.include("bird-prep-ppt-core.js")
       assets.include("all_birds_full.json")

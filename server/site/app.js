@@ -53,6 +53,7 @@ const PUBLIC_ROOT_FILES = new Set([
   "style.css",
   "beaubird-utils.js",
   "beaubird-data.js",
+  "beaubird-birdreport-core.js",
   "ebird-seasonal-core.js",
   "bird-prep-ppt-core.js",
   "all_birds_full.js",

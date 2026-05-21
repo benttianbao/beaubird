@@ -25,7 +25,8 @@ const ALL_BIRDS_FULL_SCRIPT_URL = "./all_birds_full.js";
 const ALL_BIRDS_FULL_GLOBAL = "BEAUBIRD_ALL_BIRDS_FULL";
 const BIRD_PREP_LOGIN_EXPIRED_MESSAGE = "登录已过期，请重新登录后再生成 PPT。";
 const BIRD_PREP_MACAULAY_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
-const BIRDREPORT_VERSION = "CH4";
+const BIRDREPORT_CORE = window.BeauBirdBirdreportCore || {};
+const BIRDREPORT_VERSION = BIRDREPORT_CORE.BIRDREPORT_VERSION || "CH4";
 const ANDROID_APP_USER_AGENT_TOKEN = "BeauBirdAndroidApp";
 const BIRDREPORT_PARAM_PUBLIC_KEY = "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCvxXa98E1uWXnBzXkS2yHUfnBM6n3PCwLdfIox03T91joBvjtoDqiQ5x3tTOfpHs3LtiqMMEafls6b0YWtgB1dse1W5m+FpeusVkCOkQxB4SZDH6tuerIknnmB/Hsq5wgEkIvO5Pff9biig6AyoAkdWpSek/1/B7zYIepYY0lxKQIDAQAB";
 const BIRDREPORT_AES_KEY_SOURCE = "6756696653534952657053656868665752665050485566485667545454484967";
@@ -50,7 +51,6 @@ const formatCompactTimestamp = typeof BEAUBIRD_UTILS.formatCompactTimestamp === 
       const seconds = String(value.getSeconds()).padStart(2, "0");
       return `${year}${month}${day}-${hours}${minutes}${seconds}`;
     };
-const BIRDREPORT_MUNICIPALITY_AREAS = BEAUBIRD_DATA.birdreportMunicipalityAreas || [];
 const TRADITIONAL_PHRASE_REPLACEMENTS = BEAUBIRD_DATA.traditionalPhraseReplacements || [];
 const TRADITIONAL_CHAR_MAP = BEAUBIRD_DATA.traditionalCharMap || {};
 const COMMON_BIRD_TAXONOMY = BEAUBIRD_DATA.commonBirdTaxonomy || {};
@@ -426,7 +426,23 @@ function handleQuickNavClick(event) {
   }
 
   setActiveQuickNav(targetId);
+  markJumpTarget(section);
   section.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function markJumpTarget(section) {
+  document.querySelectorAll(".panel.is-jump-target").forEach((panel) => {
+    panel.classList.remove("is-jump-target");
+  });
+  const token = String(Date.now());
+  section.dataset.jumpFocusToken = token;
+  section.classList.add("is-jump-target");
+  window.setTimeout(() => {
+    if (section.dataset.jumpFocusToken === token) {
+      section.classList.remove("is-jump-target");
+      delete section.dataset.jumpFocusToken;
+    }
+  }, 520);
 }
 
 function setActiveQuickNav(targetId) {
@@ -2191,13 +2207,13 @@ function renderUnlockedSpeciesSummary({ observedCount, missingCount, catalogCoun
   elements.unlockedSpeciesSummary.innerHTML = `
     <div class="unlocked-summary-toolbar">
       <div class="unlocked-summary-grid">
-        ${renderUnlockedSpeciesSummaryCard("记录用户", state.unlockedTargetUsername || "未填写")}
-        ${renderUnlockedSpeciesSummaryCard("已解锁", `${observedCount} 种`)}
-        ${renderUnlockedSpeciesSummaryCard("未解锁", `${missingCount} 种`)}
-        ${renderUnlockedSpeciesSummaryCard("浙江名录", `${catalogCount} 种`)}
+        ${renderUnlockedSpeciesSummaryCard("记录用户", state.unlockedTargetUsername || "未填写", "info")}
+        ${renderUnlockedSpeciesSummaryCard("已解锁", `${observedCount} 种`, "success")}
+        ${renderUnlockedSpeciesSummaryCard("未解锁", `${missingCount} 种`, "warning")}
+        ${renderUnlockedSpeciesSummaryCard("浙江名录", `${catalogCount} 种`, "catalog")}
         ${
           state.unlockedSpeciesCacheSavedAt
-            ? renderUnlockedSpeciesSummaryCard("缓存", formatDateTime(state.unlockedSpeciesCacheSavedAt))
+            ? renderUnlockedSpeciesSummaryCard("缓存", formatDateTime(state.unlockedSpeciesCacheSavedAt), "neutral")
             : ""
         }
       </div>
@@ -2211,9 +2227,10 @@ function renderUnlockedSpeciesSummary({ observedCount, missingCount, catalogCoun
     ?.addEventListener("click", toggleUnlockedSpeciesInfoVisibility);
 }
 
-function renderUnlockedSpeciesSummaryCard(label, value) {
+function renderUnlockedSpeciesSummaryCard(label, value, tone = "neutral") {
+  const toneClass = ["success", "warning", "info", "catalog", "neutral"].includes(tone) ? ` is-${tone}` : "";
   return `
-    <div class="unlocked-summary-card">
+    <div class="unlocked-summary-card${toneClass}">
       <strong>${escapeHtml(value)}</strong>
       <span>${escapeHtml(label)}</span>
     </div>
@@ -2251,6 +2268,7 @@ function renderUnlockedSpeciesList() {
   if (!state.unlockedSpeciesTableVisible) {
     const empty = document.createElement("div");
     empty.className = "empty-state unlocked-species-module-empty";
+    empty.style.setProperty("--empty-icon", "\"📋\"");
     empty.textContent = `已隐藏 ${missing.length} 个未解锁鸟种，点击“展开列表”查看。`;
     module.append(empty);
     elements.unlockedSpeciesContainer.append(module);
@@ -2660,18 +2678,7 @@ async function verifyBirdreportCaptcha(code) {
 }
 
 function createBirdreportRecordSearchPayload(basePayload, { taxonId = "", taxonName = "" } = {}) {
-  return {
-    ...basePayload,
-    ...(taxonId ? { taxonid: taxonId } : {}),
-    ...(taxonName ? { taxonname: taxonName, taxon_name: taxonName, name: taxonName } : {}),
-    field: "start_time",
-    order: "desc",
-    sort: "start_time",
-    sortField: "start_time",
-    sortOrder: "desc",
-    orderField: "start_time",
-    orderType: "desc"
-  };
+  return BIRDREPORT_CORE.createBirdreportRecordSearchPayload(basePayload, { taxonId, taxonName });
 }
 
 function clearUnlockedSpeciesDetail() {
@@ -3136,6 +3143,9 @@ function setZhejiangRareSpeciesLoading(isLoading) {
   elements.zhejiangRareMonitorDate.disabled = isLoading;
   elements.saveZhejiangRareSpeciesBtn.textContent = isLoading ? "处理中..." : "保存浙江稀有鸟种名单";
   elements.checkZhejiangRareSpeciesBtn.textContent = isLoading ? "检查中..." : "立即检查所选日期数据";
+  setElementLoadingClass(elements.saveZhejiangRareSpeciesBtn, isLoading);
+  setElementLoadingClass(elements.checkZhejiangRareSpeciesBtn, isLoading);
+  setElementLoadingClass(elements.zhejiangRareSpeciesMessage, isLoading);
 }
 
 function setZhejiangRareSpeciesMessage(message, isError = false) {
@@ -3158,6 +3168,7 @@ function setUnlockedSpeciesLoading(isLoading) {
   if (elements.queryUnlockedSpeciesBtn) {
     elements.queryUnlockedSpeciesBtn.disabled = isLoading;
     elements.queryUnlockedSpeciesBtn.textContent = isLoading ? "查询中..." : "查询未解锁鸟种";
+    setElementLoadingClass(elements.queryUnlockedSpeciesBtn, isLoading);
   }
   updateUnlockedSpeciesExportButton(isLoading);
   if (elements.clearUnlockedSpeciesBtn) {
@@ -3166,6 +3177,7 @@ function setUnlockedSpeciesLoading(isLoading) {
   if (elements.birdreportUnlockedUsername) {
     elements.birdreportUnlockedUsername.disabled = isLoading;
   }
+  setElementLoadingClass(elements.unlockedSpeciesMessage, isLoading);
 }
 
 function createBirdreportPayload({
@@ -3179,17 +3191,15 @@ function createBirdreportPayload({
   state = "",
   mode = 0
 } = {}) {
-  return normalizeBirdreportAdministrativeArea({
-    startTime: normalizeDateInput(startTime),
-    endTime: normalizeDateInput(endTime),
-    province: String(province || "").trim(),
-    city: String(city || "").trim(),
-    district: String(district || "").trim(),
-    pointname: String(pointname || "").trim(),
-    username: String(username || "").trim(),
-    state: String(state || "").trim(),
-    version: BIRDREPORT_VERSION,
-    outside_type: 0,
+  return BIRDREPORT_CORE.createBirdreportPayload({
+    startTime,
+    endTime,
+    province,
+    city,
+    district,
+    pointname,
+    username,
+    state,
     mode
   });
 }
@@ -3200,7 +3210,7 @@ function getSelectedZhejiangRareMonitorDate() {
 }
 
 function getBirdreportTaxonKey(item) {
-  return String(item?.taxon_id || item?.taxonid || item?.id || item?.taxonname || item?.name || "").trim();
+  return BIRDREPORT_CORE.getBirdreportTaxonKey(item);
 }
 
 function getBirdreportRarityFields(item) {
@@ -3230,40 +3240,7 @@ function serializeBirdreportTaxon(item) {
 }
 
 function getBirdreportTaxaArray(payload) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  if (!payload || typeof payload !== "object") {
-    return [];
-  }
-
-  const candidates = [
-    payload.species,
-    payload.list,
-    payload.rows,
-    payload.records,
-    payload.items,
-    payload.result,
-    payload.data
-  ];
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate;
-    }
-  }
-
-  for (const candidate of candidates) {
-    if (candidate && typeof candidate === "object") {
-      const nested = getBirdreportTaxaArray(candidate);
-      if (nested.length) {
-        return nested;
-      }
-    }
-  }
-
-  return [];
+  return BIRDREPORT_CORE.getBirdreportItems(payload);
 }
 
 function normalizeBirdreportTaxa(payload) {
@@ -3590,7 +3567,7 @@ function buildBirdPrepUnlockedTaxonLookup(items) {
 }
 
 function getBirdPrepTaxonName(item) {
-  return String(item?.taxonname || item?.name || "").trim();
+  return BIRDREPORT_CORE.getBirdreportTaxonName(item);
 }
 
 function filterBirdPrepSpeciesByUnlocked(species, lookup) {
@@ -4186,6 +4163,7 @@ function setBirdPrepLoading(isLoading) {
   if (elements.queryBirdPrepSpeciesBtn) {
     elements.queryBirdPrepSpeciesBtn.disabled = isLoading;
     elements.queryBirdPrepSpeciesBtn.textContent = isLoading ? "查询中..." : "查询地区鸟种";
+    setElementLoadingClass(elements.queryBirdPrepSpeciesBtn, isLoading);
   }
   [elements.birdPrepProvince, elements.birdPrepCity, elements.birdPrepDistrict, elements.birdPrepPointName, elements.birdPrepUnlockedUsername, elements.birdPrepStartDate, elements.birdPrepEndDate].forEach((element) => {
     if (element) {
@@ -4198,6 +4176,7 @@ function setBirdPrepLoading(isLoading) {
     }
   });
   syncBirdPrepMacaulayOptions();
+  setElementLoadingClass(elements.birdPrepMessage, isLoading);
   updateBirdPrepPptButton();
 }
 
@@ -4205,8 +4184,10 @@ function setBirdPrepGenerating(isGenerating) {
   state.birdPrepGenerating = isGenerating;
   if (elements.generateBirdPrepPptBtn) {
     elements.generateBirdPrepPptBtn.textContent = isGenerating ? "生成中..." : "生成 PPT";
+    setElementLoadingClass(elements.generateBirdPrepPptBtn, isGenerating);
   }
   syncBirdPrepMacaulayOptions();
+  setElementLoadingClass(elements.birdPrepMessage, isGenerating);
   updateBirdPrepPptButton();
 }
 
@@ -4407,24 +4388,17 @@ function isPublicBirdreportLocationRecord(record) {
 }
 
 function normalizeBirdreportTaxonPage(response) {
-  const decoded = decodeBirdreportPayload(response?.data);
-  const decodedItems = getBirdreportTaxaArray(decoded);
-  if (decodedItems.length) {
-    return decodedItems;
-  }
-
-  return getBirdreportTaxaArray(response);
+  return BIRDREPORT_CORE.normalizeBirdreportTaxonPage(response, { decodePayload: decodeBirdreportPayload });
 }
 
 function normalizeBirdreportRecordPage(response) {
-  const decoded = decodeBirdreportPayload(response?.data);
-  const items = getBirdreportRecordItems(decoded);
-  const fallbackItems = items.length ? items : getBirdreportRecordItems(response);
-  if (!Array.isArray(items)) {
-    return [];
-  }
-
-  return fallbackItems.map((item, index) => normalizeBirdreportRecordItem(item, index)).filter(Boolean);
+  return BIRDREPORT_CORE.normalizeBirdreportRecordPage(response, { decodePayload: decodeBirdreportPayload }).map((record) => ({
+    ...record,
+    serialId: record.isHiddenLocation ? "*************" : record.serialId,
+    pointName: record.isHiddenLocation ? "*** *** *** ********" : record.pointName,
+    startTimeLabel: formatBirdreportDateTime(record.startTime),
+    endTimeLabel: formatBirdreportDateTime(record.endTime)
+  }));
 }
 
 function renderBirdreportSpeciesDetail() {
@@ -4662,114 +4636,8 @@ function closeBirdreportSpeciesDetail() {
   renderBirdreportSpeciesResults(state.birdreportLastResults);
 }
 
-function getBirdreportRecordItems(payload) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-
-  if (!payload || typeof payload !== "object") {
-    return [];
-  }
-
-  const candidates = [
-    payload.list,
-    payload.rows,
-    payload.records,
-    payload.items,
-    payload.result,
-    payload.data
-  ];
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate;
-    }
-  }
-
-  return [];
-}
-
-function normalizeBirdreportRecordItem(item, index) {
-  if (!item || typeof item !== "object") {
-    return null;
-  }
-
-  const stateValue = Number(item.state ?? item.status);
-  const provinceName = String(item.province_name || item.provinceName || item.province || "").trim();
-  const cityName = String(item.city_name || item.cityName || item.city || "").trim();
-  const districtName = String(item.district_name || item.districtName || item.district || item.county || "").trim();
-  const pointName = String(
-    item.point_name ||
-      item.pointName ||
-      item.pointname ||
-      item.point ||
-      item.location ||
-      item.locationName ||
-      item.locality ||
-      item.address ||
-      ""
-  ).trim();
-  const locationText = `${provinceName}${cityName}${districtName}${pointName}` || pointName;
-  const hasVisibleLocation = Boolean(locationText) && !locationText.includes("*");
-  const isPublic = stateValue === 2 || hasVisibleLocation;
-  const location = isPublic ? locationText : "*** *** *** ********";
-  const username = isPublic ? String(item.username || item.userName || item.nickname || "").trim() : "******";
-  const serialId = isPublic ? String(item.serial_id || item.serialId || item.serialid || item.id || "").trim() : "*************";
-  const startTime = String(item.start_time || item.startTime || item.observation_time || item.observationTime || item.time || "").trim();
-  const endTime = String(item.end_time || item.endTime || item.finish_time || item.finishTime || item.time || "").trim();
-  return {
-    id: String(item.serial_id || item.serialId || item.serialid || item.id || `${startTime || "record"}-${index}`),
-    serialId,
-    pointName: location,
-    username: username || "未提供",
-    taxonCount: Number(item.taxon_count ?? item.taxonCount ?? item.count ?? item.number) || 0,
-    isPublic,
-    isHiddenLocation: location.includes("*"),
-    startTime,
-    endTime,
-    startTimeLabel: formatBirdreportDateTime(startTime),
-    endTimeLabel: formatBirdreportDateTime(endTime)
-  };
-}
-
-function sortBirdreportRecordsBySerialIdDesc(left, right) {
-  const leftSerial = normalizeBirdreportSerialId(left);
-  const rightSerial = normalizeBirdreportSerialId(right);
-  if (leftSerial.length !== rightSerial.length) {
-    return rightSerial.length - leftSerial.length;
-  }
-
-  const serialDiff = rightSerial.localeCompare(leftSerial, "en-US");
-  if (serialDiff !== 0) {
-    return serialDiff;
-  }
-
-  return String(right?.id || "").localeCompare(String(left?.id || ""), "zh-CN");
-}
-
-function normalizeBirdreportSerialId(record) {
-  return String(record?.serialId || record?.id || "")
-    .replace(/\D/g, "")
-    .replace(/^0+/, "");
-}
-
 function sortBirdreportRecordsByObservationTimeDesc(left, right) {
-  const rightTime = parseBirdreportRecordTime(right?.startTime || right?.endTime);
-  const leftTime = parseBirdreportRecordTime(left?.startTime || left?.endTime);
-  if (rightTime !== leftTime) {
-    return rightTime - leftTime;
-  }
-
-  return sortBirdreportRecordsBySerialIdDesc(left, right);
-}
-
-function parseBirdreportRecordTime(value) {
-  const text = String(value || "").trim();
-  if (!text) {
-    return 0;
-  }
-
-  const parsed = new Date(text.replace(" ", "T"));
-  return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+  return BIRDREPORT_CORE.sortBirdreportRecordsByObservationTimeDesc(left, right);
 }
 
 function getBirdreportReportCount(item) {
@@ -4782,29 +4650,11 @@ function getBirdreportReportCount(item) {
 }
 
 function dedupeBirdreportTaxa(items) {
-  const seen = new Set();
-  return items.filter((item) => {
-    const key = getBirdreportTaxonKey(item);
-    if (!key || seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
+  return BIRDREPORT_CORE.dedupeBirdreportTaxa(items);
 }
 
 function sortBirdreportTaxaByRecordCount(items) {
-  return [...items].sort((left, right) => {
-    const leftCount = Number(left?.recordcount) || 0;
-    const rightCount = Number(right?.recordcount) || 0;
-    if (leftCount !== rightCount) {
-      return leftCount - rightCount;
-    }
-
-    const leftName = String(left?.taxonname || left?.name || "");
-    const rightName = String(right?.taxonname || right?.name || "");
-    return leftName.localeCompare(rightName, "zh-CN");
-  });
+  return BIRDREPORT_CORE.sortBirdreportTaxaByRecordCount(items);
 }
 
 function birdreportProxyPost(path, data) {
@@ -4871,43 +4721,15 @@ function buildBirdreportSignedRequest(data) {
 }
 
 function serializeBirdreportRequestData(data) {
-  const params = new URLSearchParams();
-  Object.entries(data || {}).forEach(([key, value]) => {
-    if (value == null || value === "") {
-      return;
-    }
-    params.append(key, String(value));
-  });
-  return params.toString();
+  return BIRDREPORT_CORE.serializeBirdreportRequestData(data);
 }
 
 function parseBirdreportRequestData(serializedData) {
-  if (!serializedData) {
-    return {};
-  }
-
-  const result = {};
-  serializedData.split("&").forEach((entry) => {
-    if (!entry) {
-      return;
-    }
-    const separatorIndex = entry.indexOf("=");
-    if (separatorIndex === -1) {
-      result[entry] = "";
-      return;
-    }
-    result[entry.slice(0, separatorIndex)] = entry.slice(separatorIndex + 1);
-  });
-  return result;
+  return BIRDREPORT_CORE.parseBirdreportRequestData(serializedData);
 }
 
 function sortBirdreportObjectKeys(source) {
-  return Object.keys(source || {})
-    .sort()
-    .reduce((result, key) => {
-      result[key] = source[key];
-      return result;
-    }, {});
+  return BIRDREPORT_CORE.sortBirdreportObjectKeys(source);
 }
 
 function generateBirdreportRequestId() {
@@ -5117,6 +4939,8 @@ function setBirdreportLoading(isLoading) {
   elements.openBirdreportTaxonBtn.disabled = isLoading;
   elements.openBirdreportSearchBtn.disabled = isLoading;
   elements.queryBirdreportProxyBtn.textContent = isLoading ? "查询中..." : "查询鸟种";
+  setElementLoadingClass(elements.queryBirdreportProxyBtn, isLoading);
+  setElementLoadingClass(elements.birdreportMessage, isLoading);
 }
 
 function normalizeProxyBaseUrl(value) {
@@ -5184,21 +5008,11 @@ function buildBirdreportQueryPayload() {
 }
 
 function formatBirdreportQuerySummary(payload) {
-  const areaText = [payload.province, payload.city, payload.district].filter(Boolean).join(" / ");
-  const pointText = payload.pointname ? `观测地点“${payload.pointname}”` : "";
-  return [areaText, pointText].filter(Boolean).join(" · ") || "当前筛选条件";
+  return BIRDREPORT_CORE.formatBirdreportQuerySummary(payload);
 }
 
 function normalizeBirdreportAdministrativeArea(payload) {
-  const normalized = { ...payload };
-  const municipalityKey = `${normalized.province}${normalized.city}`;
-
-  if (normalized.city && !normalized.district && BIRDREPORT_MUNICIPALITY_AREAS.includes(municipalityKey)) {
-    normalized.district = normalized.city;
-    normalized.city = "";
-  }
-
-  return normalized;
+  return BIRDREPORT_CORE.normalizeBirdreportAdministrativeArea(payload);
 }
 
 function normalizeEbirdObservations(observations, taxonomyMap = new Map()) {
@@ -5954,20 +5768,31 @@ function setStatusMessage(target, message, isError = false) {
   target.style.color = isError ? "var(--danger)" : "var(--muted)";
 }
 
+function setElementLoadingClass(element, isLoading) {
+  if (!element) {
+    return;
+  }
+  element.classList.toggle("is-loading", Boolean(isLoading));
+}
+
 function setEbirdLoading(isLoading) {
   elements.syncEbirdBtn.disabled = isLoading;
   elements.clearEbirdKeyBtn.disabled = isLoading;
   elements.syncEbirdBtn.textContent = isLoading ? "查询中..." : "查询 eBird";
+  setElementLoadingClass(elements.syncEbirdBtn, isLoading);
+  setElementLoadingClass(elements.ebirdMessage, isLoading);
 }
 
 function setEbirdSeasonalLoading(isLoading) {
   if (elements.analyzeEbirdSeasonalBtn) {
     elements.analyzeEbirdSeasonalBtn.disabled = isLoading;
     elements.analyzeEbirdSeasonalBtn.textContent = isLoading ? "分析中..." : "分析浙江当季鸟种";
+    setElementLoadingClass(elements.analyzeEbirdSeasonalBtn, isLoading);
   }
   if (elements.clearEbirdSeasonalCacheBtn) {
     elements.clearEbirdSeasonalCacheBtn.disabled = isLoading;
   }
+  setElementLoadingClass(elements.ebirdSeasonalMessage, isLoading);
 }
 
 function escapeHtml(value) {

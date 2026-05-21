@@ -178,6 +178,7 @@ android/app/build/outputs/apk/debug/app-debug.apk
 ├── script.js                       # 页面逻辑、BirdReport/eBird 查询、缓存和监测逻辑
 ├── beaubird-utils.js               # 浏览器和 Node 共用的小工具函数
 ├── beaubird-data.js                # 页面共用静态数据
+├── beaubird-birdreport-core.js     # 浏览器和 Node 共用的 BirdReport 纯逻辑
 ├── style.css                       # 页面和 Android WebView 样式
 ├── ebird-seasonal-core.js          # eBird 浙江当季分析逻辑
 ├── bird-prep-ppt-core.js           # 鸟类预习 PPT 匹配和 PPTX 生成逻辑
@@ -216,6 +217,7 @@ node .\tools\fetch-zhejiang-birdreport-species.mjs
 
 ```powershell
 node --check script.js
+node tools\test-birdreport-core.js
 node tools\test-bird-prep-ppt-core.js
 node tools\test-bird-prep-ui.js
 node tools\test-birdreport-proxy-default.js

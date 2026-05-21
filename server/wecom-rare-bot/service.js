@@ -1,5 +1,6 @@
 const { readFile } = require("node:fs/promises");
 const { resolve } = require("node:path");
+const { createBirdreportPayload: createSharedBirdreportPayload } = require("../../beaubird-birdreport-core");
 
 const {
   DEFAULT_PROVINCE,
@@ -26,19 +27,23 @@ function createBirdreportPayload({
   state = "",
   mode = 0
 } = {}) {
-  return {
-    province: String(province || "").trim(),
-    startTime: String(startTime || "").trim(),
-    endTime: String(endTime || "").trim(),
-    ...(city ? { city: String(city).trim() } : {}),
-    ...(district ? { district: String(district).trim() } : {}),
-    ...(pointname ? { pointname: String(pointname).trim() } : {}),
-    ...(username ? { username: String(username).trim() } : {}),
-    ...(state ? { state: String(state).trim() } : {}),
-    version: BIRDREPORT_VERSION,
-    outside_type: 0,
+  const payload = createSharedBirdreportPayload({
+    province,
+    startTime,
+    endTime,
+    city,
+    district,
+    pointname,
+    username,
+    state,
     mode
-  };
+  });
+  ["city", "district", "pointname", "username", "state"].forEach((key) => {
+    if (!payload[key]) {
+      delete payload[key];
+    }
+  });
+  return payload;
 }
 
 function createRareBirdQueryService(options = {}) {

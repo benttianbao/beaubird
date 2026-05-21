@@ -1,7 +1,14 @@
 const { createDecipheriv, createHash, publicEncrypt, randomUUID, constants } = require("node:crypto");
 
-const { DEFAULT_PROVINCE, normalizeBirdreportRecord, normalizeBirdreportTaxon } = require("./core");
+const { DEFAULT_PROVINCE } = require("./core");
 const { createBirdreportPayload } = require("./service");
+const {
+  normalizeBirdreportRecordPage: normalizeSharedBirdreportRecordPage,
+  normalizeBirdreportTaxonPage: normalizeSharedBirdreportTaxonPage,
+  parseBirdreportRequestData,
+  serializeBirdreportRequestData,
+  sortBirdreportObjectKeys
+} = require("../../beaubird-birdreport-core");
 
 const ORIGIN = "https://www.birdreport.cn";
 const USER_AGENT =
@@ -33,36 +40,15 @@ function createBirdreportBusinessError(payload) {
 }
 
 function serializeQuery(value) {
-  return Object.entries(value || {})
-    .filter(([, entryValue]) => entryValue !== undefined && entryValue !== null && entryValue !== "")
-    .map(([key, entryValue]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(entryValue))}`)
-    .join("&");
+  return serializeBirdreportRequestData(value);
 }
 
 function parseFormBody(body) {
-  return String(body || "")
-    .split("&")
-    .reduce((result, entry) => {
-      if (!entry) {
-        return result;
-      }
-      const separatorIndex = entry.indexOf("=");
-      if (separatorIndex === -1) {
-        result[entry] = "";
-        return result;
-      }
-      result[entry.slice(0, separatorIndex)] = entry.slice(separatorIndex + 1);
-      return result;
-    }, {});
+  return parseBirdreportRequestData(body);
 }
 
 function sortObjectKeys(source) {
-  return Object.keys(source || {})
-    .sort()
-    .reduce((result, key) => {
-      result[key] = source[key];
-      return result;
-    }, {});
+  return sortBirdreportObjectKeys(source);
 }
 
 function encryptLong(text) {
@@ -146,41 +132,12 @@ function decodeBirdreportPayload(payload) {
   }
 }
 
-function getBirdreportItems(payload) {
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-  if (!payload || typeof payload !== "object") {
-    return [];
-  }
-
-  const candidates = [payload.list, payload.rows, payload.records, payload.items, payload.result, payload.data, payload.species];
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate;
-    }
-  }
-  for (const candidate of candidates) {
-    const nested = getBirdreportItems(candidate);
-    if (nested.length) {
-      return nested;
-    }
-  }
-  return [];
-}
-
 function normalizeBirdreportTaxonPage(response) {
-  const decoded = decodeBirdreportPayload(response?.data);
-  const decodedItems = getBirdreportItems(decoded);
-  const sourceItems = decodedItems.length ? decodedItems : getBirdreportItems(response);
-  return sourceItems.map(normalizeBirdreportTaxon).filter((item) => item.key);
+  return normalizeSharedBirdreportTaxonPage(response, { decodePayload: decodeBirdreportPayload });
 }
 
 function normalizeBirdreportRecordPage(response) {
-  const decoded = decodeBirdreportPayload(response?.data);
-  const decodedItems = getBirdreportItems(decoded);
-  const sourceItems = decodedItems.length ? decodedItems : getBirdreportItems(response);
-  return sourceItems.map(normalizeBirdreportRecord).filter(Boolean);
+  return normalizeSharedBirdreportRecordPage(response, { decodePayload: decodeBirdreportPayload });
 }
 
 function createCookieJar() {
