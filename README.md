@@ -2,7 +2,7 @@
 
 BeauBird 是一个面向观鸟记录查询、浙江鸟种监测和鸟类预习的轻量工具。项目同时提供可直接打开的网页版本、Android WebView APK，以及带登录和后台管理的 Node 站点版本。
 
-当前版本：1.5
+当前版本：1.6
 
 ## 主要功能
 
@@ -235,6 +235,13 @@ node tools\test-site-birdreport-lingod.js
 该联调会访问真实上游服务，不作为离线提交前的必跑检查。
 
 ## 版本记录
+
+### 1.6
+
+- 新增浏览器和 Node 共用的 `beaubird-birdreport-core.js`，统一 BirdReport payload、分页归一化、鸟种 / 记录归一化、排序和签名前序列化逻辑。
+- 前端页面、Node 登录站点、Android WebView 资源映射和企业微信稀有鸟机器人改为复用共享 BirdReport 核心，降低后续维护成本。
+- 补充 BirdReport 核心回归测试，并更新 UI 结构测试以覆盖共享模块加载顺序、站点静态白名单和 Android assets。
+- 延续 1.5 工作台视觉打磨，保留桌面左侧导航、移动端横向快捷导航和更清晰的结果状态样式。
 
 ### 1.5
 
