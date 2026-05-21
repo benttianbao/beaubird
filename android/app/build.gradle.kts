@@ -56,6 +56,7 @@ android {
       assets.include("vendor/aes.util.js")
       assets.include("data/zhejiang-birdreport-species.json")
       assets.include("data/zhejiang-birdreport-species.js")
+      assets.include("data/bird-profiles/**")
     }
   }
 }

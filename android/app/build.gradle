@@ -12,6 +12,7 @@ tasks.register('syncWebAssets', Sync) {
         include 'all_birds_full.json', 'all_birds_full.js'
         include 'vendor/jquery.min.js', 'vendor/crypto-js.min.js', 'vendor/jqueryAjax.js', 'vendor/aes.util.js'
         include 'data/zhejiang-birdreport-species.json', 'data/zhejiang-birdreport-species.js'
+        include 'data/bird-profiles/**'
     }
     into(generatedWebAssetsDir)
 }

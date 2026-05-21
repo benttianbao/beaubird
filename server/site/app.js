@@ -59,7 +59,8 @@ const PUBLIC_ROOT_FILES = new Set([
   "all_birds_full.js",
   "all_birds_full.json"
 ]);
-const PUBLIC_PREFIXES = ["data/", "vendor/"];
+const PUBLIC_BIRD_PROFILE_PREFIX = "data/bird-profiles/";
+const PUBLIC_PREFIXES = [PUBLIC_BIRD_PROFILE_PREFIX, "data/", "vendor/"];
 
 const BIRDREPORT_ENDPOINTS = {
   "/api/birdreport/province": {

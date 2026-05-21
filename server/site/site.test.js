@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { mkdtempSync, rmSync, writeFileSync } = require("node:fs");
+const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
@@ -621,10 +621,16 @@ test("does not serve server-side source files as static assets", async () => {
   }
 });
 
-test("serves the all birds profile data as a static asset", async () => {
+test("serves the all birds profile data and shards as static assets", async () => {
   const temp = createTempDatabase();
   try {
     writeFileSync(join(temp.dir, "all_birds_full.json"), '[{"name":"白鹭","overview":"常见涉禽。"}]', "utf8");
+    mkdirSync(join(temp.dir, "data", "bird-profiles"), { recursive: true });
+    writeFileSync(
+      join(temp.dir, "data", "bird-profiles", "index.json"),
+      '{"names":{"白鹭":{"name":"白鹭","shard":"shard-000.json","script":"shard-000.js"}}}',
+      "utf8"
+    );
 
     const db = initializeSiteDatabase(temp.databasePath);
     createUser(db, {
@@ -646,6 +652,14 @@ test("serves the all birds profile data as a static asset", async () => {
       assert.equal(profileData.status, 200);
       assert.equal(profileData.headers.get("content-type"), "application/json; charset=utf-8");
       assert.equal(await profileData.text(), '[{"name":"白鹭","overview":"常见涉禽。"}]');
+
+      const shardIndex = await request("/data/bird-profiles/index.json", { headers: { cookie: adminCookie } });
+      assert.equal(shardIndex.status, 200);
+      assert.equal(shardIndex.headers.get("content-type"), "application/json; charset=utf-8");
+      assert.equal(
+        await shardIndex.text(),
+        '{"names":{"白鹭":{"name":"白鹭","shard":"shard-000.json","script":"shard-000.js"}}}'
+      );
     });
   } finally {
     temp.cleanup();

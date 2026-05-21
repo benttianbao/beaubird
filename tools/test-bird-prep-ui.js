@@ -286,9 +286,15 @@ test("bird prep loading state disables all query filters", () => {
 
 test("bird prep profile data is lazy-loaded instead of blocking the initial page", () => {
   assert.doesNotMatch(html, /src="\.\/all_birds_full\.js[^"]*"/);
+  assert.match(script, /const BIRD_PROFILE_SHARD_INDEX_URL = "\.\/data\/bird-profiles\/index\.json";/);
+  assert.match(script, /const BIRD_PROFILE_SHARD_INDEX_SCRIPT_URL = "\.\/data\/bird-profiles\/index\.js";/);
+  assert.match(script, /const BIRD_PROFILE_SHARDS_GLOBAL = "BEAUBIRD_BIRD_PROFILE_SHARDS";/);
   assert.match(script, /const ALL_BIRDS_FULL_DATA_URL = "\.\/all_birds_full\.json";/);
   assert.match(script, /const ALL_BIRDS_FULL_SCRIPT_URL = "\.\/all_birds_full\.js";/);
   assert.match(script, /const ALL_BIRDS_FULL_GLOBAL = "BEAUBIRD_ALL_BIRDS_FULL";/);
+  assert.match(script, /function loadBirdPrepProfileIndexForSpecies\(selectedSpecies\)/);
+  assert.match(script, /function loadBirdPrepProfileShardsFromJson/);
+  assert.match(script, /function loadBirdPrepProfileShardsFromScripts/);
   assert.match(script, /window\[ALL_BIRDS_FULL_GLOBAL\]/);
   assert.match(script, /function loadBirdPrepEmbeddedDataScript\(\)/);
   assert.match(script, /script\.src = ALL_BIRDS_FULL_SCRIPT_URL;/);
@@ -353,12 +359,18 @@ test("Android assets include current shared modules and all birds profile data",
     assert.match(source, /beaubird-birdreport-core\.js/);
     assert.match(source, /all_birds_full\.json/);
     assert.match(source, /all_birds_full\.js/);
+    assert.match(source, /data\/bird-profiles/);
     assert.doesNotMatch(source, /china_bird_results\.js/);
   }
+  assert.match(androidBuildGradle, /data\/bird-profiles\/\*\*/);
+  assert.match(androidBuildGradleKts, /data\/bird-profiles\/\*\*/);
+  assert.match(androidLocalServer, /\/data\/bird-profiles\/index\.json/);
+  assert.match(androidLocalServer, /serveBirdProfileAsset/);
 });
 
 test("site server serves the shared BirdReport core as a public root asset", () => {
   assert.match(siteApp, /"beaubird-birdreport-core\.js"/);
+  assert.match(siteApp, /data\/bird-profiles\//);
 });
 
 test("Android local server rejects oversized request bodies", () => {

@@ -110,6 +110,7 @@ class BeauBirdLocalServer(private val context: Context) {
         val response = when {
           request.method == "OPTIONS" -> jsonResponse(200, """{"success":true}""")
           request.path == "/health" -> jsonResponse(200, """{"success":true,"service":"beaubird-local-server"}""")
+          isBirdProfileAssetPath(request.path) -> serveBirdProfileAsset(request.path)
           STATIC_ASSET_PATHS.containsKey(request.path) -> serveAsset(request.path)
           request.path == "/api/birdreport/captcha" -> proxyCaptchaImage(request)
           request.path == "/api/birdreport/verify" -> proxyCaptchaVerify(request)
@@ -183,6 +184,32 @@ class BeauBirdLocalServer(private val context: Context) {
     return LocalResponse(
       statusCode = 200,
       contentType = CONTENT_TYPES[path] ?: "application/octet-stream",
+      body = body
+    )
+  }
+
+  private fun isBirdProfileAssetPath(path: String): Boolean {
+    if (!path.startsWith("/data/bird-profiles/")) {
+      return false
+    }
+
+    val fileName = path.substringAfterLast("/")
+    return path == "/data/bird-profiles/index.json" ||
+      path == "/data/bird-profiles/index.js" ||
+      Regex("""^shard-\d{3}\.(json|js)$""").matches(fileName)
+  }
+
+  private fun serveBirdProfileAsset(path: String): LocalResponse {
+    val assetName = path.removePrefix("/")
+    val body = context.assets.open(assetName).use { it.readBytes() }
+    val contentType = when {
+      path.endsWith(".json") -> "application/json; charset=UTF-8"
+      path.endsWith(".js") -> "application/javascript; charset=UTF-8"
+      else -> "application/octet-stream"
+    }
+    return LocalResponse(
+      statusCode = 200,
+      contentType = contentType,
       body = body
     )
   }

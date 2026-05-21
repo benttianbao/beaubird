@@ -134,11 +134,11 @@ android/app/build/outputs/apk/debug/app-debug.apk
 
 可选输入 BirdReport 用户名后，页面会查询该用户已解锁鸟种，并从预习列表中排除这些鸟种。如果查询用户记录失败，页面会保留未过滤结果并给出提示。
 
-生成 PPT 时会用 BirdReport 返回的中文鸟名精确匹配 `all_birds_full.json` 中的 `name` 字段。匹配成功的鸟种会生成一页 16:9 幻灯片，左侧为图片占位区，右侧最上方显示简介，下面包含外形、识别、习性生境、分布、繁殖和叫声摘要；卡片正文使用 12pt 字号以改善投影阅读；没有本地简介的鸟种会被跳过，并在页面提示中列出。
+生成 PPT 时会用 BirdReport 返回的中文鸟名精确匹配本地鸟类简介数据中的 `name` 字段。匹配成功的鸟种会生成一页 16:9 幻灯片，左侧为图片占位区，右侧最上方显示简介，下面包含外形、识别、习性生境、分布、繁殖和叫声摘要；卡片正文使用 12pt 字号以改善投影阅读；没有本地简介的鸟种会被跳过，并在页面提示中列出。
 
 可选勾选“添加 Macaulay Library 图片”。页面会通过后端接口按鸟种学名 / eBird taxon code 查询 Macaulay Library，每个鸟种最多嵌入 1 张照片，并在幻灯片中保留 ML 编号、摄影者和来源链接。Macaulay Library 媒体通常需要确认使用权或授权；生成前需勾选确认，未找到图片或下载失败时会保留原图片占位区。
 
-为了支持直接双击打开 `index.html`，项目同时提供自动生成的 `all_birds_full.js`。页面会优先懒加载该 JS 全局数据，失败时再回退读取 JSON。
+为了减少生成 PPT 前读取的数据量，页面会优先读取 `data/bird-profiles/index.json`，再按已选鸟种加载对应的简介分片。为了支持直接双击打开 `index.html`，项目同时提供 `data/bird-profiles/index.js` 和 `shard-*.js` 回退脚本；如果分片加载失败，仍会回退到完整的 `all_birds_full.json` / `all_birds_full.js`。
 
 ## 未解锁鸟种查询
 
@@ -184,10 +184,11 @@ android/app/build/outputs/apk/debug/app-debug.apk
 ├── bird-prep-ppt-core.js           # 鸟类预习 PPT 匹配和 PPTX 生成逻辑
 ├── all_birds_full.json             # PPT 鸟类简介原始数据
 ├── all_birds_full.js               # PPT 浏览器直读数据
+├── data/bird-profiles/             # PPT 鸟类简介索引和按需加载分片
 ├── birdreport-proxy.ps1            # 网页版本地 BirdReport 代理
 ├── start-birdreport-proxy.cmd      # 本地代理启动脚本
 ├── start-site.cmd                  # Node 站点启动脚本
-├── data/                           # 浙江名录和运行数据目录
+├── data/                           # 浙江名录、鸟类简介分片和运行数据目录
 ├── docs/site-auth-admin.md         # 站点登录和后台管理说明
 ├── nginx/site-auth-ubuntu.conf     # Ubuntu + Nginx 示例配置
 ├── server/site/                    # 登录站点、后台管理和同源 BirdReport 接口
@@ -211,12 +212,19 @@ powershell -ExecutionPolicy Bypass -File .\birdreport-proxy.ps1
 node .\tools\fetch-zhejiang-birdreport-species.mjs
 ```
 
+重新生成鸟类简介分片：
+
+```powershell
+node .\tools\build-bird-profile-shards.mjs
+```
+
 ## 测试
 
 常用本地检查：
 
 ```powershell
 node --check script.js
+node tools\test-bird-profile-shards.js
 node tools\test-birdreport-core.js
 node tools\test-bird-prep-ppt-core.js
 node tools\test-bird-prep-ui.js
