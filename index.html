@@ -4,12 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <title>BeauBird 观鸟助手</title>
-    <link rel="stylesheet" href="./style.css?v=20260520-0002" />
+    <link rel="stylesheet" href="./style.css?v=20260602-0002" />
   </head>
   <body>
     <div class="workspace-shell">
       <aside class="workspace-sidebar" aria-label="工作台工具导航">
         <header class="hero workspace-hero">
+          <div class="hero-logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+              <path d="M21.5 8c-2.5.5-4.5 2-5.5 4-1-2-3-3.5-5.5-4 3-.5 5.5-3 5.5-6 0 3 2.5 5.5 5.5 6zM13 14c-1.5.3-2.7 1.2-3.3 2.4-.6-1.2-1.8-2.1-3.3-2.4 1.8-.3 3.3-1.8 3.3-3.6 0 1.8 1.5 3.3 3.3 3.6zM4 10.5c-1 .2-1.8.8-2.2 1.6C1.4 11.3.6 10.7-.4 10.5c1.2-.2 2.2-1.2 2.2-2.4 0 1.2 1 2.2 2.2 2.4z"/>
+            </svg>
+          </div>
           <div class="hero-title-block">
             <p class="hero-kicker">BeauBird Workspace</p>
             <h1>BeauBird 观鸟助手</h1>
@@ -21,23 +26,33 @@
           <span class="workspace-nav-label">工具导航</span>
           <div class="workspace-nav-items">
             <button class="app-quicknav-btn is-active" data-target="monitorSection" type="button">
-              <span class="quicknav-icon" aria-hidden="true">🔍</span>
+              <span class="quicknav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+              </span>
               <span class="quicknav-text">监测</span>
             </button>
             <button class="app-quicknav-btn" data-target="unlockedSection" type="button">
-              <span class="quicknav-icon" aria-hidden="true">📋</span>
+              <span class="quicknav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="m9 14 2 2 4-4"/></svg>
+              </span>
               <span class="quicknav-text">未解锁</span>
             </button>
             <button class="app-quicknav-btn" data-target="birdPrepSection" type="button">
-              <span class="quicknav-icon" aria-hidden="true">🦅</span>
+              <span class="quicknav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>
+              </span>
               <span class="quicknav-text">预习 PPT</span>
             </button>
             <button class="app-quicknav-btn" data-target="ebirdSection" type="button">
-              <span class="quicknav-icon" aria-hidden="true">🗺️</span>
+              <span class="quicknav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+              </span>
               <span class="quicknav-text">eBird</span>
             </button>
             <button class="app-quicknav-btn" data-target="birdreportSection" type="button">
-              <span class="quicknav-icon" aria-hidden="true">📊</span>
+              <span class="quicknav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+              </span>
               <span class="quicknav-text">BirdReport</span>
             </button>
           </div>
@@ -307,9 +322,9 @@
     <script src="./data/zhejiang-birdreport-species.js?v=20260507-0004"></script>
     <script src="./beaubird-utils.js?v=20260515-0002"></script>
     <script src="./beaubird-data.js?v=20260515-0002"></script>
-    <script src="./beaubird-birdreport-core.js?v=20260521-0001"></script>
+    <script src="./beaubird-birdreport-core.js?v=20260602-0002"></script>
     <script src="./ebird-seasonal-core.js?v=20260507-0004"></script>
     <script src="./bird-prep-ppt-core.js?v=20260517-0001"></script>
-    <script src="./script.js?v=20260521-0001"></script>
+    <script src="./script.js?v=20260602-0002"></script>
   </body>
 </html>

@@ -347,6 +347,75 @@ test("proxies BirdReport endpoints through the authenticated same-origin API", a
   }
 });
 
+test("proxies BirdReport captcha endpoints with the upstream cookie jar", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+    const upstreamCalls = [];
+
+    await withServer(
+      {
+        database: db,
+        projectRoot: process.cwd(),
+        fetchImpl: async (url, init) => {
+          upstreamCalls.push({ url, init });
+          if (String(url).includes("/front/code/visited/generate")) {
+            return new Response(Buffer.from("captcha-image"), {
+              status: 200,
+              headers: {
+                "content-type": "image/png",
+                "set-cookie": "birdreport-captcha=session-123; Path=/; HttpOnly"
+              }
+            });
+          }
+          return new Response(JSON.stringify({ success: true }), {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          });
+        }
+      },
+      async ({ request }) => {
+        const login = await request("/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+        });
+        const adminCookie = cookieFrom(login);
+
+        const captcha = await request("/api/birdreport/captcha", {
+          headers: { cookie: adminCookie }
+        });
+        assert.equal(captcha.status, 200);
+        assert.equal(captcha.headers.get("content-type"), "image/png");
+        assert.equal(await captcha.text(), "captcha-image");
+
+        const verified = await request("/api/birdreport/verify", {
+          method: "POST",
+          headers: { "content-type": "application/json", cookie: adminCookie },
+          body: JSON.stringify({ code: "1234" })
+        });
+        assert.equal(verified.status, 200);
+        assert.deepEqual(await json(verified), { success: true });
+
+        assert.equal(upstreamCalls.length, 2);
+        assert.match(upstreamCalls[0].url, /\/front\/code\/visited\/generate\?timestamp=\d+$/);
+        assert.equal(upstreamCalls[0].init.method, "GET");
+        assert.equal(upstreamCalls[1].url, "https://api.birdreport.cn/front/code/visited/verify");
+        assert.equal(upstreamCalls[1].init.method, "POST");
+        assert.equal(upstreamCalls[1].init.headers.cookie, "birdreport-captcha=session-123");
+      }
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("rejects request bodies over the configured limit", async () => {
   const temp = createTempDatabase();
   try {

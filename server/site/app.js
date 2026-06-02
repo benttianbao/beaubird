@@ -86,6 +86,17 @@ const BIRDREPORT_ENDPOINTS = {
   "/api/birdreport/summary": {
     remote: "https://api.birdreport.cn/front/record/chart/summary",
     referer: "https://www.birdreport.cn/home/search/page.html"
+  },
+  "/api/birdreport/captcha": {
+    remote: () => `https://api.birdreport.cn/front/code/visited/generate?timestamp=${Date.now()}`,
+    referer: "https://www.birdreport.cn/home/code/verify.html",
+    method: "GET",
+    accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+  },
+  "/api/birdreport/verify": {
+    remote: "https://api.birdreport.cn/front/code/visited/verify",
+    referer: "https://www.birdreport.cn/home/code/verify.html",
+    method: "POST"
   }
 };
 
@@ -99,6 +110,7 @@ function createSiteServer(options = {}) {
     ...DEFAULT_BIRDREPORT_RATE_LIMIT,
     ...(options.birdreportRateLimit || {})
   });
+  const birdreportCookieJars = options.birdreportCookieJars || new Map();
   const secureCookies = Boolean(options.secureCookies || process.env.NODE_ENV === "production");
   const fetchImpl = options.fetchImpl || fetch;
 
@@ -107,6 +119,7 @@ function createSiteServer(options = {}) {
       await routeRequest({
         database,
         birdreportRateLimiter,
+        birdreportCookieJars,
         fetchImpl,
         projectRoot,
         request,
@@ -161,6 +174,7 @@ async function routeRequest(context) {
       return json(response, 403, { error: "请求校验失败。" });
     }
     deleteSession(context.database, session.sessionId);
+    context.birdreportCookieJars.delete(session.sessionId);
     setSessionCookie(response, "", context.secureCookies, 0);
     return json(response, 200, { ok: true });
   }
@@ -310,28 +324,75 @@ async function proxyBirdreport(context, pathname) {
   if (!context.birdreportRateLimiter.consume(getBirdreportRateLimitKey(context))) {
     return json(context.response, 429, { error: "BirdReport 请求过于频繁，请稍后再试。" });
   }
+  const method = endpoint.method || context.request.method;
+  if (endpoint.method && context.request.method !== endpoint.method) {
+    return json(context.response, 405, { error: "Method not allowed" });
+  }
   const body =
-    context.request.method === "GET" || context.request.method === "HEAD"
+    method === "GET" || method === "HEAD"
       ? undefined
       : await readRaw(context.request, context.requestLimits);
-  const upstream = await context.fetchImpl(endpoint.remote, {
-    method: context.request.method,
-    headers: {
-      accept: context.request.headers.accept || "application/json, text/plain, */*",
-      "content-type": context.request.headers["content-type"] || "application/json; charset=UTF-8",
-      origin: "https://www.birdreport.cn",
-      referer: endpoint.referer,
-      requestId: context.request.headers.requestid || "",
-      sign: context.request.headers.sign || "",
-      timestamp: context.request.headers.timestamp || "",
-      "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
-    },
+  const cookieJar = getBirdreportCookieJar(context);
+  const cookieHeader = buildBirdreportCookieHeader(cookieJar);
+  const headers = {
+    accept: endpoint.accept || context.request.headers.accept || "application/json, text/plain, */*",
+    origin: "https://www.birdreport.cn",
+    referer: endpoint.referer,
+    requestId: context.request.headers.requestid || "",
+    sign: context.request.headers.sign || "",
+    timestamp: context.request.headers.timestamp || "",
+    "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
+  };
+  if (body !== undefined || context.request.headers["content-type"]) {
+    headers["content-type"] = context.request.headers["content-type"] || "application/json; charset=UTF-8";
+  }
+  if (cookieHeader) {
+    headers.cookie = cookieHeader;
+  }
+  const remote = typeof endpoint.remote === "function" ? endpoint.remote() : endpoint.remote;
+  const upstream = await context.fetchImpl(remote, {
+    method,
+    headers,
     body
   });
+  storeBirdreportSetCookies(cookieJar, upstream.headers);
   context.response.writeHead(upstream.status, {
     "content-type": upstream.headers.get("content-type") || "application/json; charset=utf-8"
   });
   context.response.end(Buffer.from(await upstream.arrayBuffer()));
+}
+
+function getBirdreportCookieJar(context) {
+  const key = getBirdreportRateLimitKey(context);
+  let jar = context.birdreportCookieJars.get(key);
+  if (!jar) {
+    jar = new Map();
+    context.birdreportCookieJars.set(key, jar);
+  }
+  return jar;
+}
+
+function buildBirdreportCookieHeader(cookieJar) {
+  if (!cookieJar.size) {
+    return "";
+  }
+  return [...cookieJar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+}
+
+function storeBirdreportSetCookies(cookieJar, headers) {
+  const values =
+    typeof headers.getSetCookie === "function"
+      ? headers.getSetCookie()
+      : headers.get("set-cookie")
+        ? [headers.get("set-cookie")]
+        : [];
+  for (const line of values) {
+    const firstPart = String(line).split(";")[0];
+    const separator = firstPart.indexOf("=");
+    if (separator > 0) {
+      cookieJar.set(firstPart.slice(0, separator).trim(), firstPart.slice(separator + 1).trim());
+    }
+  }
 }
 
 async function proxyMacaulaySearch(context, url) {

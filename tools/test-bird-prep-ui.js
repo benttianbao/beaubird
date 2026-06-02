@@ -41,7 +41,7 @@ test("zhejiang rare bird monitor starts without instructional placeholder copy",
 });
 
 test("desktop workspace uses a sticky sidebar navigation", () => {
-  assert.match(css, /\.workspace-shell\s*\{[\s\S]*grid-template-columns: 224px minmax\(0, 1fr\);/);
+  assert.match(css, /\.workspace-shell\s*\{[\s\S]*grid-template-columns: 248px minmax\(0, 1fr\);/);
   assert.match(css, /\.workspace-sidebar\s*\{[\s\S]*position: sticky;[\s\S]*top: 0;/);
   assert.match(css, /\.app-quicknav\s*\{[\s\S]*display: grid;[\s\S]*position: static;/);
   assert.doesNotMatch(css, /\.app-quicknav\s*\{\s*display: none;\s*\}/);
@@ -51,9 +51,12 @@ test("main page uses a layered product visual system", () => {
   assert.match(css, /--bg: oklch\(96\.8% 0\.006 190\);/);
   assert.match(css, /--surface: oklch\(99% 0\.004 190\);/);
   assert.match(css, /--sidebar: oklch\(94\.8% 0\.008 190\);/);
+  assert.match(css, /--sidebar-shell: oklch\(40% 0\.052 168\);/);
   assert.match(css, /--radius-panel: 12px;/);
   assert.match(css, /--shadow-panel: 0 1px 3px rgba\(24, 36, 38, 0\.04\), 0 4px 12px rgba\(24, 36, 38, 0\.03\);/);
+  assert.match(css, /\.workspace-sidebar\s*\{[\s\S]*background: linear-gradient\(180deg, var\(--sidebar-shell\) 0%, var\(--sidebar-shell-strong\) 100%\);/);
   assert.match(css, /\.panel\s*\{[\s\S]*border-radius: var\(--radius-panel\);[\s\S]*box-shadow: var\(--shadow-panel\);/);
+  assert.match(css, /\.panel::before\s*\{/);
   assert.match(css, /\.panel h2::before\s*\{/);
   assert.match(css, /\.controls\s*\{[\s\S]*background: var\(--controls-surface\);[\s\S]*border: 1px solid var\(--controls-border\);/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
@@ -69,13 +72,15 @@ test("workspace sections expose distinct visual accents", () => {
 });
 
 test("quick navigation uses icons and stronger active affordances", () => {
-  assert.match(html, /<span class="quicknav-icon" aria-hidden="true">🔍<\/span>/);
-  assert.match(html, /<span class="quicknav-icon" aria-hidden="true">📋<\/span>/);
-  assert.match(html, /<span class="quicknav-icon" aria-hidden="true">🦅<\/span>/);
-  assert.match(html, /<span class="quicknav-icon" aria-hidden="true">🗺️<\/span>/);
-  assert.match(html, /<span class="quicknav-icon" aria-hidden="true">📊<\/span>/);
+  assert.match(html, /<div class="hero-logo" aria-hidden="true">[\s\S]*<svg viewBox="0 0 24 24"/);
+  assert.match(html, /data-target="monitorSection"[\s\S]*<span class="quicknav-icon" aria-hidden="true">[\s\S]*<circle cx="11" cy="11" r="8"\/>[\s\S]*<\/span>/);
+  assert.match(html, /data-target="unlockedSection"[\s\S]*<span class="quicknav-icon" aria-hidden="true">[\s\S]*<rect x="9" y="3" width="6" height="4" rx="1"\/>[\s\S]*<\/span>/);
+  assert.match(html, /data-target="birdPrepSection"[\s\S]*<span class="quicknav-icon" aria-hidden="true">[\s\S]*<rect x="2" y="3" width="20" height="14" rx="2"\/>[\s\S]*<\/span>/);
+  assert.match(html, /data-target="ebirdSection"[\s\S]*<span class="quicknav-icon" aria-hidden="true">[\s\S]*<circle cx="12" cy="12" r="10"\/>[\s\S]*<\/span>/);
+  assert.match(html, /data-target="birdreportSection"[\s\S]*<span class="quicknav-icon" aria-hidden="true">[\s\S]*<path d="M3 3v18h18"\/>[\s\S]*<\/span>/);
   assert.match(css, /\.app-quicknav-btn::before\s*\{/);
   assert.match(css, /\.app-quicknav-btn\.is-active\s*\{[\s\S]*box-shadow: var\(--shadow-nav-active\);/);
+  assert.match(css, /\.quicknav-icon svg\s*\{[\s\S]*stroke: var\(--nav-accent\);/);
 });
 
 test("result modules add clearer empty states and summary tones", () => {
@@ -98,7 +103,7 @@ test("visual system replaces legacy green literals with section-aware tokens", (
   assert.match(css, /--state-success-bg: oklch\(94% 0\.026 148\);/);
   assert.match(css, /--state-warning-bg: oklch\(94\.5% 0\.038 82\);/);
   assert.match(css, /\.panel\s*\{[\s\S]*background: var\(--section-surface\);/);
-  assert.match(css, /\.workspace-content\s*\{[\s\S]*gap: 18px;/);
+  assert.match(css, /\.workspace-content\s*\{[\s\S]*gap: 20px;/);
   [
     "#edf7f7",
     "#fbfdfa",
@@ -339,6 +344,12 @@ test("shared data, utility, and BirdReport core modules load before the app scri
   assert.match(birdreportCore, /BeauBirdBirdreportCore/);
   assert.match(birdreportCore, /createBirdreportPayload/);
   assert.match(birdreportCore, /normalizeBirdreportTaxonPage/);
+});
+
+test("frontend shared assets use the current deployment cache version", () => {
+  assert.match(html, /style\.css\?v=20260602-0002/);
+  assert.match(html, /beaubird-birdreport-core\.js\?v=20260602-0002/);
+  assert.match(html, /script\.js\?v=20260602-0002/);
 });
 
 test("main script consumes shared modules and removes the unused unlocked export overlay", () => {
