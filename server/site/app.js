@@ -36,6 +36,7 @@ const DEFAULT_BIRDREPORT_RATE_LIMIT = {
   windowMs: 60_000,
   maxRequests: 120
 };
+const MACAULAY_PPT_IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -438,7 +439,7 @@ async function proxyMacaulayAsset(context, rawAssetId) {
   const upstreamUrl = `https://cdn.download.ams.birds.cornell.edu/api/v1/asset/${assetId}/1200`;
   const upstream = await context.fetchImpl(upstreamUrl, {
     headers: {
-      accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+      accept: MACAULAY_PPT_IMAGE_ACCEPT,
       "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
     }
   });

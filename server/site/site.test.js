@@ -655,7 +655,8 @@ test("proxies Macaulay Library assets and rejects invalid asset ids", async () =
         assert.equal(proxied.headers.get("content-type"), "image/jpeg");
         assert.equal(await proxied.text(), "jpg-bytes");
         assert.equal(upstreamCalls[0].url, "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/123456789/1200");
-        assert.equal(upstreamCalls[0].init.headers.accept, "image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
+        assert.equal(upstreamCalls[0].init.headers.accept, "image/jpeg,image/png,image/webp");
+        assert.doesNotMatch(upstreamCalls[0].init.headers.accept, /image\/avif/);
       }
     );
   } finally {

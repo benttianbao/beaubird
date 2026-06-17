@@ -36,8 +36,40 @@ test("main page presents BeauBird as a professional split workspace", () => {
   assert.match(html, /class="workspace-nav-label">工具导航<\/span>/);
 });
 
+test("main workspace is organized into reusable display components", () => {
+  assert.match(html, /<section id="monitorSection" class="panel workspace-panel workspace-panel--priority birdreport-monitor-panel" aria-labelledby="monitorSectionTitle">/);
+  assert.match(html, /<header class="workspace-panel-header">[\s\S]*<p class="workspace-panel-kicker">监测<\/p>[\s\S]*<h2 id="monitorSectionTitle">浙江稀有鸟种监测<\/h2>/);
+  assert.match(html, /<div class="workspace-panel-body">[\s\S]*<div class="controls control-grid birdreport-monitor-controls">/);
+  assert.match(html, /<div class="actions action-bar birdreport-monitor-actions">/);
+  assert.match(html, /<div class="result-zone" aria-live="polite">[\s\S]*id="zhejiangRareSpeciesMessage"/);
+  assert.match(html, /<section id="birdPrepSection" class="panel workspace-panel bird-prep-panel" aria-labelledby="birdPrepSectionTitle">/);
+  assert.match(html, /<section id="ebirdSection" class="panel workspace-panel" aria-labelledby="ebirdSectionTitle">/);
+  assert.match(html, /<div class="sub-panel ebird-seasonal-panel" id="ebirdSeasonalPanel">/);
+  assert.match(css, /\.workspace-panel-header\s*\{/);
+  assert.match(css, /\.workspace-panel--priority\s*\{/);
+  assert.match(css, /\.workspace-panel-body\s*\{/);
+  assert.match(css, /\.control-grid\s*\{/);
+  assert.match(css, /\.action-bar\s*\{/);
+  assert.match(css, /\.result-zone\s*\{/);
+  assert.match(css, /\.sub-panel\s*\{/);
+});
+
 test("zhejiang rare bird monitor starts without instructional placeholder copy", () => {
   assert.doesNotMatch(script, /先保存一次浙江稀有鸟种名单，再开启每小时监测。/);
+});
+
+test("zhejiang rare bird monitor automatically runs one daily query on startup", () => {
+  const bootstrapIndex = indexOfRequired(script, "function bootstrap()");
+  const autoQueryCallIndex = indexOfRequired(script, "initZhejiangRareSpeciesDailyQuery();");
+  const monitorResumeIndex = indexOfRequired(script, "initZhejiangRareSpeciesMonitor();");
+  const unlockedMessageIndex = indexOfRequired(script, "setUnlockedSpeciesMessage(");
+
+  assert.ok(monitorResumeIndex < autoQueryCallIndex);
+  assert.ok(unlockedMessageIndex < autoQueryCallIndex);
+  assert.match(script, /function hydrateZhejiangRareMonitorInputs\(\) \{[\s\S]*const targetDate = formatIsoDate\(new Date\(\)\);[\s\S]*state\.zhejiangRareMonitor\.targetDate = targetDate;/);
+  assert.match(script, /async function initZhejiangRareSpeciesDailyQuery\(\) \{[\s\S]*state\.zhejiangRareMonitor\.enabled[\s\S]*return;[\s\S]*await saveZhejiangRareSpecies\(\);[\s\S]*checkZhejiangRareSpeciesToday\(\{ source: "auto", notify: false \}\);/);
+  assert.match(script, /checkZhejiangRareSpeciesToday\(\{ source: "auto", notify: false \}\);/);
+  assert.ok(bootstrapIndex < autoQueryCallIndex);
 });
 
 test("desktop workspace uses a sticky sidebar navigation", () => {
@@ -73,18 +105,25 @@ test("workspace sections expose distinct visual accents", () => {
 
 test("quick navigation uses icons and stronger active affordances", () => {
   assert.match(html, /<div class="hero-logo" aria-hidden="true">[\s\S]*<svg viewBox="0 0 24 24"/);
-  assert.match(html, /data-target="monitorSection"[\s\S]*<span class="quicknav-icon" aria-hidden="true">[\s\S]*<circle cx="11" cy="11" r="8"\/>[\s\S]*<\/span>/);
+  assert.match(html, /data-target="monitorSection" aria-current="true"[\s\S]*<span class="quicknav-icon" aria-hidden="true">[\s\S]*<circle cx="11" cy="11" r="8"\/>[\s\S]*<\/span>/);
   assert.match(html, /data-target="unlockedSection"[\s\S]*<span class="quicknav-icon" aria-hidden="true">[\s\S]*<rect x="9" y="3" width="6" height="4" rx="1"\/>[\s\S]*<\/span>/);
   assert.match(html, /data-target="birdPrepSection"[\s\S]*<span class="quicknav-icon" aria-hidden="true">[\s\S]*<rect x="2" y="3" width="20" height="14" rx="2"\/>[\s\S]*<\/span>/);
   assert.match(html, /data-target="ebirdSection"[\s\S]*<span class="quicknav-icon" aria-hidden="true">[\s\S]*<circle cx="12" cy="12" r="10"\/>[\s\S]*<\/span>/);
   assert.match(html, /data-target="birdreportSection"[\s\S]*<span class="quicknav-icon" aria-hidden="true">[\s\S]*<path d="M3 3v18h18"\/>[\s\S]*<\/span>/);
   assert.match(css, /\.app-quicknav-btn::before\s*\{/);
-  assert.match(css, /\.app-quicknav-btn\.is-active\s*\{[\s\S]*box-shadow: var\(--shadow-nav-active\);/);
+  assert.match(css, /\.app-quicknav-btn\.is-active\s*\{[\s\S]*border-color: color-mix\(in oklch, var\(--nav-accent\) 42%, var\(--sidebar-line\)\);[\s\S]*box-shadow: var\(--shadow-nav-active\);/);
+  assert.match(css, /\.app-quicknav-btn\.is-active\s+\.quicknav-text\s*\{[\s\S]*font-weight: 800;/);
   assert.match(css, /\.quicknav-icon svg\s*\{[\s\S]*stroke: var\(--nav-accent\);/);
+  assert.match(script, /button\.toggleAttribute\("aria-current", isActive\)/);
 });
 
 test("result modules add clearer empty states and summary tones", () => {
-  assert.match(css, /\.empty-state::before\s*\{[\s\S]*content: var\(--empty-icon, "•"\);/);
+  assert.match(html, /id="zhejiangRareSpeciesContainer" class="records cards"[\s\S]*data-empty-state="monitor"/);
+  assert.match(html, /id="regionQueryContainer" class="records cards"[\s\S]*data-empty-state="ebird-region"/);
+  assert.match(html, /id="birdreportSpeciesContainer" class="records cards"[\s\S]*data-empty-state="birdreport"/);
+  assert.match(css, /\.result-empty\s*\{/);
+  assert.match(css, /\.empty-state-title\s*\{/);
+  assert.match(css, /\.empty-state::before\s*\{[\s\S]*content: "";[\s\S]*border: 2px solid color-mix\(in oklch, var\(--section-accent\) 46%, transparent\);/);
   assert.match(css, /\.unlocked-summary-card::before\s*\{/);
   assert.match(css, /\.unlocked-summary-card\.is-success\s*\{/);
   assert.match(css, /\.unlocked-summary-card\.is-warning\s*\{/);
@@ -92,7 +131,8 @@ test("result modules add clearer empty states and summary tones", () => {
   assert.match(css, /\.unlocked-species-row:hover\s*\{/);
   assert.match(script, /renderUnlockedSpeciesSummaryCard\("已解锁", `\$\{observedCount\} 种`, "success"\)/);
   assert.match(script, /renderUnlockedSpeciesSummaryCard\("未解锁", `\$\{missingCount\} 种`, "warning"\)/);
-  assert.match(script, /empty\.style\.setProperty\("--empty-icon", "\\\"📋\\\""\)/);
+  assert.match(script, /renderEmptyState\(elements\.regionQueryContainer, "ebird-region"\)/);
+  assert.match(script, /renderEmptyState\(elements\.birdPrepSpeciesOptions, "bird-prep-picker"\)/);
 });
 
 test("visual system replaces legacy green literals with section-aware tokens", () => {
@@ -120,17 +160,23 @@ test("visual system replaces legacy green literals with section-aware tokens", (
 });
 
 test("form controls, stats, and loading states are polished", () => {
+  assert.match(css, /--control-padding-y: 7px;/);
+  assert.match(css, /--control-grid-gap: 8px;/);
   assert.match(
     css,
-    /input\[type="text"\],[\s\S]*input\[type="file"\]\s*\{[\s\S]*transition:[\s\S]*border-color 150ms var\(--ease-out-quart\),[\s\S]*box-shadow 150ms var\(--ease-out-quart\),[\s\S]*background-color 150ms var\(--ease-out-quart\);/
+    /input\[type="text"\],[\s\S]*input\[type="file"\]\s*\{[\s\S]*padding: var\(--control-padding-y\) var\(--control-padding-x\);[\s\S]*transition:[\s\S]*border-color 150ms var\(--ease-out-quart\),[\s\S]*box-shadow 150ms var\(--ease-out-quart\),[\s\S]*background-color 150ms var\(--ease-out-quart\);/
   );
   assert.match(css, /input\[type="text"\]:focus,[\s\S]*select:focus\s*\{[\s\S]*border-color: var\(--section-accent\);/);
   assert.match(css, /\.checkbox-control\s*\{[\s\S]*background: var\(--section-surface-strong\);/);
   assert.match(css, /\.stats\s*\{[\s\S]*background: var\(--stats-surface\);[\s\S]*border: 1px solid var\(--section-divider\);/);
   assert.match(css, /\.message\.is-loading::before\s*\{/);
+  assert.match(css, /\.message\.error\s*\{/);
   assert.match(css, /@keyframes button-loading-pulse/);
   assert.match(css, /button\.is-loading\s*\{[\s\S]*animation: button-loading-pulse/);
   assert.match(script, /function setElementLoadingClass\(element, isLoading\)/);
+  assert.match(script, /element\.setAttribute\("aria-busy", "true"\)/);
+  assert.match(script, /element\.removeAttribute\("aria-busy"\)/);
+  assert.match(script, /target\.classList\.toggle\("error", Boolean\(isError\)\)/);
   assert.match(script, /setElementLoadingClass\(elements\.queryBirdPrepSpeciesBtn, isLoading\)/);
   assert.match(script, /setElementLoadingClass\(elements\.generateBirdPrepPptBtn, isGenerating\)/);
   assert.match(script, /setElementLoadingClass\(elements\.ebirdMessage, isLoading\)/);
@@ -243,6 +289,41 @@ test("bird prep PPT can opt into Macaulay Library images with usage confirmation
   assert.match(script, /正在匹配 Macaulay 图片/);
 });
 
+test("bird prep PPT generation exposes staged progress", () => {
+  assert.match(html, /id="birdPrepProgress" class="bird-prep-progress is-hidden" aria-live="polite"/);
+  assert.match(html, /<progress id="birdPrepProgressBar" class="bird-prep-progress-bar" max="100" value="0"/);
+  assert.match(html, /id="birdPrepProgressLabel"/);
+  assert.match(html, /id="birdPrepProgressPercent"/);
+  assert.match(html, /id="birdPrepProgressDetail"/);
+  assert.match(script, /birdPrepProgress: document\.querySelector\("#birdPrepProgress"\)/);
+  assert.match(script, /birdPrepProgressBar: document\.querySelector\("#birdPrepProgressBar"\)/);
+  assert.match(script, /function setBirdPrepProgress\(\{ label, value, max, detail, status \} = \{\}\)/);
+  assert.match(script, /function resetBirdPrepProgress\(\)/);
+  assert.match(script, /function yieldToBrowserFrame\(\)/);
+  assert.match(script, /setBirdPrepProgress\(\{ label: "读取鸟类简介", value: 8, detail: "正在读取所选鸟种简介。" \}\)/);
+  assert.match(script, /setBirdPrepProgress\(\{ label: "准备幻灯片", value: 22, detail: `已匹配 \$\{slides\.length\} 个鸟种简介。` \}\)/);
+  assert.match(script, /loadBirdPrepMacaulayPhotos\(selectedSpecies, slides, \{[\s\S]*onProgress: \(progress\) =>/);
+  assert.match(script, /setBirdPrepProgress\(\{ label: "打包 PPT", value: 92, detail: "正在写入幻灯片和图片资源。" \}\)/);
+  assert.match(script, /setBirdPrepProgress\(\{ label: "触发下载", value: 98, detail: "正在准备浏览器下载。" \}\)/);
+  assert.match(script, /setBirdPrepProgress\(\{ label: "已完成", value: 100, detail: `已生成 \$\{slides\.length\} 页 PPT。`, status: "complete" \}\)/);
+  assert.match(script, /async function loadBirdPrepMacaulayPhotos\(selectedSpecies, slides, options = \{\}\)/);
+  assert.match(script, /const \{ onProgress \} = options;/);
+  assert.match(script, /onProgress\?\.\(\{[\s\S]*phase: "image-download"[\s\S]*done: index \+ 1,[\s\S]*total: slides\.length/);
+  assert.match(css, /\.bird-prep-progress\s*\{/);
+  assert.match(css, /\.bird-prep-progress\.is-hidden\s*\{/);
+  assert.match(css, /\.bird-prep-progress-bar\s*\{/);
+  assert.match(css, /\.bird-prep-progress\.is-complete\s*\{/);
+  assert.match(css, /\.bird-prep-progress\.is-error\s*\{/);
+});
+
+test("bird prep PPT reports the first Macaulay image failure when all downloads fail", () => {
+  assert.match(script, /let firstErrorMessage = "";/);
+  assert.match(script, /firstErrorMessage = firstErrorMessage \|\| error\.message;/);
+  assert.match(script, /return \{ attachedCount, missingCount, firstErrorMessage \};/);
+  assert.match(script, /photoResult\.firstErrorMessage/);
+  assert.match(script, /Macaulay Library 图片全部失败：\$\{photoResult\.firstErrorMessage\}/);
+});
+
 test("bird prep city changes load district options", () => {
   assert.match(script, /bindIfPresent\(elements\.birdPrepCity, "change", handleBirdPrepCityChange\)/);
   assert.match(script, /function handleBirdPrepCityChange\(\)/);
@@ -347,9 +428,9 @@ test("shared data, utility, and BirdReport core modules load before the app scri
 });
 
 test("frontend shared assets use the current deployment cache version", () => {
-  assert.match(html, /style\.css\?v=20260602-0002/);
+  assert.match(html, /style\.css\?v=20260613-0001/);
   assert.match(html, /beaubird-birdreport-core\.js\?v=20260602-0002/);
-  assert.match(html, /script\.js\?v=20260602-0002/);
+  assert.match(html, /script\.js\?v=20260613-0001/);
 });
 
 test("main script consumes shared modules and removes the unused unlocked export overlay", () => {

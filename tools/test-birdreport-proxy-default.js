@@ -41,6 +41,12 @@ test("local proxy exposes read-only Macaulay Library media endpoints", () => {
   assert.match(proxy, /Invalid Macaulay Library asset id/);
 });
 
+test("local Macaulay asset proxy only requests PPT-supported image formats", () => {
+  const proxy = readFileSync("birdreport-proxy.ps1", "utf8");
+  assert.match(proxy, /\$assetResponse = Invoke-MacaulayCurlRequest -RemotePath \$assetUrl -Accept "image\/jpeg,image\/png,image\/webp"/);
+  assert.doesNotMatch(proxy, /\$assetResponse = Invoke-MacaulayCurlRequest -RemotePath \$assetUrl -Accept "image\/avif/);
+});
+
 test("local Macaulay proxy uses JSON search and filters empty search bodies", () => {
   const proxy = readFileSync("birdreport-proxy.ps1", "utf8");
   assert.match(proxy, /Accept "application\/json"/);

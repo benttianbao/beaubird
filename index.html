@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <title>BeauBird 观鸟助手</title>
-    <link rel="stylesheet" href="./style.css?v=20260602-0002" />
+    <link rel="stylesheet" href="./style.css?v=20260613-0001" />
   </head>
   <body>
     <div class="workspace-shell">
@@ -25,7 +25,7 @@
         <nav class="app-quicknav workspace-nav" aria-label="首页快捷导航">
           <span class="workspace-nav-label">工具导航</span>
           <div class="workspace-nav-items">
-            <button class="app-quicknav-btn is-active" data-target="monitorSection" type="button">
+            <button class="app-quicknav-btn is-active" data-target="monitorSection" aria-current="true" type="button">
               <span class="quicknav-icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
               </span>
@@ -60,259 +60,338 @@
       </aside>
 
       <main class="container workspace-content">
-      <section id="monitorSection" class="panel birdreport-monitor-panel">
-        <h2>浙江稀有鸟种监测</h2>
-        <div class="controls birdreport-monitor-controls">
-          <div class="control">
-            <label for="zhejiangRareMonitorDate">检查日期</label>
-            <input id="zhejiangRareMonitorDate" type="date" />
-          </div>
-        </div>
-        <div class="actions birdreport-monitor-actions">
-          <button id="saveZhejiangRareSpeciesBtn">保存浙江稀有鸟种名单</button>
-          <button id="checkZhejiangRareSpeciesBtn" class="ghost">立即检查所选日期数据</button>
-          <button id="toggleZhejiangRareMonitorBtn" class="ghost">开始每小时监测</button>
-        </div>
-        <p id="zhejiangRareSpeciesMessage" class="message" aria-live="polite"></p>
-        <div id="zhejiangRareSpeciesSummary" class="stats"></div>
-        <div id="zhejiangRareSpeciesContainer" class="records cards"></div>
-      </section>
-      <div id="zhejiangRareSpeciesDetailBackdrop" class="birdreport-rare-detail-backdrop is-hidden" aria-hidden="true"></div>
-      <div
-        id="zhejiangRareSpeciesDetail"
-        class="birdreport-rare-detail-panel is-hidden"
-        aria-live="polite"
-        aria-modal="true"
-        role="dialog"
-        aria-label="浙江稀有鸟种观测地点详情"
-      ></div>
-
-      <section id="unlockedSection" class="panel birdreport-unlocked-panel">
-        <h2>未解锁鸟种查询</h2>
-        <div class="controls birdreport-unlocked-controls">
-          <div class="control birdreport-unlocked-user-control">
-            <label for="birdreportUnlockedUsername">记录用户</label>
-            <input id="birdreportUnlockedUsername" type="text" placeholder="输入记录中心用户名" autocomplete="off" />
-          </div>
-        </div>
-        <div class="actions birdreport-unlocked-actions">
-          <button id="queryUnlockedSpeciesBtn">查询未解锁鸟种</button>
-          <button id="exportUnlockedSpeciesBtn" class="ghost">导出表格</button>
-          <button id="clearUnlockedSpeciesBtn" class="ghost">清空结果</button>
-        </div>
-        <p id="unlockedSpeciesMessage" class="message" aria-live="polite"></p>
-        <div id="unlockedSpeciesSummary" class="stats"></div>
-        <div id="unlockedSpeciesContainer" class="unlocked-species-list"></div>
-      </section>
-
-      <section id="birdPrepSection" class="panel bird-prep-panel">
-        <h2>鸟类预习 PPT</h2>
-        <p class="hint">
-          选择省份、城市、区县、观测地点和可选日期范围，通过 BirdReport 查询地区鸟种，再从下拉框多选鸟种生成预习 PPT。每页左侧预留图片位置，右侧展示鸟种简介。
-        </p>
-
-        <div class="controls bird-prep-controls">
-          <div class="control">
-            <label for="birdPrepProvince">省</label>
-            <select id="birdPrepProvince">
-              <option value="">请选择省</option>
-            </select>
-          </div>
-          <div class="control">
-            <label for="birdPrepCity">市</label>
-            <select id="birdPrepCity">
-              <option value="">请选择市</option>
-            </select>
-          </div>
-          <div class="control">
-            <label for="birdPrepDistrict">区</label>
-            <select id="birdPrepDistrict">
-              <option value="">请选择区</option>
-            </select>
-          </div>
-          <div class="control bird-prep-point-control">
-            <label for="birdPrepPointName">观测地点</label>
-            <input id="birdPrepPointName" type="text" placeholder="例如 西溪湿地、鄱阳湖、某公园" autocomplete="off" />
-          </div>
-          <div class="control bird-prep-unlocked-user-control">
-            <label for="birdPrepUnlockedUsername">记录用户</label>
-            <input id="birdPrepUnlockedUsername" type="text" placeholder="可选：输入记录中心用户名，自动剔除已解锁鸟种" autocomplete="off" />
-          </div>
-          <div class="control">
-            <label for="birdPrepStartDate">开始日期</label>
-            <input id="birdPrepStartDate" type="date" />
-          </div>
-          <div class="control">
-            <label for="birdPrepEndDate">结束日期</label>
-            <input id="birdPrepEndDate" type="date" />
-          </div>
-          <label class="checkbox-control bird-prep-media-toggle" for="birdPrepMacaulayImages">
-            <input id="birdPrepMacaulayImages" type="checkbox" checked />
-            <span>添加 Macaulay Library 图片</span>
-          </label>
-          <label class="checkbox-control bird-prep-media-rights" for="birdPrepMacaulayRights">
-            <input id="birdPrepMacaulayRights" type="checkbox" />
-            <span>我确认这些图片用于自己有权使用的 PPT，并保留 Macaulay Library 署名</span>
-          </label>
-        </div>
-
-        <div class="actions bird-prep-actions">
-          <button id="queryBirdPrepSpeciesBtn">查询地区鸟种</button>
-          <button id="selectAllBirdPrepSpeciesBtn" class="ghost" type="button">全选当前列表</button>
-          <button id="clearBirdPrepSpeciesBtn" class="ghost" type="button">清空选择</button>
-          <button id="generateBirdPrepPptBtn" type="button">生成 PPT</button>
-        </div>
-
-        <div class="bird-prep-picker">
-          <div class="control">
-            <label for="birdPrepSpeciesSearch">搜索鸟种</label>
-            <input id="birdPrepSpeciesSearch" type="text" placeholder="输入中文名、学名、目或科过滤" autocomplete="off" />
-          </div>
-          <div class="control">
-            <label for="birdPrepSpeciesOptions">鸟种多选列表</label>
-            <div id="birdPrepSpeciesOptions" class="bird-prep-species-options" role="listbox" aria-multiselectable="true" tabindex="0"></div>
-          </div>
-        </div>
-
-        <p class="hint compact">如果选中的鸟种在 <code>all_birds_full.json</code> 中没有简介，生成时会自动跳过并列出名称。</p>
-        <p id="birdPrepMessage" class="message" aria-live="polite"></p>
-        <div id="birdPrepSummary" class="stats"></div>
-      </section>
-
-      <section id="ebirdSection" class="panel">
-        <h2>查询 eBird 区域记录</h2>
-        <p class="hint">
-          输入 eBird API 密钥后，可查询某个国家 / 地区 / 县区 / 位置代码下的最近观测。
-          这些区域结果只用于查看，不会写入你的个人记录。
-        </p>
-
-        <div class="ebird-grid">
-          <div class="control">
-            <label for="ebirdApiKey">API 密钥</label>
-            <input id="ebirdApiKey" type="password" placeholder="输入你的 eBird API Key" autocomplete="off" />
-          </div>
-          <div class="control">
-            <label for="ebirdRegionCode">区域代码</label>
-            <input id="ebirdRegionCode" type="text" placeholder="例如 CN-31、US-NY、L123456" />
-          </div>
-          <div class="control">
-            <label for="ebirdBackDays">回溯天数</label>
-            <input id="ebirdBackDays" type="number" min="1" max="30" value="14" />
-          </div>
-        </div>
-
-        <div class="actions ebird-actions">
-          <button id="syncEbirdBtn">查询 eBird</button>
-          <button id="clearEbirdKeyBtn" class="ghost">清除密钥</button>
-        </div>
-        <p class="hint compact">
-          区域代码可填国家、州省、区县或 locId。示例：<code>CN</code>、<code>CN-31</code>、
-          <code>US-CA</code>、<code>L7884500</code>。
-          API 密钥仅保存在当前浏览器的本地存储中。
-        </p>
-        <p class="hint compact">本工具聚焦区域查询；如果你只想快速看一个地区最近有哪些鸟，这里直接查询即可。</p>
-        <p id="ebirdMessage" class="message" aria-live="polite"></p>
-        <div id="regionQuerySummary" class="stats"></div>
-        <div id="regionQueryContainer" class="records cards"></div>
-        <div id="ebirdSeasonalPanel" class="life-list-panel ebird-seasonal-panel">
-          <div class="section-heading">
-            <h3>浙江当季可能出现鸟种</h3>
-            <p class="hint compact">
-              固定分析 <code>CN-33</code>，按目标日期前后窗口统计多年历史记录，并用最近 30 天记录标记是否已确认。
-            </p>
-          </div>
-          <div class="controls ebird-seasonal-controls">
-            <div class="control">
-              <label for="ebirdSeasonalDate">目标日期</label>
-              <input id="ebirdSeasonalDate" type="date" />
+        <section id="monitorSection" class="panel workspace-panel workspace-panel--priority birdreport-monitor-panel" aria-labelledby="monitorSectionTitle">
+          <header class="workspace-panel-header">
+            <div class="workspace-panel-title">
+              <p class="workspace-panel-kicker">监测</p>
+              <h2 id="monitorSectionTitle">浙江稀有鸟种监测</h2>
             </div>
-            <div class="control">
-              <label for="ebirdSeasonalYears">历史年份</label>
-              <input id="ebirdSeasonalYears" type="number" min="1" max="15" value="10" />
+            <p class="workspace-panel-description">保存基线名单，检查指定日期，并可启动每小时监测。</p>
+          </header>
+
+          <div class="workspace-panel-body">
+            <div class="controls control-grid birdreport-monitor-controls">
+              <div class="control">
+                <label for="zhejiangRareMonitorDate">检查日期</label>
+                <input id="zhejiangRareMonitorDate" type="date" />
+              </div>
             </div>
-            <div class="control">
-              <label for="ebirdSeasonalWindow">前后天数</label>
-              <input id="ebirdSeasonalWindow" type="number" min="0" max="14" value="7" />
+            <div class="actions action-bar birdreport-monitor-actions">
+              <button id="saveZhejiangRareSpeciesBtn">保存浙江稀有鸟种名单</button>
+              <button id="checkZhejiangRareSpeciesBtn" class="ghost">立即检查所选日期数据</button>
+              <button id="toggleZhejiangRareMonitorBtn" class="ghost">开始每小时监测</button>
+            </div>
+            <div class="result-zone" aria-live="polite">
+              <p id="zhejiangRareSpeciesMessage" class="message" aria-live="polite"></p>
+              <div id="zhejiangRareSpeciesSummary" class="stats"></div>
+              <div id="zhejiangRareSpeciesContainer" class="records cards" data-empty-state="monitor">
+                <div class="empty-state result-empty" role="status">
+                  <strong class="empty-state-title">等待检查稀有鸟种</strong>
+                  <span>保存基线名单或立即检查所选日期后，命中结果会显示在这里。</span>
+                </div>
+              </div>
             </div>
           </div>
-          <div class="actions ebird-seasonal-actions">
-            <button id="analyzeEbirdSeasonalBtn">分析浙江当季鸟种</button>
-            <button id="clearEbirdSeasonalCacheBtn" class="ghost">清除历史缓存</button>
-          </div>
-          <p id="ebirdSeasonalMessage" class="message" aria-live="polite"></p>
-          <div id="ebirdSeasonalSummary" class="stats"></div>
-          <div id="ebirdSeasonalContainer" class="records cards"></div>
-        </div>
-        <div id="regionQueryBackdrop" class="query-detail-backdrop is-hidden" aria-hidden="true"></div>
+        </section>
+        <div id="zhejiangRareSpeciesDetailBackdrop" class="birdreport-rare-detail-backdrop is-hidden" aria-hidden="true"></div>
         <div
-          id="regionQueryDetail"
-          class="query-detail-panel is-hidden"
-          aria-live="polite"
-          aria-modal="true"
-          role="dialog"
-          aria-label="鸟种查询详情"
-        ></div>
-      </section>
-
-      <section id="birdreportSection" class="panel">
-        <h2>BirdReport 查询</h2>
-        <p class="hint">
-          按省 / 市 / 区、观测地点和时间范围查看符合条件的鸟种。
-        </p>
-
-        <div class="controls birdreport-controls">
-          <div class="control">
-            <label for="birdreportStartDate">开始日期</label>
-            <input id="birdreportStartDate" type="date" />
-          </div>
-          <div class="control">
-            <label for="birdreportEndDate">结束日期</label>
-            <input id="birdreportEndDate" type="date" />
-          </div>
-          <div class="control">
-            <label for="birdreportProvince">省</label>
-            <select id="birdreportProvince">
-              <option value="">请选择省</option>
-            </select>
-          </div>
-          <div class="control">
-            <label for="birdreportCity">市</label>
-            <select id="birdreportCity">
-              <option value="">请选择市</option>
-            </select>
-          </div>
-          <div class="control">
-            <label for="birdreportDistrict">区</label>
-            <select id="birdreportDistrict">
-              <option value="">请选择区</option>
-            </select>
-          </div>
-          <div class="control birdreport-point-control">
-            <label for="birdreportPointName">观测地点</label>
-            <input id="birdreportPointName" type="text" placeholder="例如 西溪湿地、鄱阳湖、某公园" autocomplete="off" />
-          </div>
-        </div>
-
-        <div class="actions birdreport-actions">
-          <button id="queryBirdreportProxyBtn">查询鸟种</button>
-          <button id="openBirdreportTaxonBtn" class="ghost">打开 BirdReport 结果页</button>
-          <button id="openBirdreportSearchBtn" class="ghost">打开 BirdReport 查询页</button>
-        </div>
-        <p id="birdreportMessage" class="message" aria-live="polite"></p>
-        <div id="birdreportSpeciesSummary" class="stats"></div>
-        <div id="birdreportSpeciesContainer" class="records cards"></div>
-        <div id="birdreportSpeciesDetailBackdrop" class="birdreport-rare-detail-backdrop is-hidden" aria-hidden="true"></div>
-        <div
-          id="birdreportSpeciesDetail"
+          id="zhejiangRareSpeciesDetail"
           class="birdreport-rare-detail-panel is-hidden"
           aria-live="polite"
           aria-modal="true"
           role="dialog"
-          aria-label="BirdReport 鸟种地点详情"
+          aria-label="浙江稀有鸟种观测地点详情"
         ></div>
 
-      </section>
+        <section id="unlockedSection" class="panel workspace-panel birdreport-unlocked-panel" aria-labelledby="unlockedSectionTitle">
+          <header class="workspace-panel-header">
+            <div class="workspace-panel-title">
+              <p class="workspace-panel-kicker">缺口</p>
+              <h2 id="unlockedSectionTitle">未解锁鸟种查询</h2>
+            </div>
+            <p class="workspace-panel-description">输入记录中心用户名，快速查看浙江名录中还未解锁的鸟种。</p>
+          </header>
 
+          <div class="workspace-panel-body">
+            <div class="controls control-grid birdreport-unlocked-controls">
+              <div class="control birdreport-unlocked-user-control">
+                <label for="birdreportUnlockedUsername">记录用户</label>
+                <input id="birdreportUnlockedUsername" type="text" placeholder="输入记录中心用户名" autocomplete="off" />
+              </div>
+            </div>
+            <div class="actions action-bar birdreport-unlocked-actions">
+              <button id="queryUnlockedSpeciesBtn">查询未解锁鸟种</button>
+              <button id="exportUnlockedSpeciesBtn" class="ghost">导出表格</button>
+              <button id="clearUnlockedSpeciesBtn" class="ghost">清空结果</button>
+            </div>
+            <div class="result-zone" aria-live="polite">
+              <p id="unlockedSpeciesMessage" class="message" aria-live="polite"></p>
+              <div id="unlockedSpeciesSummary" class="stats"></div>
+              <div id="unlockedSpeciesContainer" class="unlocked-species-list" data-empty-state="unlocked">
+                <div class="empty-state result-empty" role="status">
+                  <strong class="empty-state-title">等待查询记录用户</strong>
+                  <span>输入记录中心用户名后，会显示浙江名录中还未解锁的鸟种。</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="birdPrepSection" class="panel workspace-panel bird-prep-panel" aria-labelledby="birdPrepSectionTitle">
+          <header class="workspace-panel-header">
+            <div class="workspace-panel-title">
+              <p class="workspace-panel-kicker">预习</p>
+              <h2 id="birdPrepSectionTitle">鸟类预习 PPT</h2>
+            </div>
+            <p class="workspace-panel-description">按地区和日期查询鸟种，多选后生成带简介和可选图片的预习 PPT。</p>
+          </header>
+
+          <div class="workspace-panel-body">
+            <div class="controls control-grid bird-prep-controls">
+              <div class="control">
+                <label for="birdPrepProvince">省</label>
+                <select id="birdPrepProvince">
+                  <option value="">请选择省</option>
+                </select>
+              </div>
+              <div class="control">
+                <label for="birdPrepCity">市</label>
+                <select id="birdPrepCity">
+                  <option value="">请选择市</option>
+                </select>
+              </div>
+              <div class="control">
+                <label for="birdPrepDistrict">区</label>
+                <select id="birdPrepDistrict">
+                  <option value="">请选择区</option>
+                </select>
+              </div>
+              <div class="control bird-prep-point-control">
+                <label for="birdPrepPointName">观测地点</label>
+                <input id="birdPrepPointName" type="text" placeholder="例如 西溪湿地、鄱阳湖、某公园" autocomplete="off" />
+              </div>
+              <div class="control bird-prep-unlocked-user-control">
+                <label for="birdPrepUnlockedUsername">记录用户</label>
+                <input id="birdPrepUnlockedUsername" type="text" placeholder="可选：输入记录中心用户名，自动剔除已解锁鸟种" autocomplete="off" />
+              </div>
+              <div class="control">
+                <label for="birdPrepStartDate">开始日期</label>
+                <input id="birdPrepStartDate" type="date" />
+              </div>
+              <div class="control">
+                <label for="birdPrepEndDate">结束日期</label>
+                <input id="birdPrepEndDate" type="date" />
+              </div>
+              <label class="checkbox-control bird-prep-media-toggle" for="birdPrepMacaulayImages">
+                <input id="birdPrepMacaulayImages" type="checkbox" checked />
+                <span>添加 Macaulay Library 图片</span>
+              </label>
+              <label class="checkbox-control bird-prep-media-rights" for="birdPrepMacaulayRights">
+                <input id="birdPrepMacaulayRights" type="checkbox" />
+                <span>我确认这些图片用于自己有权使用的 PPT，并保留 Macaulay Library 署名</span>
+              </label>
+            </div>
+
+            <div class="actions action-bar bird-prep-actions">
+              <button id="queryBirdPrepSpeciesBtn">查询地区鸟种</button>
+              <button id="selectAllBirdPrepSpeciesBtn" class="ghost" type="button">全选当前列表</button>
+              <button id="clearBirdPrepSpeciesBtn" class="ghost" type="button">清空选择</button>
+              <button id="generateBirdPrepPptBtn" type="button">生成 PPT</button>
+            </div>
+
+            <div class="bird-prep-picker workspace-tool-card">
+              <div class="control">
+                <label for="birdPrepSpeciesSearch">搜索鸟种</label>
+                <input id="birdPrepSpeciesSearch" type="text" placeholder="输入中文名、学名、目或科过滤" autocomplete="off" />
+              </div>
+              <div class="control">
+                <label for="birdPrepSpeciesOptions">鸟种多选列表</label>
+                <div id="birdPrepSpeciesOptions" class="bird-prep-species-options" role="listbox" aria-multiselectable="true" tabindex="0" data-empty-state="bird-prep-picker">
+                  <div class="empty-state result-empty" role="status">
+                    <strong class="empty-state-title">等待地区鸟种</strong>
+                    <span>选择地区和日期后查询，再多选要生成 PPT 的鸟种。</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="result-zone" aria-live="polite">
+              <p class="hint compact">如果选中的鸟种在 <code>all_birds_full.json</code> 中没有简介，生成时会自动跳过并列出名称。</p>
+              <p id="birdPrepMessage" class="message" aria-live="polite"></p>
+              <div id="birdPrepProgress" class="bird-prep-progress is-hidden" aria-live="polite" aria-hidden="true">
+                <div class="bird-prep-progress-header">
+                  <span id="birdPrepProgressLabel" class="bird-prep-progress-label">等待生成</span>
+                  <span id="birdPrepProgressPercent" class="bird-prep-progress-percent">0%</span>
+                </div>
+                <progress id="birdPrepProgressBar" class="bird-prep-progress-bar" max="100" value="0">0%</progress>
+                <div id="birdPrepProgressDetail" class="bird-prep-progress-detail">选择鸟种后生成 PPT。</div>
+              </div>
+              <div id="birdPrepSummary" class="stats"></div>
+            </div>
+          </div>
+        </section>
+
+        <section id="ebirdSection" class="panel workspace-panel" aria-labelledby="ebirdSectionTitle">
+          <header class="workspace-panel-header">
+            <div class="workspace-panel-title">
+              <p class="workspace-panel-kicker">eBird</p>
+              <h2 id="ebirdSectionTitle">查询 eBird 区域记录</h2>
+            </div>
+            <p class="workspace-panel-description">使用 eBird API Key 查询区域最近观测，并分析浙江当季可能出现的鸟种。</p>
+          </header>
+
+          <div class="workspace-panel-body">
+            <div class="controls control-grid ebird-grid">
+              <div class="control">
+                <label for="ebirdApiKey">API 密钥</label>
+                <input id="ebirdApiKey" type="password" placeholder="输入你的 eBird API Key" autocomplete="off" />
+              </div>
+              <div class="control">
+                <label for="ebirdRegionCode">区域代码</label>
+                <input id="ebirdRegionCode" type="text" placeholder="例如 CN-31、US-NY、L123456" />
+              </div>
+              <div class="control">
+                <label for="ebirdBackDays">回溯天数</label>
+                <input id="ebirdBackDays" type="number" min="1" max="30" value="14" />
+              </div>
+            </div>
+
+            <div class="actions action-bar ebird-actions">
+              <button id="syncEbirdBtn">查询 eBird</button>
+              <button id="clearEbirdKeyBtn" class="ghost">清除密钥</button>
+            </div>
+            <div class="panel-notes">
+              <p class="hint compact">
+                区域代码可填国家、州省、区县或 locId。示例：<code>CN</code>、<code>CN-31</code>、
+                <code>US-CA</code>、<code>L7884500</code>。
+              </p>
+              <p class="hint compact">API 密钥仅保存在当前浏览器的本地存储中，区域结果只用于查看。</p>
+            </div>
+            <div class="result-zone" aria-live="polite">
+              <p id="ebirdMessage" class="message" aria-live="polite"></p>
+              <div id="regionQuerySummary" class="stats"></div>
+              <div id="regionQueryContainer" class="records cards" data-empty-state="ebird-region">
+                <div class="empty-state result-empty" role="status">
+                  <strong class="empty-state-title">等待 eBird 区域记录</strong>
+                  <span>填入 API Key、区域代码和回溯天数后，最近观测会显示在这里。</span>
+                </div>
+              </div>
+              <div class="sub-panel ebird-seasonal-panel" id="ebirdSeasonalPanel">
+                <div class="section-heading sub-panel-header">
+                  <h3>浙江当季可能出现鸟种</h3>
+                  <p class="hint compact">
+                    固定分析 <code>CN-33</code>，按目标日期前后窗口统计多年历史记录，并用最近 30 天记录标记是否已确认。
+                  </p>
+                </div>
+                <div class="controls control-grid ebird-seasonal-controls">
+                  <div class="control">
+                    <label for="ebirdSeasonalDate">目标日期</label>
+                    <input id="ebirdSeasonalDate" type="date" />
+                  </div>
+                  <div class="control">
+                    <label for="ebirdSeasonalYears">历史年份</label>
+                    <input id="ebirdSeasonalYears" type="number" min="1" max="15" value="10" />
+                  </div>
+                  <div class="control">
+                    <label for="ebirdSeasonalWindow">前后天数</label>
+                    <input id="ebirdSeasonalWindow" type="number" min="0" max="14" value="7" />
+                  </div>
+                </div>
+                <div class="actions action-bar ebird-seasonal-actions">
+                  <button id="analyzeEbirdSeasonalBtn">分析浙江当季鸟种</button>
+                  <button id="clearEbirdSeasonalCacheBtn" class="ghost">清除历史缓存</button>
+                </div>
+                <p id="ebirdSeasonalMessage" class="message" aria-live="polite"></p>
+                <div id="ebirdSeasonalSummary" class="stats"></div>
+                <div id="ebirdSeasonalContainer" class="records cards" data-empty-state="ebird-seasonal">
+                  <div class="empty-state result-empty" role="status">
+                    <strong class="empty-state-title">等待当季分析</strong>
+                    <span>选择目标日期并开始分析后，会列出浙江当季候选鸟种。</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="regionQueryBackdrop" class="query-detail-backdrop is-hidden" aria-hidden="true"></div>
+            <div
+              id="regionQueryDetail"
+              class="query-detail-panel is-hidden"
+              aria-live="polite"
+              aria-modal="true"
+              role="dialog"
+              aria-label="鸟种查询详情"
+            ></div>
+          </div>
+        </section>
+
+        <section id="birdreportSection" class="panel workspace-panel" aria-labelledby="birdreportSectionTitle">
+          <header class="workspace-panel-header">
+            <div class="workspace-panel-title">
+              <p class="workspace-panel-kicker">BirdReport</p>
+              <h2 id="birdreportSectionTitle">BirdReport 查询</h2>
+            </div>
+            <p class="workspace-panel-description">按省、市、区、观测地点和时间范围查看符合条件的鸟种。</p>
+          </header>
+
+          <div class="workspace-panel-body">
+            <div class="controls control-grid birdreport-controls">
+              <div class="control">
+                <label for="birdreportStartDate">开始日期</label>
+                <input id="birdreportStartDate" type="date" />
+              </div>
+              <div class="control">
+                <label for="birdreportEndDate">结束日期</label>
+                <input id="birdreportEndDate" type="date" />
+              </div>
+              <div class="control">
+                <label for="birdreportProvince">省</label>
+                <select id="birdreportProvince">
+                  <option value="">请选择省</option>
+                </select>
+              </div>
+              <div class="control">
+                <label for="birdreportCity">市</label>
+                <select id="birdreportCity">
+                  <option value="">请选择市</option>
+                </select>
+              </div>
+              <div class="control">
+                <label for="birdreportDistrict">区</label>
+                <select id="birdreportDistrict">
+                  <option value="">请选择区</option>
+                </select>
+              </div>
+              <div class="control birdreport-point-control">
+                <label for="birdreportPointName">观测地点</label>
+                <input id="birdreportPointName" type="text" placeholder="例如 西溪湿地、鄱阳湖、某公园" autocomplete="off" />
+              </div>
+            </div>
+
+            <div class="actions action-bar birdreport-actions">
+              <button id="queryBirdreportProxyBtn">查询鸟种</button>
+              <button id="openBirdreportTaxonBtn" class="ghost">打开 BirdReport 结果页</button>
+              <button id="openBirdreportSearchBtn" class="ghost">打开 BirdReport 查询页</button>
+            </div>
+            <div class="result-zone" aria-live="polite">
+              <p id="birdreportMessage" class="message" aria-live="polite"></p>
+              <div id="birdreportSpeciesSummary" class="stats"></div>
+              <div id="birdreportSpeciesContainer" class="records cards" data-empty-state="birdreport">
+                <div class="empty-state result-empty" role="status">
+                  <strong class="empty-state-title">等待 BirdReport 查询</strong>
+                  <span>选择时间和地区后，符合条件的鸟种结果会显示在这里。</span>
+                </div>
+              </div>
+              <div id="birdreportSpeciesDetailBackdrop" class="birdreport-rare-detail-backdrop is-hidden" aria-hidden="true"></div>
+              <div
+                id="birdreportSpeciesDetail"
+                class="birdreport-rare-detail-panel is-hidden"
+                aria-live="polite"
+                aria-modal="true"
+                role="dialog"
+                aria-label="BirdReport 鸟种地点详情"
+              ></div>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
     <script src="./vendor/jquery.min.js?v=20260507-0004"></script>
@@ -325,6 +404,6 @@
     <script src="./beaubird-birdreport-core.js?v=20260602-0002"></script>
     <script src="./ebird-seasonal-core.js?v=20260507-0004"></script>
     <script src="./bird-prep-ppt-core.js?v=20260517-0001"></script>
-    <script src="./script.js?v=20260602-0002"></script>
+    <script src="./script.js?v=20260613-0001"></script>
   </body>
 </html>

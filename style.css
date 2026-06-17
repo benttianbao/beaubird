@@ -41,6 +41,12 @@
   --section-selected: color-mix(in oklch, var(--section-accent) 14%, var(--panel-muted));
   --controls-surface: color-mix(in oklch, var(--section-accent) 7%, var(--panel-muted));
   --controls-border: color-mix(in oklch, var(--section-accent) 18%, var(--border));
+  --control-padding-y: 7px;
+  --control-padding-x: 10px;
+  --control-grid-gap: 8px;
+  --control-shell-padding: 10px;
+  --button-padding-y: 8px;
+  --button-padding-x: 14px;
   --stats-surface: color-mix(in oklch, var(--section-accent) 5%, var(--panel-muted));
   --state-success-bg: oklch(94% 0.026 148);
   --state-success-text: oklch(34% 0.076 148);
@@ -202,6 +208,7 @@ body {
   font-size: 0.88rem;
   font-weight: 650;
   text-align: left;
+  isolation: isolate;
   transition:
     background-color 160ms var(--ease-out-quart),
     border-color 160ms var(--ease-out-quart),
@@ -233,11 +240,11 @@ body {
 .app-quicknav-btn::before {
   content: "";
   position: absolute;
-  left: 0;
+  left: 4px;
   top: 50%;
   width: 3px;
-  height: 20px;
-  border-radius: 0 999px 999px 0;
+  height: 22px;
+  border-radius: 999px;
   background: var(--nav-accent);
   opacity: 0;
   transform: translateY(-50%) scaleY(0.55);
@@ -247,14 +254,15 @@ body {
 }
 
 .app-quicknav-btn:hover {
-  background: var(--sidebar-hover);
+  border-color: color-mix(in oklch, var(--nav-accent) 24%, var(--sidebar-line));
+  background: color-mix(in oklch, var(--nav-accent) 10%, var(--sidebar-hover));
   color: var(--sidebar-ink);
   filter: none;
 }
 
 .app-quicknav-btn.is-active {
-  border-color: var(--sidebar-line);
-  background: var(--sidebar-active);
+  border-color: color-mix(in oklch, var(--nav-accent) 42%, var(--sidebar-line));
+  background: color-mix(in oklch, var(--nav-accent) 20%, var(--sidebar-active));
   color: var(--sidebar-ink);
   box-shadow: var(--shadow-nav-active);
 }
@@ -279,7 +287,8 @@ body {
 }
 
 .app-quicknav-btn.is-active .quicknav-icon {
-  background: color-mix(in oklch, var(--nav-accent) 24%, transparent);
+  background: color-mix(in oklch, var(--nav-accent) 34%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--nav-accent) 45%, transparent);
 }
 
 .quicknav-icon svg {
@@ -298,6 +307,10 @@ body {
   text-overflow: ellipsis;
 }
 
+.app-quicknav-btn.is-active .quicknav-text {
+  font-weight: 800;
+}
+
 .container {
   width: 100%;
   max-width: 100%;
@@ -314,27 +327,22 @@ body {
 
 #monitorSection {
   --section-accent: var(--accent-monitor);
-  --empty-icon: "🔍";
 }
 
 #unlockedSection {
   --section-accent: var(--accent-unlocked);
-  --empty-icon: "📋";
 }
 
 #birdPrepSection {
   --section-accent: var(--accent-ppt);
-  --empty-icon: "🦅";
 }
 
 #ebirdSection {
   --section-accent: var(--accent-ebird);
-  --empty-icon: "🗺️";
 }
 
 #birdreportSection {
   --section-accent: var(--accent-birdreport);
-  --empty-icon: "📊";
 }
 
 .panel {
@@ -351,6 +359,33 @@ body {
     border-color 180ms var(--ease-out-quart),
     box-shadow 180ms var(--ease-out-quart),
     background-color 180ms var(--ease-out-quart);
+}
+
+.workspace-panel {
+  scroll-margin-top: calc(var(--sticky-nav-offset) + 14px);
+}
+
+.workspace-panel--priority {
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--section-accent) 8%, var(--panel)) 0%, var(--section-surface) 56%),
+    var(--section-surface);
+  border-color: color-mix(in oklch, var(--section-accent) 30%, var(--border));
+  box-shadow: 0 2px 5px rgba(24, 36, 38, 0.06), 0 12px 26px rgba(24, 36, 38, 0.05);
+}
+
+.workspace-panel--priority .workspace-panel-header {
+  grid-template-columns: minmax(0, 1.15fr) minmax(240px, 0.72fr);
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+}
+
+.workspace-panel--priority h2 {
+  font-size: 1.22rem;
+}
+
+.workspace-panel--priority .workspace-panel-description {
+  color: color-mix(in oklch, var(--section-accent) 18%, var(--muted));
+  font-weight: 560;
 }
 
 .panel::before {
@@ -374,7 +409,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0 0 14px;
+  margin: 0;
   font-size: 1.12rem;
   line-height: 1.3;
 }
@@ -387,6 +422,58 @@ body {
   border-radius: 3px;
   background: var(--section-accent);
   box-shadow: none;
+}
+
+.workspace-panel-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.78fr);
+  align-items: start;
+  gap: 18px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--section-divider);
+}
+
+.workspace-panel-title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.workspace-panel-kicker {
+  margin: 0;
+  color: color-mix(in oklch, var(--section-accent) 74%, var(--muted));
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.workspace-panel-description {
+  max-width: 58ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.workspace-panel-body {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.result-zone,
+.panel-notes {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.result-zone {
+  margin-top: 2px;
 }
 
 @keyframes panel-jump-focus {
@@ -415,10 +502,10 @@ body {
 .control label,
 .map-controls label {
   display: block;
-  margin: 0 0 5px;
+  margin: 0 0 4px;
   color: var(--text);
   font-weight: 700;
-  font-size: 0.84rem;
+  font-size: 0.8rem;
 }
 
 input[type="file"],
@@ -442,7 +529,7 @@ select,
 input[type="file"] {
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 8px 10px;
+  padding: var(--control-padding-y) var(--control-padding-x);
   background: var(--surface);
   color: var(--text);
   box-shadow: inset 0 1px 0 rgba(24, 36, 38, 0.02);
@@ -470,17 +557,31 @@ textarea {
 }
 
 .actions {
-  margin-top: 12px;
+  margin-top: 8px;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  gap: var(--control-grid-gap);
+}
+
+.control-grid {
+  align-items: end;
+}
+
+.action-bar {
+  margin-top: 0;
+  align-items: center;
+}
+
+.action-bar button {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .ebird-grid {
   display: grid;
   grid-template-columns: 2fr 1.2fr 0.8fr;
-  gap: 10px;
-  padding: 12px;
+  gap: var(--control-grid-gap);
+  padding: var(--control-shell-padding);
   background: var(--controls-surface);
   border: 1px solid var(--controls-border);
   border-radius: 10px;
@@ -548,15 +649,19 @@ textarea {
 }
 
 .bird-prep-picker {
-  margin-top: 12px;
+  margin-top: 0;
   display: grid;
   grid-template-columns: minmax(220px, 0.7fr) minmax(320px, 1.3fr);
-  gap: 10px;
-  padding: 12px;
+  gap: var(--control-grid-gap);
+  padding: var(--control-shell-padding);
   background: var(--controls-surface);
   border: 1px solid var(--controls-border);
   border-radius: 10px;
   box-shadow: inset 0 1px 0 color-mix(in oklch, var(--surface) 72%, transparent);
+}
+
+.workspace-tool-card {
+  background: color-mix(in oklch, var(--section-accent) 5%, var(--panel-muted));
 }
 
 .bird-prep-species-options {
@@ -606,22 +711,104 @@ textarea {
   color: var(--muted);
 }
 
+.bird-prep-progress {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--section-divider);
+  border-radius: 10px;
+  background: var(--stats-surface);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 color-mix(in oklch, var(--surface) 72%, transparent);
+}
+
+.bird-prep-progress.is-hidden {
+  display: none;
+}
+
+.bird-prep-progress-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bird-prep-progress-label {
+  min-width: 0;
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.bird-prep-progress-percent {
+  flex: 0 0 auto;
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: var(--section-link);
+}
+
+.bird-prep-progress-bar {
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--section-accent) 10%, var(--surface));
+}
+
+.bird-prep-progress-bar::-webkit-progress-bar {
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--section-accent) 10%, var(--surface));
+}
+
+.bird-prep-progress-bar::-webkit-progress-value {
+  border-radius: 999px;
+  background: var(--section-accent);
+}
+
+.bird-prep-progress-bar::-moz-progress-bar {
+  border-radius: 999px;
+  background: var(--section-accent);
+}
+
+.bird-prep-progress-detail {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.bird-prep-progress.is-complete {
+  border-color: color-mix(in oklch, var(--state-success-text) 36%, var(--section-divider));
+  background: color-mix(in oklch, var(--state-success-bg) 68%, var(--stats-surface));
+}
+
+.bird-prep-progress.is-error {
+  border-color: color-mix(in oklch, var(--danger) 44%, var(--section-divider));
+  background: color-mix(in oklch, var(--danger) 8%, var(--stats-surface));
+}
+
 .birdreport-unlocked-actions {
   grid-template-columns: repeat(3, minmax(0, 220px));
 }
 
 .birdreport-unlocked-controls {
-  margin-top: 10px;
+  margin-top: 4px;
   grid-template-columns: minmax(0, 360px);
 }
 
 .birdreport-monitor-actions {
-  grid-template-columns: repeat(3, minmax(0, 220px));
+  grid-template-columns: minmax(0, 220px) repeat(2, minmax(0, 210px));
 }
 
 .birdreport-monitor-controls {
-  margin-top: 10px;
-  grid-template-columns: minmax(0, 260px);
+  margin-top: 2px;
+  grid-template-columns: minmax(180px, 240px);
+}
+
+.workspace-panel--priority .birdreport-monitor-actions {
+  grid-template-columns: minmax(190px, 240px) repeat(2, minmax(170px, 220px));
 }
 
 .embedded-android-app {
@@ -724,7 +911,8 @@ textarea {
   box-shadow: none;
 }
 
-.embedded-android-app .life-list-panel {
+.embedded-android-app .life-list-panel,
+.embedded-android-app .sub-panel {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--border);
@@ -821,7 +1009,7 @@ textarea {
 button {
   border: 1px solid transparent;
   border-radius: 10px;
-  padding: 9px 16px;
+  padding: var(--button-padding-y) var(--button-padding-x);
   cursor: pointer;
   background: var(--section-accent);
   color: var(--surface);
@@ -897,6 +1085,14 @@ button.danger {
   color: var(--muted);
 }
 
+.result-zone > .message {
+  margin-top: 0;
+}
+
+.message.error {
+  color: var(--danger);
+}
+
 .message.is-loading {
   display: inline-flex;
   align-items: center;
@@ -932,9 +1128,9 @@ button.danger {
 .controls {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: var(--control-grid-gap);
   min-width: 0;
-  padding: 12px;
+  padding: var(--control-shell-padding);
   background: var(--controls-surface);
   border: 1px solid var(--controls-border);
   border-radius: 10px;
@@ -1118,6 +1314,21 @@ button.danger {
 .section-heading h3 {
   margin: 0 0 6px;
   font-size: 1rem;
+}
+
+.sub-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--section-divider);
+  border-radius: var(--radius-panel);
+  background: color-mix(in oklch, var(--section-accent) 4%, var(--panel-muted));
+}
+
+.sub-panel-header {
+  margin-top: 0;
 }
 
 .life-list-panel {
@@ -2090,25 +2301,42 @@ body.query-detail-open {
 }
 
 .empty-state {
-  border: 1px dashed var(--border);
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  border: 1px dashed color-mix(in oklch, var(--section-accent) 26%, var(--border));
   border-radius: 10px;
-  padding: 18px;
+  padding: 16px;
   background: color-mix(in oklch, var(--section-accent) 6%, var(--panel-muted));
   color: var(--muted);
   text-align: center;
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .empty-state::before {
-  content: var(--empty-icon, "•");
+  content: "";
   display: block;
-  width: 38px;
-  height: 38px;
-  margin: 0 auto 8px;
+  width: 34px;
+  height: 34px;
+  margin: 0 auto 4px;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--section-accent) 10%, var(--surface));
-  color: color-mix(in oklch, var(--section-accent) 70%, var(--text));
-  font-size: 1.25rem;
-  line-height: 38px;
+  border: 2px solid color-mix(in oklch, var(--section-accent) 46%, transparent);
+  background:
+    radial-gradient(circle at center, color-mix(in oklch, var(--section-accent) 58%, var(--surface)) 0 3px, transparent 4px),
+    color-mix(in oklch, var(--section-accent) 9%, var(--surface));
+}
+
+.result-empty {
+  min-height: 116px;
+  align-content: center;
+}
+
+.empty-state-title {
+  display: block;
+  color: color-mix(in oklch, var(--section-accent) 46%, var(--text));
+  font-size: 0.94rem;
+  font-weight: 800;
 }
 
 .map-controls {
@@ -2190,6 +2418,12 @@ canvas {
 }
 
 @media (max-width: 860px) {
+  :root {
+    --control-padding-y: 9px;
+    --control-padding-x: 10px;
+    --button-padding-y: 10px;
+  }
+
   .workspace-shell {
     grid-template-columns: 1fr;
   }
@@ -2253,7 +2487,7 @@ canvas {
 
   .app-quicknav-btn {
     width: auto;
-    min-height: 36px;
+    min-height: 40px;
     padding: 0 12px;
     justify-content: center;
     text-align: center;
@@ -2261,11 +2495,40 @@ canvas {
   }
 
   .app-quicknav-btn::before {
-    display: none;
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: 4px;
+    width: auto;
+    height: 3px;
+    border-radius: 999px;
+    transform: scaleX(0.45);
+    transform-origin: center;
+  }
+
+  .app-quicknav-btn.is-active::before {
+    transform: scaleX(1);
   }
 
   .panel {
     padding: 16px;
+  }
+
+  .workspace-panel-header {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+  }
+
+  .workspace-panel-description {
+    max-width: none;
+  }
+
+  .workspace-panel-body,
+  .result-zone,
+  .panel-notes {
+    gap: 10px;
   }
 
   .import-grid,
@@ -2285,6 +2548,11 @@ canvas {
 
   .bird-prep-picker {
     grid-template-columns: 1fr;
+  }
+
+  .sub-panel {
+    margin-top: 10px;
+    padding: 12px;
   }
 
   .bird-prep-point-control,
@@ -2394,9 +2662,14 @@ canvas {
   .hero p,
   .hint,
   .hint.compact,
+  .workspace-panel-description,
   .message,
   .stats {
     font-size: 0.88rem;
+  }
+
+  .workspace-panel-kicker {
+    font-size: 0.66rem;
   }
 
   .panel h2 {
@@ -2511,6 +2784,16 @@ canvas {
 
   .panel {
     padding: 12px;
+    border-radius: 10px;
+  }
+
+  .workspace-panel-header {
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+  }
+
+  .sub-panel {
+    padding: 10px;
     border-radius: 10px;
   }
 
