@@ -264,6 +264,12 @@ test("bird prep species picker uses checkboxes instead of native multi-select", 
   assert.match(script, /data-bird-prep-species-key/);
 });
 
+test("bird prep species query sorts options by record count descending", () => {
+  assert.match(script, /function sortBirdreportTaxaByRecordCountDesc\(items\) \{/);
+  assert.match(script, /return BIRDREPORT_CORE\.sortBirdreportTaxaByRecordCountDesc\(items\);/);
+  assert.match(script, /const sortedResults = sortBirdreportTaxaByRecordCountDesc\(filterResult\.species\);/);
+});
+
 test("bird prep query controls include district and point name filters", () => {
   assert.match(html, /id="birdPrepDistrict"/);
   assert.match(html, /id="birdPrepPointName"/);
@@ -429,8 +435,8 @@ test("shared data, utility, and BirdReport core modules load before the app scri
 
 test("frontend shared assets use the current deployment cache version", () => {
   assert.match(html, /style\.css\?v=20260613-0001/);
-  assert.match(html, /beaubird-birdreport-core\.js\?v=20260602-0002/);
-  assert.match(html, /script\.js\?v=20260613-0001/);
+  assert.match(html, /beaubird-birdreport-core\.js\?v=20260617-0001/);
+  assert.match(html, /script\.js\?v=20260617-0001/);
 });
 
 test("main script consumes shared modules and removes the unused unlocked export overlay", () => {

@@ -252,6 +252,18 @@
     });
   }
 
+  function sortBirdreportTaxaByRecordCountDesc(items) {
+    return [...(items || [])].sort((left, right) => {
+      const leftCount = Number(left?.recordcount) || 0;
+      const rightCount = Number(right?.recordcount) || 0;
+      if (leftCount !== rightCount) {
+        return rightCount - leftCount;
+      }
+
+      return getBirdreportTaxonName(left).localeCompare(getBirdreportTaxonName(right), "zh-CN");
+    });
+  }
+
   function normalizeBirdreportSerialId(record) {
     return String(record?.serialId || record?.id || "")
       .replace(/\D/g, "")
@@ -355,6 +367,7 @@
     serializeBirdreportRequestData,
     sortBirdreportObjectKeys,
     sortBirdreportRecordsByObservationTimeDesc,
-    sortBirdreportTaxaByRecordCount
+    sortBirdreportTaxaByRecordCount,
+    sortBirdreportTaxaByRecordCountDesc
   };
 });

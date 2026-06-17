@@ -18,7 +18,8 @@ const {
   serializeBirdreportRequestData,
   sortBirdreportObjectKeys,
   sortBirdreportRecordsByObservationTimeDesc,
-  sortBirdreportTaxaByRecordCount
+  sortBirdreportTaxaByRecordCount,
+  sortBirdreportTaxaByRecordCountDesc
 } = require("../beaubird-birdreport-core");
 
 test("createBirdreportPayload builds the default BirdReport request contract", () => {
@@ -198,6 +199,12 @@ test("dedupe and sort helpers keep stable BirdReport ordering", () => {
   ];
   assert.deepEqual(dedupeBirdreportTaxa(taxa).map(getBirdreportTaxonKey), ["2", "1"]);
   assert.deepEqual(sortBirdreportTaxaByRecordCount(taxa).map(getBirdreportTaxonName), ["彩鹮", "彩鹮", "白鹭"]);
+
+  assert.deepEqual(sortBirdreportTaxaByRecordCountDesc(taxa).map(getBirdreportTaxonName), [
+    getBirdreportTaxonName(taxa[0]),
+    getBirdreportTaxonName(taxa[1]),
+    getBirdreportTaxonName(taxa[2])
+  ]);
 
   const records = [
     normalizeBirdreportRecord({ serial_id: "9", start_time: "2026-05-07 06:30", state: 2, point_name: "A" }),

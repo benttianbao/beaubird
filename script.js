@@ -3534,7 +3534,7 @@ async function queryBirdPrepSpecies() {
     const filterResult = unlockedLookup
       ? filterBirdPrepSpeciesByUnlocked(results, unlockedLookup)
       : { species: results, removedCount: 0 };
-    const sortedResults = sortBirdreportTaxaByRecordCount(filterResult.species);
+    const sortedResults = sortBirdreportTaxaByRecordCountDesc(filterResult.species);
     state.birdPrepSpeciesResults = sortedResults;
     state.birdPrepLastQueryPayload = { ...payload };
     state.birdPrepUnlockedFilteredCount = filterResult.removedCount;
@@ -5065,6 +5065,10 @@ function dedupeBirdreportTaxa(items) {
 
 function sortBirdreportTaxaByRecordCount(items) {
   return BIRDREPORT_CORE.sortBirdreportTaxaByRecordCount(items);
+}
+
+function sortBirdreportTaxaByRecordCountDesc(items) {
+  return BIRDREPORT_CORE.sortBirdreportTaxaByRecordCountDesc(items);
 }
 
 function birdreportProxyPost(path, data) {
