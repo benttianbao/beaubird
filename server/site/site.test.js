@@ -610,6 +610,87 @@ test("proxies Macaulay Library search results as normalized media metadata", asy
   }
 });
 
+test("falls back to Macaulay catalog HTML when the JSON search endpoint is unavailable", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+    const upstreamCalls = [];
+    const catalogHtml = `
+      <script>
+        window.__NUXT__=(function(){
+          return {fetch:{"SearchPage:0":{list:[{
+            assetId:312541331,
+            mediaType:"photo",
+            eBirdChecklistId:"S82506368",
+            rating:4.890476190476191,
+            userDisplayName:"Jane Birder",
+            taxonomy:{speciesCode:"litegr"}
+          }]} }};
+        })();
+      </script>
+    `;
+
+    await withServer(
+      {
+        database: db,
+        projectRoot: process.cwd(),
+        fetchImpl: async (url, init) => {
+          upstreamCalls.push({ url, init });
+          if (url.startsWith("https://media.ebird.org/api/v1/search")) {
+            return new Response("<!doctype html><title>Not found</title>", {
+              status: 404,
+              headers: { "content-type": "text/html; charset=utf-8" }
+            });
+          }
+          return new Response(catalogHtml, {
+            status: 200,
+            headers: { "content-type": "text/html; charset=utf-8" }
+          });
+        }
+      },
+      async ({ request }) => {
+        const login = await request("/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+        });
+        const adminCookie = cookieFrom(login);
+
+        const proxied = await request("/api/media/macaulay/search?taxonCode=litegr", {
+          headers: { cookie: adminCookie }
+        });
+        assert.equal(proxied.status, 200);
+        assert.deepEqual(await json(proxied), {
+          results: [
+            {
+              mlId: "ML312541331",
+              assetId: "312541331",
+              attribution: "Jane Birder",
+              rating: 4.890476190476191,
+              checklistId: "S82506368",
+              previewUrl: "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/312541331/1200",
+              sourceUrl: "https://macaulaylibrary.org/asset/312541331"
+            }
+          ]
+        });
+        assert.equal(
+          upstreamCalls[1].url,
+          "https://media.ebird.org/catalog?taxonCode=litegr&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
+        );
+        assert.equal(upstreamCalls[1].init.headers.accept, "text/html");
+      }
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("proxies Macaulay Library assets and rejects invalid asset ids", async () => {
   const temp = createTempDatabase();
   try {

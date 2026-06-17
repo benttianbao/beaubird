@@ -403,6 +403,44 @@ async function proxyMacaulaySearch(context, url) {
     return json(context.response, 400, { error: "Missing Macaulay Library taxonCode or query" });
   }
 
+  const upstreamUrl = createMacaulayApiSearchUrl({ taxonCode, query });
+
+  const upstream = await context.fetchImpl(upstreamUrl.toString(), {
+    headers: {
+      accept: "application/json",
+      "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
+    }
+  });
+
+  let upstreamError = upstream.ok ? "" : `Macaulay Library search returned HTTP ${upstream.status}`;
+  let results = [];
+  const contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
+  if (upstream.ok && contentType.includes("application/json")) {
+    try {
+      const payload = await upstream.json();
+      results = normalizeMacaulaySearchResults(payload, { taxonCode, query });
+    } catch (error) {
+      upstreamError = `Macaulay Library search returned invalid JSON: ${error.message}`;
+    }
+  } else if (upstream.ok) {
+    upstreamError = "Macaulay Library search did not return JSON";
+  }
+
+  if (!results.length) {
+    const fallbackResults = await fetchMacaulayCatalogSearchResults(context, { taxonCode, query });
+    if (fallbackResults.length) {
+      results = fallbackResults;
+    }
+  }
+
+  if (!results.length && upstreamError) {
+    return json(context.response, upstream.ok ? 502 : upstream.status, { error: upstreamError });
+  }
+
+  return json(context.response, 200, { results });
+}
+
+function createMacaulayApiSearchUrl({ taxonCode = "", query = "" } = {}) {
   const upstreamUrl = new URL("https://media.ebird.org/api/v1/search");
   if (taxonCode) {
     upstreamUrl.searchParams.set("taxonCode", taxonCode);
@@ -414,20 +452,35 @@ async function proxyMacaulaySearch(context, url) {
   upstreamUrl.searchParams.set("sort", "rating_rank_desc");
   upstreamUrl.searchParams.set("birdOnly", "true");
   upstreamUrl.searchParams.set("count", "5");
+  return upstreamUrl;
+}
 
-  const upstream = await context.fetchImpl(upstreamUrl.toString(), {
+async function fetchMacaulayCatalogSearchResults(context, { taxonCode = "", query = "" } = {}) {
+  const catalogUrl = createMacaulayCatalogSearchUrl({ taxonCode, query });
+  const response = await context.fetchImpl(catalogUrl.toString(), {
     headers: {
-      accept: "application/json",
+      accept: "text/html",
       "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
     }
   });
-
-  if (!upstream.ok) {
-    return json(context.response, upstream.status, { error: `Macaulay Library search returned HTTP ${upstream.status}` });
+  if (!response.ok) {
+    return [];
   }
+  return normalizeMacaulayCatalogSearchResults(await response.text());
+}
 
-  const payload = await upstream.json();
-  return json(context.response, 200, { results: normalizeMacaulaySearchResults(payload, { taxonCode, query }) });
+function createMacaulayCatalogSearchUrl({ taxonCode = "", query = "" } = {}) {
+  const catalogUrl = new URL("https://media.ebird.org/catalog");
+  if (taxonCode) {
+    catalogUrl.searchParams.set("taxonCode", taxonCode);
+  } else {
+    catalogUrl.searchParams.set("q", query);
+    catalogUrl.searchParams.set("searchField", "species");
+  }
+  catalogUrl.searchParams.set("mediaType", "photo");
+  catalogUrl.searchParams.set("sort", "rating_rank_desc");
+  catalogUrl.searchParams.set("birdOnly", "true");
+  return catalogUrl;
 }
 
 async function proxyMacaulayAsset(context, rawAssetId) {
@@ -491,6 +544,57 @@ function normalizeMacaulaySearchResults(payload, criteria = {}) {
   }
 
   return results.slice(0, 5);
+}
+
+function normalizeMacaulayCatalogSearchResults(html) {
+  const source = String(html || "");
+  const searchIndex = source.indexOf('fetch:{"SearchPage:0"');
+  const searchSource = searchIndex === -1 ? source : source.slice(searchIndex);
+  const seen = new Set();
+  const results = [];
+  const assetPattern = /(?:^|[,{])\s*assetId:(\d+)/g;
+  let match;
+
+  while ((match = assetPattern.exec(searchSource)) && results.length < 5) {
+    const assetId = normalizeMacaulayAssetId(match[1]);
+    if (!assetId || seen.has(assetId)) {
+      continue;
+    }
+    seen.add(assetId);
+    const start = match.index;
+    const nextItem = searchSource.indexOf("},{ageSex:", start + 1);
+    const end = nextItem === -1 ? Math.min(searchSource.length, start + 3000) : nextItem;
+    const itemSource = searchSource.slice(start, end);
+    const rating = parseMacaulayCatalogNumber(itemSource, "rating");
+    results.push({
+      mlId: `ML${assetId}`,
+      assetId,
+      attribution: parseMacaulayCatalogString(itemSource, "userDisplayName"),
+      rating,
+      checklistId: parseMacaulayCatalogString(itemSource, "eBirdChecklistId"),
+      previewUrl: `https://cdn.download.ams.birds.cornell.edu/api/v1/asset/${assetId}/1200`,
+      sourceUrl: `https://macaulaylibrary.org/asset/${assetId}`
+    });
+  }
+
+  return results;
+}
+
+function parseMacaulayCatalogString(source, key) {
+  const match = String(source || "").match(new RegExp(`${key}:"([^"]*)"`, "i"));
+  if (!match) {
+    return "";
+  }
+  try {
+    return JSON.parse(`"${match[1].replace(/"/g, '\\"')}"`);
+  } catch {
+    return match[1].replace(/\\u002F/g, "/").replace(/\\"/g, '"');
+  }
+}
+
+function parseMacaulayCatalogNumber(source, key) {
+  const match = String(source || "").match(new RegExp(`${key}:([-+]?\\d+(?:\\.\\d+)?)`, "i"));
+  return match ? Number(match[1]) : null;
 }
 
 function isMacaulayMediaMatch(item, criteria = {}) {

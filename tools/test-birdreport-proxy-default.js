@@ -54,3 +54,11 @@ test("local Macaulay proxy uses JSON search and filters empty search bodies", ()
   assert.match(proxy, /Test-MacaulayMediaMatch/);
   assert.match(proxy, /\$searchBytes = @\(\$searchResponse\.BodyBytes\)/);
 });
+
+test("local Macaulay proxy can fall back to catalog HTML search results", () => {
+  const proxy = readFileSync("birdreport-proxy.ps1", "utf8");
+  assert.match(proxy, /Get-MacaulayCatalogSearchResults/);
+  assert.match(proxy, /media\.ebird\.org\/catalog/);
+  assert.match(proxy, /assetId:\(\\d\+\)/);
+  assert.match(proxy, /Accept "text\/html"/);
+});

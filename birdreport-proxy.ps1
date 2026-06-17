@@ -586,6 +586,55 @@ function Get-MacaulaySearchResults {
   return $items
 }
 
+function Get-MacaulayCatalogSearchResults {
+  param([string] $Html)
+
+  $items = New-Object System.Collections.Generic.List[object]
+  $seen = @{}
+  $source = [string]$Html
+  $searchIndex = $source.IndexOf('fetch:{"SearchPage:0"')
+  if ($searchIndex -ge 0) {
+    $source = $source.Substring($searchIndex)
+  }
+
+  $matches = [regex]::Matches($source, "(?:^|[,{])\s*assetId:(\d+)")
+  foreach ($match in $matches) {
+    $assetId = Get-MacaulayAssetId -Value $match.Groups[1].Value
+    if (-not $assetId -or $seen.ContainsKey($assetId)) {
+      continue
+    }
+    $seen[$assetId] = $true
+
+    $start = $match.Index
+    $nextItem = $source.IndexOf("},{ageSex:", $start + 1)
+    $length = if ($nextItem -gt $start) { $nextItem - $start } else { [Math]::Min(3000, $source.Length - $start) }
+    $itemSource = $source.Substring($start, $length)
+    $rating = $null
+    $ratingMatch = [regex]::Match($itemSource, "rating:([-+]?\d+(?:\.\d+)?)")
+    if ($ratingMatch.Success) {
+      $rating = [double]$ratingMatch.Groups[1].Value
+    }
+    $checklistMatch = [regex]::Match($itemSource, 'eBirdChecklistId:"([^"]*)"')
+    $userMatch = [regex]::Match($itemSource, 'userDisplayName:"([^"]*)"')
+
+    $items.Add([pscustomobject]@{
+      mlId = "ML$assetId"
+      assetId = $assetId
+      attribution = if ($userMatch.Success) { $userMatch.Groups[1].Value } else { "" }
+      rating = $rating
+      checklistId = if ($checklistMatch.Success) { $checklistMatch.Groups[1].Value } else { "" }
+      previewUrl = "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/$assetId/1200"
+      sourceUrl = "https://macaulaylibrary.org/asset/$assetId"
+    })
+
+    if ($items.Count -ge 5) {
+      break
+    }
+  }
+
+  return $items
+}
+
 Write-Host "BirdReport proxy listening on $prefix"
 Write-Host "Allowed endpoints:"
 $endpointMap.Keys | ForEach-Object { Write-Host "  $_" }
@@ -653,13 +702,31 @@ try {
         }
         $searchResponse = Invoke-MacaulayCurlRequest -RemotePath $remoteUrl -Accept "application/json"
         $searchBytes = @($searchResponse.BodyBytes)
-        if ($searchBytes.Count -eq 0) {
-          Write-JsonResponse -Context $context -StatusCode 200 -Body '{"results":[]}'
-          continue
+        $results = @()
+        if ($searchBytes.Count -gt 0 -and ([string]$searchResponse.ContentType).ToLowerInvariant().Contains("application/json")) {
+          try {
+            $searchJson = [System.Text.Encoding]::UTF8.GetString([byte[]]$searchBytes) | ConvertFrom-Json
+            $results = @(Get-MacaulaySearchResults -Payload $searchJson -TaxonCode $taxonCode -Query $query)
+          } catch {
+            $results = @()
+          }
         }
 
-        $searchJson = [System.Text.Encoding]::UTF8.GetString([byte[]]$searchBytes) | ConvertFrom-Json
-        $resultsJson = (Get-MacaulaySearchResults -Payload $searchJson -TaxonCode $taxonCode -Query $query | ConvertTo-Json -Depth 5 -Compress)
+        if ($results.Count -eq 0) {
+          if ($taxonCode) {
+            $catalogUrl = "https://media.ebird.org/catalog?taxonCode=$([uri]::EscapeDataString($taxonCode))&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
+          } else {
+            $catalogUrl = "https://media.ebird.org/catalog?q=$([uri]::EscapeDataString($query))&searchField=species&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
+          }
+          $catalogResponse = Invoke-MacaulayCurlRequest -RemotePath $catalogUrl -Accept "text/html"
+          $catalogBytes = @($catalogResponse.BodyBytes)
+          if ($catalogBytes.Count -gt 0) {
+            $catalogHtml = [System.Text.Encoding]::UTF8.GetString([byte[]]$catalogBytes)
+            $results = @(Get-MacaulayCatalogSearchResults -Html $catalogHtml)
+          }
+        }
+
+        $resultsJson = ($results | ConvertTo-Json -Depth 5 -Compress)
         if (-not $resultsJson) {
           $resultsJson = "[]"
         }
