@@ -32,7 +32,6 @@ const BIRD_PREP_LOGIN_EXPIRED_MESSAGE = "登录已过期，请重新登录后再
 const BIRD_PREP_MACAULAY_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const BIRD_PREP_MACAULAY_FETCH_TIMEOUT_MS = 90 * 1000;
 const BIRD_PREP_MACAULAY_FETCH_ATTEMPTS = 2;
-const BIRD_PREP_EBIRD_TAXONOMY_TIMEOUT_MS = 15 * 1000;
 const BIRD_PREP_IMAGE_DIMENSION_TIMEOUT_MS = 5000;
 const BIRDREPORT_CORE = window.BeauBirdBirdreportCore || {};
 const BIRDREPORT_VERSION = BIRDREPORT_CORE.BIRDREPORT_VERSION || "CH4";
@@ -3976,58 +3975,8 @@ async function loadBirdPrepMacaulayPhotos(selectedSpecies, slides, options = {})
 }
 
 async function loadBirdPrepMacaulayTaxonomyBySciName(scientificNames) {
-  const wanted = new Set((scientificNames || []).map(normalizeScientificName).filter(Boolean));
-  if (!wanted.size) {
-    return new Map();
-  }
-  if (state.birdPrepMacaulayTaxonomyBySciName) {
-    return state.birdPrepMacaulayTaxonomyBySciName;
-  }
-  if (state.birdPrepMacaulayTaxonomyLoading) {
-    return state.birdPrepMacaulayTaxonomyLoading;
-  }
-
-  const apiKey = getStoredEbirdApiKey();
-  state.birdPrepMacaulayTaxonomyLoading = fetchBirdPrepEbirdTaxonomy(apiKey)
-    .then((items) => {
-      const lookup = new Map();
-      items.forEach((item) => {
-        const sciName = normalizeScientificName(item?.sciName);
-        if (sciName && (!wanted.size || wanted.has(sciName))) {
-          lookup.set(sciName, String(item.speciesCode || "").trim());
-        }
-      });
-      state.birdPrepMacaulayTaxonomyBySciName = lookup;
-      return lookup;
-    })
-    .catch((error) => {
-      console.warn("Failed to load eBird taxonomy for Macaulay Library lookup:", error);
-      return new Map();
-    })
-    .finally(() => {
-      state.birdPrepMacaulayTaxonomyLoading = null;
-    });
-
-  return state.birdPrepMacaulayTaxonomyLoading;
-}
-
-async function fetchBirdPrepEbirdTaxonomy(apiKey) {
-  const url = new URL("https://api.ebird.org/v2/ref/taxonomy/ebird");
-  url.searchParams.set("fmt", "json");
-  url.searchParams.set("locale", EBIRD_SPECIES_LOCALE);
-  url.searchParams.set("cat", "species");
-
-  const headers = apiKey ? { "X-eBirdApiToken": apiKey } : {};
-  const response = await fetchWithTimeoutAndRetry(url.toString(), {
-    headers
-  }, {
-    timeoutMs: BIRD_PREP_EBIRD_TAXONOMY_TIMEOUT_MS
-  });
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`taxonomy 返回 ${response.status}：${errorText || "请求失败"}`);
-  }
-  return response.json();
+  void scientificNames;
+  return new Map();
 }
 
 async function fetchBirdPrepMacaulayPhoto(taxon, taxonomyBySciName, slide) {
