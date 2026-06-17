@@ -347,6 +347,14 @@ test("bird prep PPT Macaulay requests time out and retry", () => {
   assert.match(script, /for \(let attempt = 1; attempt <= attempts; attempt \+= 1\)/);
 });
 
+test("bird prep PPT eBird taxonomy lookup cannot block Macaulay image fallback", () => {
+  assert.match(script, /BIRD_PREP_EBIRD_TAXONOMY_TIMEOUT_MS/);
+  assert.match(
+    script,
+    /fetchWithTimeoutAndRetry\(url\.toString\(\), \{[\s\S]*headers[\s\S]*\}, \{[\s\S]*timeoutMs: BIRD_PREP_EBIRD_TAXONOMY_TIMEOUT_MS/
+  );
+});
+
 test("bird prep city changes load district options", () => {
   assert.match(script, /bindIfPresent\(elements\.birdPrepCity, "change", handleBirdPrepCityChange\)/);
   assert.match(script, /function handleBirdPrepCityChange\(\)/);
@@ -453,7 +461,7 @@ test("shared data, utility, and BirdReport core modules load before the app scri
 test("frontend shared assets use the current deployment cache version", () => {
   assert.match(html, /style\.css\?v=20260613-0001/);
   assert.match(html, /beaubird-birdreport-core\.js\?v=20260617-0001/);
-  assert.match(html, /script\.js\?v=20260618-0001/);
+  assert.match(html, /script\.js\?v=20260618-0002/);
 });
 
 test("main script consumes shared modules and removes the unused unlocked export overlay", () => {

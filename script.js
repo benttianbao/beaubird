@@ -32,6 +32,7 @@ const BIRD_PREP_LOGIN_EXPIRED_MESSAGE = "登录已过期，请重新登录后再
 const BIRD_PREP_MACAULAY_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
 const BIRD_PREP_MACAULAY_FETCH_TIMEOUT_MS = 90 * 1000;
 const BIRD_PREP_MACAULAY_FETCH_ATTEMPTS = 2;
+const BIRD_PREP_EBIRD_TAXONOMY_TIMEOUT_MS = 15 * 1000;
 const BIRD_PREP_IMAGE_DIMENSION_TIMEOUT_MS = 5000;
 const BIRDREPORT_CORE = window.BeauBirdBirdreportCore || {};
 const BIRDREPORT_VERSION = BIRDREPORT_CORE.BIRDREPORT_VERSION || "CH4";
@@ -4017,8 +4018,10 @@ async function fetchBirdPrepEbirdTaxonomy(apiKey) {
   url.searchParams.set("cat", "species");
 
   const headers = apiKey ? { "X-eBirdApiToken": apiKey } : {};
-  const response = await fetch(url, {
+  const response = await fetchWithTimeoutAndRetry(url.toString(), {
     headers
+  }, {
+    timeoutMs: BIRD_PREP_EBIRD_TAXONOMY_TIMEOUT_MS
   });
   if (!response.ok) {
     const errorText = await response.text();
