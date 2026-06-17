@@ -330,6 +330,23 @@ test("bird prep PPT reports the first Macaulay image failure when all downloads 
   assert.match(script, /Macaulay Library 图片全部失败：\$\{photoResult\.firstErrorMessage\}/);
 });
 
+test("bird prep PPT image lookup falls back to slide scientific names", () => {
+  assert.match(script, /fetchBirdPrepMacaulayPhoto\(taxon, taxonomyBySciName, slide\)/);
+  assert.match(script, /getBirdPrepTaxonScientificName\(taxon\) \|\| String\(slide\?\.latinName \|\| ""\)\.trim\(\)/);
+});
+
+test("bird prep PPT image dimension probing cannot block downloads forever", () => {
+  assert.match(script, /BIRD_PREP_IMAGE_DIMENSION_TIMEOUT_MS/);
+  assert.match(script, /setTimeout\(\(\) => finish\(\{ width: 0, height: 0 \}\), BIRD_PREP_IMAGE_DIMENSION_TIMEOUT_MS\)/);
+});
+
+test("bird prep PPT Macaulay requests time out and retry", () => {
+  assert.match(script, /BIRD_PREP_MACAULAY_FETCH_TIMEOUT_MS/);
+  assert.match(script, /BIRD_PREP_MACAULAY_FETCH_ATTEMPTS/);
+  assert.match(script, /new AbortController\(\)/);
+  assert.match(script, /for \(let attempt = 1; attempt <= attempts; attempt \+= 1\)/);
+});
+
 test("bird prep city changes load district options", () => {
   assert.match(script, /bindIfPresent\(elements\.birdPrepCity, "change", handleBirdPrepCityChange\)/);
   assert.match(script, /function handleBirdPrepCityChange\(\)/);
@@ -436,7 +453,7 @@ test("shared data, utility, and BirdReport core modules load before the app scri
 test("frontend shared assets use the current deployment cache version", () => {
   assert.match(html, /style\.css\?v=20260613-0001/);
   assert.match(html, /beaubird-birdreport-core\.js\?v=20260617-0001/);
-  assert.match(html, /script\.js\?v=20260617-0001/);
+  assert.match(html, /script\.js\?v=20260618-0001/);
 });
 
 test("main script consumes shared modules and removes the unused unlocked export overlay", () => {

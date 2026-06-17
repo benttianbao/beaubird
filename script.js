@@ -30,6 +30,9 @@ const ALL_BIRDS_FULL_SCRIPT_URL = "./all_birds_full.js";
 const ALL_BIRDS_FULL_GLOBAL = "BEAUBIRD_ALL_BIRDS_FULL";
 const BIRD_PREP_LOGIN_EXPIRED_MESSAGE = "登录已过期，请重新登录后再生成 PPT。";
 const BIRD_PREP_MACAULAY_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+const BIRD_PREP_MACAULAY_FETCH_TIMEOUT_MS = 90 * 1000;
+const BIRD_PREP_MACAULAY_FETCH_ATTEMPTS = 2;
+const BIRD_PREP_IMAGE_DIMENSION_TIMEOUT_MS = 5000;
 const BIRDREPORT_CORE = window.BeauBirdBirdreportCore || {};
 const BIRDREPORT_VERSION = BIRDREPORT_CORE.BIRDREPORT_VERSION || "CH4";
 const ANDROID_APP_USER_AGENT_TOKEN = "BeauBirdAndroidApp";
@@ -3918,7 +3921,10 @@ async function loadBirdPrepMacaulayPhotos(selectedSpecies, slides, options = {})
   });
 
   const scientificNames = slides
-    .map((slide) => getBirdPrepTaxonScientificName(taxaByName.get(window.BeauBirdPrepPpt.normalizeBirdName(slide.speciesName))))
+    .map((slide) => {
+      const taxon = taxaByName.get(window.BeauBirdPrepPpt.normalizeBirdName(slide.speciesName));
+      return getBirdPrepTaxonScientificName(taxon) || String(slide?.latinName || "").trim();
+    })
     .filter(Boolean);
   onProgress?.({
     phase: "taxonomy",
@@ -3944,7 +3950,7 @@ async function loadBirdPrepMacaulayPhotos(selectedSpecies, slides, options = {})
       detail: `正在下载图片 ${index + 1}/${slides.length}：${slide.speciesName}`
     });
     try {
-      const photo = await fetchBirdPrepMacaulayPhoto(taxon, taxonomyBySciName);
+      const photo = await fetchBirdPrepMacaulayPhoto(taxon, taxonomyBySciName, slide);
       if (photo) {
         slide.photo = photo;
         attachedCount += 1;
@@ -4021,8 +4027,8 @@ async function fetchBirdPrepEbirdTaxonomy(apiKey) {
   return response.json();
 }
 
-async function fetchBirdPrepMacaulayPhoto(taxon, taxonomyBySciName) {
-  const scientificName = getBirdPrepTaxonScientificName(taxon);
+async function fetchBirdPrepMacaulayPhoto(taxon, taxonomyBySciName, slide) {
+  const scientificName = getBirdPrepTaxonScientificName(taxon) || String(slide?.latinName || "").trim();
   const taxonCode = getBirdPrepMacaulayTaxonCode(taxon, taxonomyBySciName, scientificName);
   const cacheKey = taxonCode || scientificName || getBirdPrepTaxonName(taxon);
   if (!cacheKey) {
@@ -4121,7 +4127,55 @@ async function birdreportProxyGetImage(path) {
 
 function birdreportProxyGet(path) {
   const baseUrl = getBirdreportProxyBaseUrl();
-  return fetch(`${baseUrl}${path}`, { method: "GET" });
+  const url = `${baseUrl}${path}`;
+  if (String(path || "").startsWith("/api/media/macaulay/")) {
+    return fetchWithTimeoutAndRetry(url, {
+      method: "GET"
+    }, {
+      attempts: BIRD_PREP_MACAULAY_FETCH_ATTEMPTS,
+      timeoutMs: BIRD_PREP_MACAULAY_FETCH_TIMEOUT_MS
+    });
+  }
+  return fetch(url, { method: "GET" });
+}
+
+async function fetchWithTimeoutAndRetry(url, init = {}, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts) || 1);
+  const timeoutMs = Math.max(1, Number(options.timeoutMs) || 0);
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = timeoutMs && typeof AbortController === "function" ? new AbortController() : null;
+    const timeoutId = controller
+      ? setTimeout(() => controller.abort(), timeoutMs)
+      : null;
+    try {
+      const response = await fetch(url, {
+        ...init,
+        signal: controller?.signal || init.signal
+      });
+      if (response.ok || response.status < 500 || attempt === attempts) {
+        return response;
+      }
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) {
+        throw formatFetchTimeoutError(error, timeoutMs);
+      }
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  throw formatFetchTimeoutError(lastError, timeoutMs);
+}
+
+function formatFetchTimeoutError(error, timeoutMs) {
+  if (error?.name === "AbortError") {
+    return new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒）`);
+  }
+  return error instanceof Error ? error : new Error(String(error || "请求失败"));
 }
 
 function readImageDimensions(blob) {
@@ -4132,14 +4186,23 @@ function readImageDimensions(blob) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(blob);
     const image = new Image();
-    image.onload = () => {
-      const dimensions = { width: image.naturalWidth || 0, height: image.naturalHeight || 0 };
+    let settled = false;
+    let timeoutId = null;
+    const finish = (dimensions) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
       URL.revokeObjectURL(url);
       resolve(dimensions);
     };
+    timeoutId = setTimeout(() => finish({ width: 0, height: 0 }), BIRD_PREP_IMAGE_DIMENSION_TIMEOUT_MS);
+    image.onload = () => {
+      finish({ width: image.naturalWidth || 0, height: image.naturalHeight || 0 });
+    };
     image.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve({ width: 0, height: 0 });
+      finish({ width: 0, height: 0 });
     };
     image.src = url;
   });
