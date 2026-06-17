@@ -62,3 +62,11 @@ test("local Macaulay proxy can fall back to catalog HTML search results", () => 
   assert.match(proxy, /assetId:\(\\d\+\)/);
   assert.match(proxy, /Accept "text\/html"/);
 });
+
+test("local Macaulay proxy resolves scientific-name queries to eBird taxon codes", () => {
+  const proxy = readFileSync("birdreport-proxy.ps1", "utf8");
+  assert.match(proxy, /Resolve-MacaulayQueryTaxonCode/);
+  assert.match(proxy, /api\.ebird\.org\/v2\/ref\/taxonomy\/ebird/);
+  assert.match(proxy, /species=\$\(\[uri\]::EscapeDataString\(\$Query\)\)/);
+  assert.match(proxy, /catalog\?taxonCode=\$\(\[uri\]::EscapeDataString\(\$resolvedTaxonCode\)\)/);
+});

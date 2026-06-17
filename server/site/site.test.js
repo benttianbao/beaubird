@@ -691,6 +691,106 @@ test("falls back to Macaulay catalog HTML when the JSON search endpoint is unava
   }
 });
 
+test("resolves scientific-name Macaulay queries through eBird taxonomy before catalog fallback", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+    const upstreamCalls = [];
+    const taxonCatalogHtml = `
+      <script>
+        window.__NUXT__=(function(){
+          return {fetch:{"SearchPage:0":{list:[{
+            assetId:204246161,
+            mediaType:"photo",
+            eBirdChecklistId:"S123456",
+            rating:4.75,
+            userDisplayName:"Woodpecker Birder",
+            taxonomy:{speciesCode:"grswoo"}
+          }]} }};
+        })();
+      </script>
+    `;
+
+    await withServer(
+      {
+        database: db,
+        projectRoot: process.cwd(),
+        fetchImpl: async (url, init) => {
+          upstreamCalls.push({ url, init });
+          if (url.startsWith("https://media.ebird.org/api/v1/search")) {
+            return new Response("<!doctype html><title>Not found</title>", {
+              status: 404,
+              headers: { "content-type": "text/html; charset=utf-8" }
+            });
+          }
+          if (url.startsWith("https://api.ebird.org/v2/ref/taxonomy/ebird")) {
+            return new Response(
+              JSON.stringify([
+                {
+                  sciName: "Dendrocopos major",
+                  comName: "Great Spotted Woodpecker",
+                  speciesCode: "grswoo",
+                  category: "species"
+                }
+              ]),
+              { status: 200, headers: { "content-type": "application/json; charset=utf-8" } }
+            );
+          }
+          if (url.startsWith("https://media.ebird.org/catalog?taxonCode=grswoo")) {
+            return new Response(taxonCatalogHtml, {
+              status: 200,
+              headers: { "content-type": "text/html; charset=utf-8" }
+            });
+          }
+          throw new Error(`Unexpected upstream URL ${url}`);
+        }
+      },
+      async ({ request }) => {
+        const login = await request("/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+        });
+        const adminCookie = cookieFrom(login);
+
+        const proxied = await request("/api/media/macaulay/search?q=Dendrocopos%20major", {
+          headers: { cookie: adminCookie }
+        });
+        assert.equal(proxied.status, 200);
+        assert.deepEqual(await json(proxied), {
+          results: [
+            {
+              mlId: "ML204246161",
+              assetId: "204246161",
+              attribution: "Woodpecker Birder",
+              rating: 4.75,
+              checklistId: "S123456",
+              previewUrl: "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/204246161/1200",
+              sourceUrl: "https://macaulaylibrary.org/asset/204246161"
+            }
+          ]
+        });
+        assert.equal(
+          upstreamCalls[1].url,
+          "https://api.ebird.org/v2/ref/taxonomy/ebird?fmt=json&species=Dendrocopos+major&cat=species"
+        );
+        assert.equal(
+          upstreamCalls[2].url,
+          "https://media.ebird.org/catalog?taxonCode=grswoo&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
+        );
+      }
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("proxies Macaulay Library assets and rejects invalid asset ids", async () => {
   const temp = createTempDatabase();
   try {

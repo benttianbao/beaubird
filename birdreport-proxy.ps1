@@ -635,6 +635,43 @@ function Get-MacaulayCatalogSearchResults {
   return $items
 }
 
+function Resolve-MacaulayQueryTaxonCode {
+  param([string] $Query)
+
+  $trimmedQuery = ([string]$Query).Trim()
+  if (-not $trimmedQuery) {
+    return ""
+  }
+
+  $taxonomyUrl = "https://api.ebird.org/v2/ref/taxonomy/ebird?fmt=json&species=$([uri]::EscapeDataString($Query))&cat=species"
+  $taxonomyResponse = Invoke-MacaulayCurlRequest -RemotePath $taxonomyUrl -Accept "application/json"
+  $taxonomyBytes = @($taxonomyResponse.BodyBytes)
+  if ($taxonomyBytes.Count -eq 0 -or -not ([string]$taxonomyResponse.ContentType).ToLowerInvariant().Contains("application/json")) {
+    return ""
+  }
+
+  try {
+    $payload = [System.Text.Encoding]::UTF8.GetString([byte[]]$taxonomyBytes) | ConvertFrom-Json
+  } catch {
+    return ""
+  }
+
+  $queryKey = Normalize-MacaulayQuery $trimmedQuery
+  $items = @($payload)
+  $match = $null
+  foreach ($item in $items) {
+    if ((Normalize-MacaulayQuery $item.sciName) -eq $queryKey -or (Normalize-MacaulayQuery $item.comName) -eq $queryKey) {
+      $match = $item
+      break
+    }
+  }
+  if (-not $match -and $items.Count -gt 0) {
+    $match = $items[0]
+  }
+
+  return ([string]$match.speciesCode).Trim()
+}
+
 Write-Host "BirdReport proxy listening on $prefix"
 Write-Host "Allowed endpoints:"
 $endpointMap.Keys | ForEach-Object { Write-Host "  $_" }
@@ -709,6 +746,19 @@ try {
             $results = @(Get-MacaulaySearchResults -Payload $searchJson -TaxonCode $taxonCode -Query $query)
           } catch {
             $results = @()
+          }
+        }
+
+        if ($results.Count -eq 0 -and -not $taxonCode -and $query) {
+          $resolvedTaxonCode = Resolve-MacaulayQueryTaxonCode -Query $query
+          if ($resolvedTaxonCode) {
+            $catalogUrl = "https://media.ebird.org/catalog?taxonCode=$([uri]::EscapeDataString($resolvedTaxonCode))&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
+            $catalogResponse = Invoke-MacaulayCurlRequest -RemotePath $catalogUrl -Accept "text/html"
+            $catalogBytes = @($catalogResponse.BodyBytes)
+            if ($catalogBytes.Count -gt 0) {
+              $catalogHtml = [System.Text.Encoding]::UTF8.GetString([byte[]]$catalogBytes)
+              $results = @(Get-MacaulayCatalogSearchResults -Html $catalogHtml)
+            }
           }
         }
 

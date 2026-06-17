@@ -426,6 +426,18 @@ async function proxyMacaulaySearch(context, url) {
     upstreamError = "Macaulay Library search did not return JSON";
   }
 
+  if (!results.length && query && !taxonCode) {
+    const resolvedTaxonCode = await resolveMacaulayQueryTaxonCode(context, query);
+    if (resolvedTaxonCode) {
+      const fallbackResults = await fetchMacaulayCatalogSearchResults(context, {
+        taxonCode: resolvedTaxonCode
+      });
+      if (fallbackResults.length) {
+        results = fallbackResults;
+      }
+    }
+  }
+
   if (!results.length) {
     const fallbackResults = await fetchMacaulayCatalogSearchResults(context, { taxonCode, query });
     if (fallbackResults.length) {
@@ -481,6 +493,48 @@ function createMacaulayCatalogSearchUrl({ taxonCode = "", query = "" } = {}) {
   catalogUrl.searchParams.set("sort", "rating_rank_desc");
   catalogUrl.searchParams.set("birdOnly", "true");
   return catalogUrl;
+}
+
+async function resolveMacaulayQueryTaxonCode(context, query) {
+  const trimmedQuery = String(query || "").trim();
+  if (!trimmedQuery) {
+    return "";
+  }
+
+  const taxonomyUrl = new URL("https://api.ebird.org/v2/ref/taxonomy/ebird");
+  taxonomyUrl.searchParams.set("fmt", "json");
+  taxonomyUrl.searchParams.set("species", trimmedQuery);
+  taxonomyUrl.searchParams.set("cat", "species");
+  const response = await context.fetchImpl(taxonomyUrl.toString(), {
+    headers: {
+      accept: "application/json",
+      "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
+    }
+  });
+  if (!response.ok) {
+    return "";
+  }
+  const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+  if (!contentType.includes("application/json")) {
+    return "";
+  }
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    return "";
+  }
+
+  const items = Array.isArray(payload) ? payload : [];
+  const queryKey = normalizeMacaulayTaxonomyName(trimmedQuery);
+  const exact = items.find(
+    (item) =>
+      normalizeMacaulayTaxonomyName(item?.sciName) === queryKey ||
+      normalizeMacaulayTaxonomyName(item?.comName) === queryKey
+  );
+  const match = exact || items[0];
+  return String(match?.speciesCode || "").trim();
 }
 
 async function proxyMacaulayAsset(context, rawAssetId) {
@@ -632,6 +686,10 @@ function getMacaulayItemNames(item) {
 
 function normalizeMacaulayQuery(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function normalizeMacaulayTaxonomyName(value) {
+  return normalizeMacaulayQuery(value);
 }
 
 function serveStatic(context, pathname) {
