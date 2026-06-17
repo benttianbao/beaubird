@@ -70,3 +70,10 @@ test("local Macaulay proxy resolves scientific-name queries to eBird taxon codes
   assert.match(proxy, /species=\$\(\[uri\]::EscapeDataString\(\$Query\)\)/);
   assert.match(proxy, /catalog\?taxonCode=\$\(\[uri\]::EscapeDataString\(\$resolvedTaxonCode\)\)/);
 });
+
+test("site nginx proxy allows slow Macaulay media lookups", () => {
+  const nginx = readFileSync("nginx/site-auth-ubuntu.conf", "utf8");
+  assert.match(nginx, /proxy_connect_timeout 180s;/);
+  assert.match(nginx, /proxy_send_timeout 180s;/);
+  assert.match(nginx, /proxy_read_timeout 180s;/);
+});
