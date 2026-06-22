@@ -84,6 +84,10 @@ const BIRDREPORT_ENDPOINTS = {
     remote: "https://api.birdreport.cn/front/record/search/page",
     referer: "https://www.birdreport.cn/home/search/record.html"
   },
+  "/api/birdreport/report": {
+    remote: "https://api.birdreport.cn/front/record/activity/search",
+    referer: "https://www.birdreport.cn/home/search/report.html"
+  },
   "/api/birdreport/summary": {
     remote: "https://api.birdreport.cn/front/record/chart/summary",
     referer: "https://www.birdreport.cn/home/search/page.html"

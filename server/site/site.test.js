@@ -340,6 +340,23 @@ test("proxies BirdReport endpoints through the authenticated same-origin API", a
         assert.equal(upstreamCalls[0].init.headers.requestId, "req-123");
         assert.equal(upstreamCalls[0].init.headers.sign, "signed");
         assert.equal(upstreamCalls[0].init.headers.timestamp, "1700000000000");
+
+        const report = await request("/api/birdreport/report", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            cookie: adminCookie,
+            requestId: "req-456",
+            sign: "signed-report",
+            timestamp: "1700000001000"
+          },
+          body: JSON.stringify({ taxonid: "5255", page: 1, limit: 10 })
+        });
+        assert.equal(report.status, 200);
+        assert.equal(upstreamCalls.length, 2);
+        assert.equal(upstreamCalls[1].url, "https://api.birdreport.cn/front/record/activity/search");
+        assert.equal(upstreamCalls[1].init.headers.referer, "https://www.birdreport.cn/home/search/report.html");
+        assert.equal(upstreamCalls[1].init.headers.requestId, "req-456");
       }
     );
   } finally {

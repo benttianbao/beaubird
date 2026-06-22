@@ -155,7 +155,7 @@
       serialId,
       pointName: location,
       username: username || "未提供",
-      taxonCount: Number(item.taxon_count ?? item.taxonCount ?? item.count ?? item.number) || 0,
+      taxonCount: Number(item.taxoncount ?? item.taxon_count ?? item.taxonCount ?? item.count ?? item.number) || 0,
       isPublic,
       isHiddenLocation: !isPublic || location.includes("*") || location === HIDDEN_LOCATION_LABEL,
       startTime,

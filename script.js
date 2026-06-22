@@ -2542,7 +2542,7 @@ function renderUnlockedSpeciesLocationPanel(species, context = {}) {
     ${summaryBlock}
     <div class="unlocked-location-title">
       <strong>${escapeHtml(species.taxonname || "未命名鸟种")} 公开地点</strong>
-      <span>按记录中心的报告编号降序展示</span>
+      <span>按记录中心活动报告默认顺序展示</span>
     </div>
     <div class="unlocked-location-list">
       ${state.unlockedSpeciesDetailRecords
@@ -2585,7 +2585,7 @@ async function toggleUnlockedSpeciesLocations(species) {
   state.unlockedSpeciesDetailError = "";
   state.unlockedSpeciesDetailLoading = true;
   renderUnlockedSpeciesList();
-  setUnlockedSpeciesMessage(`正在按报告编号降序加载 ${species.taxonname || "该鸟种"} 在浙江的公开地点...`);
+  setUnlockedSpeciesMessage(`正在按记录中心默认顺序加载 ${species.taxonname || "该鸟种"} 在浙江的公开地点...`);
 
   try {
     state.unlockedSpeciesDetailRecords = await fetchRecentBirdreportRecordsByTaxon(species, {
@@ -2594,7 +2594,7 @@ async function toggleUnlockedSpeciesLocations(species) {
     state.unlockedSpeciesDetailError = "";
     setUnlockedSpeciesMessage(
       state.unlockedSpeciesDetailRecords.length
-        ? `${species.taxonname || "该鸟种"} 公开地点已加载 ${state.unlockedSpeciesDetailRecords.length} 条，按报告编号降序展示。`
+        ? `${species.taxonname || "该鸟种"} 公开地点已加载 ${state.unlockedSpeciesDetailRecords.length} 条，按活动报告默认顺序展示。`
         : `${species.taxonname || "该鸟种"} 暂时没有可展示的公开地点。`
     );
   } catch (error) {
@@ -2641,7 +2641,7 @@ async function submitUnlockedSpeciesCaptcha(species, rawCode) {
     state.unlockedSpeciesDetailError = "";
     setUnlockedSpeciesMessage(
       state.unlockedSpeciesDetailRecords.length
-        ? `${species.taxonname || "该鸟种"} 公开地点已加载 ${state.unlockedSpeciesDetailRecords.length} 条，按报告编号降序展示。`
+        ? `${species.taxonname || "该鸟种"} 公开地点已加载 ${state.unlockedSpeciesDetailRecords.length} 条，按活动报告默认顺序展示。`
         : `${species.taxonname || "该鸟种"} 暂时没有可展示的公开地点。`
     );
   } catch (error) {
@@ -2697,17 +2697,13 @@ async function fetchBirdreportRecordWindowByTaxon(taxonQuery, windowRange, optio
   const taxonId = String(taxonQuery?.taxonId || taxonQuery || "").trim();
   const taxonName = String(taxonQuery?.taxonName || "").trim();
   const displayLimit = Math.max(1, Math.min(20, Number(options.displayLimit) || 10));
-  const requestedMaxPages = Number(options.maxPages);
-  const maxPages = Number.isFinite(requestedMaxPages)
-    ? Math.max(1, requestedMaxPages)
-    : Number.POSITIVE_INFINITY;
   const basePayload = createBirdreportPayload({
     province: BIRDREPORT_RARE_SPECIES_PROVINCE,
     startTime: windowRange.startTime,
     endTime: windowRange.endTime,
     state: ""
   });
-  const recordPayload = {
+  const reportPayload = {
     ...basePayload,
     ...(taxonId ? { taxonid: taxonId } : {}),
     ...(taxonName
@@ -2718,15 +2714,16 @@ async function fetchBirdreportRecordWindowByTaxon(taxonQuery, windowRange, optio
         }
       : {})
   };
-  const records = await fetchBirdreportRecordPages(recordPayload, {
-    maxPages,
-    pageLimit: 500,
+  const records = await fetchBirdreportReportPages(reportPayload, {
+    maxPages: 1,
+    pageLimit: displayLimit,
     displayLimit,
+    stopAtDisplayLimit: true,
     checkCaptcha: true,
     filterRecord: isPublicBirdreportLocationRecord
   });
 
-  return records.sort(sortBirdreportRecordsBySerialIdDesc).slice(0, displayLimit);
+  return records.slice(0, displayLimit);
 }
 
 function isBirdreportCaptchaResponse(response) {
@@ -4775,8 +4772,16 @@ async function fetchBirdreportRecordsForCurrentQuery(species, payload, options =
   return records.sort(sortBirdreportRecordsByObservationTimeDesc).slice(0, displayLimit);
 }
 
+async function fetchBirdreportReportPages(reportPayload, options = {}) {
+  return fetchBirdreportRecordPages(reportPayload, {
+    ...options,
+    path: "/api/birdreport/report"
+  });
+}
+
 async function fetchBirdreportRecordPages(recordPayload, options = {}) {
   const {
+    path = "/api/birdreport/record",
     onProgress,
     pageLimit = 100,
     maxPages = Number.POSITIVE_INFINITY,
@@ -4787,7 +4792,7 @@ async function fetchBirdreportRecordPages(recordPayload, options = {}) {
     filterRecord = () => true
   } = options;
   const limit = Math.max(1, Number(pageLimit) || 100);
-  const firstPage = await birdreportProxyPost("/api/birdreport/record", {
+  const firstPage = await birdreportProxyPost(path, {
     ...recordPayload,
     page: 1,
     limit
@@ -4807,7 +4812,7 @@ async function fetchBirdreportRecordPages(recordPayload, options = {}) {
       break;
     }
     onProgress?.(`${progressLabel} 第 ${page}/${pagesToFetch} 页`);
-    const response = await birdreportProxyPost("/api/birdreport/record", {
+    const response = await birdreportProxyPost(path, {
       ...recordPayload,
       page,
       limit

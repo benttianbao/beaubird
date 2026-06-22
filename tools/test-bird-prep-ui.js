@@ -384,15 +384,18 @@ test("bird prep query filters species unlocked by username but keeps unfiltered 
   assert.match(script, /catch \(filterError\)[\s\S]*当前列表未过滤/);
 });
 
-test("unlocked species full-history records are not truncated before sorting", () => {
+test("unlocked species locations use the BirdReport report page default first page", () => {
   const functionStart = indexOfRequired(script, "async function fetchBirdreportRecordWindowByTaxon");
   const functionEnd = indexOfRequired(script.slice(functionStart), "function isBirdreportCaptchaResponse");
   const functionBody = script.slice(functionStart, functionStart + functionEnd);
   assert.match(functionBody, /Number\(options\.displayLimit\) \|\| 10/);
-  assert.match(functionBody, /pageLimit:\s*500/);
-  assert.doesNotMatch(functionBody, /Number\(options\.maxPages\) \|\| 4/);
-  assert.doesNotMatch(functionBody, /stopAtDisplayLimit:\s*true/);
-  assert.match(functionBody, /sortBirdreportRecordsBySerialIdDesc/);
+  assert.match(functionBody, /fetchBirdreportReportPages/);
+  assert.match(functionBody, /maxPages:\s*1/);
+  assert.match(functionBody, /pageLimit:\s*displayLimit/);
+  assert.match(functionBody, /stopAtDisplayLimit:\s*true/);
+  assert.doesNotMatch(functionBody, /pageLimit:\s*500/);
+  assert.doesNotMatch(functionBody, /Number\.POSITIVE_INFINITY/);
+  assert.doesNotMatch(functionBody, /sortBirdreportRecordsBySerialIdDesc/);
   assert.doesNotMatch(functionBody, /sortBirdreportRecordsByObservationTimeDesc/);
   assert.doesNotMatch(script, /fetchRecentBirdreportRecordsByTaxon\(species,[\s\S]{0,80}limit:\s*8/);
 });
@@ -472,8 +475,8 @@ test("shared data, utility, and BirdReport core modules load before the app scri
 
 test("frontend shared assets use the current deployment cache version", () => {
   assert.match(html, /style\.css\?v=20260613-0001/);
-  assert.match(html, /beaubird-birdreport-core\.js\?v=20260617-0001/);
-  assert.match(html, /script\.js\?v=20260618-0003/);
+  assert.match(html, /beaubird-birdreport-core\.js\?v=20260622-0001/);
+  assert.match(html, /script\.js\?v=20260622-0001/);
 });
 
 test("main script consumes shared modules and removes the unused unlocked export overlay", () => {
