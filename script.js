@@ -2697,7 +2697,10 @@ async function fetchBirdreportRecordWindowByTaxon(taxonQuery, windowRange, optio
   const taxonId = String(taxonQuery?.taxonId || taxonQuery || "").trim();
   const taxonName = String(taxonQuery?.taxonName || "").trim();
   const displayLimit = Math.max(1, Math.min(20, Number(options.displayLimit) || 10));
-  const maxPages = Math.max(1, Math.min(8, Number(options.maxPages) || 4));
+  const requestedMaxPages = Number(options.maxPages);
+  const maxPages = Number.isFinite(requestedMaxPages)
+    ? Math.max(1, requestedMaxPages)
+    : Number.POSITIVE_INFINITY;
   const basePayload = createBirdreportPayload({
     province: BIRDREPORT_RARE_SPECIES_PROVINCE,
     startTime: windowRange.startTime,
@@ -2717,6 +2720,7 @@ async function fetchBirdreportRecordWindowByTaxon(taxonQuery, windowRange, optio
   };
   const records = await fetchBirdreportRecordPages(recordPayload, {
     maxPages,
+    pageLimit: 500,
     displayLimit,
     checkCaptcha: true,
     filterRecord: isPublicBirdreportLocationRecord

@@ -389,6 +389,8 @@ test("unlocked species full-history records are not truncated before sorting", (
   const functionEnd = indexOfRequired(script.slice(functionStart), "function isBirdreportCaptchaResponse");
   const functionBody = script.slice(functionStart, functionStart + functionEnd);
   assert.match(functionBody, /Number\(options\.displayLimit\) \|\| 10/);
+  assert.match(functionBody, /pageLimit:\s*500/);
+  assert.doesNotMatch(functionBody, /Number\(options\.maxPages\) \|\| 4/);
   assert.doesNotMatch(functionBody, /stopAtDisplayLimit:\s*true/);
   assert.match(functionBody, /sortBirdreportRecordsBySerialIdDesc/);
   assert.doesNotMatch(functionBody, /sortBirdreportRecordsByObservationTimeDesc/);
