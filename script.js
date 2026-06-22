@@ -2542,7 +2542,7 @@ function renderUnlockedSpeciesLocationPanel(species, context = {}) {
     ${summaryBlock}
     <div class="unlocked-location-title">
       <strong>${escapeHtml(species.taxonname || "未命名鸟种")} 公开地点</strong>
-      <span>按官网记录页的观测时间倒序展示</span>
+      <span>按记录中心的报告编号降序展示</span>
     </div>
     <div class="unlocked-location-list">
       ${state.unlockedSpeciesDetailRecords
@@ -2585,16 +2585,16 @@ async function toggleUnlockedSpeciesLocations(species) {
   state.unlockedSpeciesDetailError = "";
   state.unlockedSpeciesDetailLoading = true;
   renderUnlockedSpeciesList();
-  setUnlockedSpeciesMessage(`正在按观测时间倒序加载 ${species.taxonname || "该鸟种"} 在浙江的公开地点...`);
+  setUnlockedSpeciesMessage(`正在按报告编号降序加载 ${species.taxonname || "该鸟种"} 在浙江的公开地点...`);
 
   try {
     state.unlockedSpeciesDetailRecords = await fetchRecentBirdreportRecordsByTaxon(species, {
-      limit: 8
+      limit: 10
     });
     state.unlockedSpeciesDetailError = "";
     setUnlockedSpeciesMessage(
       state.unlockedSpeciesDetailRecords.length
-        ? `${species.taxonname || "该鸟种"} 公开地点已加载 ${state.unlockedSpeciesDetailRecords.length} 条，按观测时间倒序展示。`
+        ? `${species.taxonname || "该鸟种"} 公开地点已加载 ${state.unlockedSpeciesDetailRecords.length} 条，按报告编号降序展示。`
         : `${species.taxonname || "该鸟种"} 暂时没有可展示的公开地点。`
     );
   } catch (error) {
@@ -2636,12 +2636,12 @@ async function submitUnlockedSpeciesCaptcha(species, rawCode) {
     setUnlockedSpeciesMessage("验证码通过，正在重新加载公开地点...");
 
     state.unlockedSpeciesDetailRecords = await fetchRecentBirdreportRecordsByTaxon(species, {
-      limit: 8
+      limit: 10
     });
     state.unlockedSpeciesDetailError = "";
     setUnlockedSpeciesMessage(
       state.unlockedSpeciesDetailRecords.length
-        ? `${species.taxonname || "该鸟种"} 公开地点已加载 ${state.unlockedSpeciesDetailRecords.length} 条，按观测时间倒序展示。`
+        ? `${species.taxonname || "该鸟种"} 公开地点已加载 ${state.unlockedSpeciesDetailRecords.length} 条，按报告编号降序展示。`
         : `${species.taxonname || "该鸟种"} 暂时没有可展示的公开地点。`
     );
   } catch (error) {
@@ -2685,7 +2685,7 @@ async function fetchRecentBirdreportRecordsByTaxon(species, options = {}) {
     throw new Error("缺少 BirdReport 鸟种编号或鸟种名称。");
   }
 
-  const displayLimit = Math.max(1, Math.min(20, Number(options.limit) || 8));
+  const displayLimit = Math.max(1, Math.min(20, Number(options.limit) || 10));
   return fetchBirdreportRecordWindowByTaxon(
     { taxonId, taxonName },
     { startTime: "", endTime: "", label: "全历史" },
@@ -2696,7 +2696,7 @@ async function fetchRecentBirdreportRecordsByTaxon(species, options = {}) {
 async function fetchBirdreportRecordWindowByTaxon(taxonQuery, windowRange, options = {}) {
   const taxonId = String(taxonQuery?.taxonId || taxonQuery || "").trim();
   const taxonName = String(taxonQuery?.taxonName || "").trim();
-  const displayLimit = Math.max(1, Math.min(20, Number(options.displayLimit) || 8));
+  const displayLimit = Math.max(1, Math.min(20, Number(options.displayLimit) || 10));
   const maxPages = Math.max(1, Math.min(8, Number(options.maxPages) || 4));
   const basePayload = createBirdreportPayload({
     province: BIRDREPORT_RARE_SPECIES_PROVINCE,
@@ -2704,16 +2704,25 @@ async function fetchBirdreportRecordWindowByTaxon(taxonQuery, windowRange, optio
     endTime: windowRange.endTime,
     state: ""
   });
-  const recordPayload = createBirdreportRecordSearchPayload(basePayload, { taxonId, taxonName });
+  const recordPayload = {
+    ...basePayload,
+    ...(taxonId ? { taxonid: taxonId } : {}),
+    ...(taxonName
+      ? {
+          taxonname: taxonName,
+          taxon_name: taxonName,
+          name: taxonName
+        }
+      : {})
+  };
   const records = await fetchBirdreportRecordPages(recordPayload, {
     maxPages,
     displayLimit,
-    stopAtDisplayLimit: true,
     checkCaptcha: true,
     filterRecord: isPublicBirdreportLocationRecord
   });
 
-  return records.sort(sortBirdreportRecordsByObservationTimeDesc).slice(0, displayLimit);
+  return records.sort(sortBirdreportRecordsBySerialIdDesc).slice(0, displayLimit);
 }
 
 function isBirdreportCaptchaResponse(response) {
@@ -5063,6 +5072,10 @@ function closeBirdreportSpeciesDetail() {
 
 function sortBirdreportRecordsByObservationTimeDesc(left, right) {
   return BIRDREPORT_CORE.sortBirdreportRecordsByObservationTimeDesc(left, right);
+}
+
+function sortBirdreportRecordsBySerialIdDesc(left, right) {
+  return BIRDREPORT_CORE.sortBirdreportRecordsBySerialIdDesc(left, right);
 }
 
 function getBirdreportReportCount(item) {

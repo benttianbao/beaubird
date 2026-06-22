@@ -366,6 +366,7 @@
     parseBirdreportRequestData,
     serializeBirdreportRequestData,
     sortBirdreportObjectKeys,
+    sortBirdreportRecordsBySerialIdDesc,
     sortBirdreportRecordsByObservationTimeDesc,
     sortBirdreportTaxaByRecordCount,
     sortBirdreportTaxaByRecordCountDesc

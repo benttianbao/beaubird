@@ -384,6 +384,17 @@ test("bird prep query filters species unlocked by username but keeps unfiltered 
   assert.match(script, /catch \(filterError\)[\s\S]*当前列表未过滤/);
 });
 
+test("unlocked species full-history records are not truncated before sorting", () => {
+  const functionStart = indexOfRequired(script, "async function fetchBirdreportRecordWindowByTaxon");
+  const functionEnd = indexOfRequired(script.slice(functionStart), "function isBirdreportCaptchaResponse");
+  const functionBody = script.slice(functionStart, functionStart + functionEnd);
+  assert.match(functionBody, /Number\(options\.displayLimit\) \|\| 10/);
+  assert.doesNotMatch(functionBody, /stopAtDisplayLimit:\s*true/);
+  assert.match(functionBody, /sortBirdreportRecordsBySerialIdDesc/);
+  assert.doesNotMatch(functionBody, /sortBirdreportRecordsByObservationTimeDesc/);
+  assert.doesNotMatch(script, /fetchRecentBirdreportRecordsByTaxon\(species,[\s\S]{0,80}limit:\s*8/);
+});
+
 test("bird prep unlocked filtering matches taxon keys and Chinese names", () => {
   assert.match(script, /function buildBirdPrepUnlockedTaxonLookup\(items\)/);
   assert.match(script, /keys: new Set\(\)/);

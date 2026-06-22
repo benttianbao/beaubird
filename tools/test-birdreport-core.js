@@ -17,6 +17,7 @@ const {
   parseBirdreportRequestData,
   serializeBirdreportRequestData,
   sortBirdreportObjectKeys,
+  sortBirdreportRecordsBySerialIdDesc,
   sortBirdreportRecordsByObservationTimeDesc,
   sortBirdreportTaxaByRecordCount,
   sortBirdreportTaxaByRecordCountDesc
@@ -215,6 +216,17 @@ test("dedupe and sort helpers keep stable BirdReport ordering", () => {
     "11",
     "10",
     "9"
+  ]);
+
+  const recordCenterRecords = [
+    normalizeBirdreportRecord({ serial_id: "100", start_time: "2026-05-28 06:30", state: 2, point_name: "A" }),
+    normalizeBirdreportRecord({ serial_id: "102", start_time: "2025-12-01 06:30", state: 2, point_name: "B" }),
+    normalizeBirdreportRecord({ serial_id: "101", start_time: "2026-05-30 06:30", state: 2, point_name: "C" })
+  ];
+  assert.deepEqual(recordCenterRecords.sort(sortBirdreportRecordsBySerialIdDesc).map((record) => record.serialId), [
+    "102",
+    "101",
+    "100"
   ]);
 });
 
