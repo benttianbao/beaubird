@@ -192,7 +192,7 @@ function createBirdreportClient(options = {}) {
       throw new Error(`BirdReport HTTP ${response.status}: ${text || "请求失败"}`);
     }
     const payload = text ? JSON.parse(text) : {};
-    if (payload?.success === false || payload?.errorCode) {
+    if (payload?.success === false || payload?.errorCode || (payload?.code && Number(payload.code) !== 200)) {
       throw createBirdreportBusinessError(payload);
     }
     return payload;

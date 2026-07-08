@@ -9,7 +9,7 @@ const birdreportCore = readFileSync("beaubird-birdreport-core.js", "utf8");
 const siteApp = readFileSync("server/site/app.js", "utf8");
 const sitePages = readFileSync("server/site/pages.js", "utf8");
 const androidBuildGradle = readFileSync("android/app/build.gradle", "utf8");
-const androidBuildGradleKts = readFileSync("android/app/build.gradle.kts", "utf8");
+const androidBuildGradleKtsPath = "android/app/build.gradle.kts";
 const androidLocalServer = readFileSync("android/app/src/main/java/cn/beaubird/app/BeauBirdLocalServer.kt", "utf8");
 
 function indexOfRequired(source, needle) {
@@ -92,6 +92,21 @@ test("main page uses a layered product visual system", () => {
   assert.match(css, /\.panel h2::before\s*\{/);
   assert.match(css, /\.controls\s*\{[\s\S]*background: var\(--controls-surface\);[\s\S]*border: 1px solid var\(--controls-border\);/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
+});
+
+test("main page has sRGB fallbacks for browsers without OKLCH support", () => {
+  assert.match(css, /@supports not \(color: oklch\(50% 0 0\)\)/);
+  assert.match(css, /--bg: #f4f7f7;/);
+  assert.match(css, /--section-surface: #f8fbfa;/);
+  assert.match(css, /--focus-ring: 0 0 0 3px rgba\(36, 117, 107, 0\.18\);/);
+});
+
+test("local storage access is guarded against browser storage failures", () => {
+  assert.match(script, /function safeLocalStorageGet\(key, fallback = ""\)/);
+  assert.match(script, /function safeLocalStorageSet\(key, value\)/);
+  assert.match(script, /function safeLocalStorageRemove\(key\)/);
+  assert.match(script, /safeLocalStorageGet\(EBIRD_API_KEY_STORAGE/);
+  assert.match(script, /safeLocalStorageSet\(PERSONAL_STORAGE_KEY/);
 });
 
 test("workspace sections expose distinct visual accents", () => {
@@ -324,7 +339,7 @@ test("bird prep PPT generation exposes staged progress", () => {
 test("bird prep PPT reports the first Macaulay image failure when all downloads fail", () => {
   assert.match(script, /let firstErrorMessage = "";/);
   assert.match(script, /firstErrorMessage = firstErrorMessage \|\| error\.message;/);
-  assert.match(script, /return \{ attachedCount, missingCount, firstErrorMessage \};/);
+  assert.match(script, /return \{ attachedCount, missingCount, firstErrorMessage, attachedImageBytes \};/);
   assert.match(script, /photoResult\.firstErrorMessage/);
   assert.match(script, /Macaulay Library 图片全部失败：\$\{photoResult\.firstErrorMessage\}/);
 });
@@ -344,6 +359,12 @@ test("bird prep PPT Macaulay requests time out and retry", () => {
   assert.match(script, /BIRD_PREP_MACAULAY_FETCH_ATTEMPTS/);
   assert.match(script, /new AbortController\(\)/);
   assert.match(script, /for \(let attempt = 1; attempt <= attempts; attempt \+= 1\)/);
+});
+
+test("bird prep PPT enforces a total Macaulay image budget", () => {
+  assert.match(script, /BIRD_PREP_MACAULAY_MAX_TOTAL_IMAGE_BYTES/);
+  assert.match(script, /attachedImageBytes \+ imageBytes > BIRD_PREP_MACAULAY_MAX_TOTAL_IMAGE_BYTES/);
+  assert.match(script, /Macaulay Library 图片总大小超过限制/);
 });
 
 test("bird prep PPT skips browser eBird taxonomy fetch before Macaulay image fallback", () => {
@@ -491,7 +512,8 @@ test("main script consumes shared modules and removes the unused unlocked export
 });
 
 test("Android assets include current shared modules and all birds profile data", () => {
-  for (const source of [androidBuildGradle, androidBuildGradleKts, androidLocalServer]) {
+  assert.equal(existsSync(androidBuildGradleKtsPath), false);
+  for (const source of [androidBuildGradle, androidLocalServer]) {
     assert.match(source, /beaubird-utils\.js/);
     assert.match(source, /beaubird-data\.js/);
     assert.match(source, /beaubird-birdreport-core\.js/);
@@ -501,7 +523,6 @@ test("Android assets include current shared modules and all birds profile data",
     assert.doesNotMatch(source, /china_bird_results\.js/);
   }
   assert.match(androidBuildGradle, /data\/bird-profiles\/\*\*/);
-  assert.match(androidBuildGradleKts, /data\/bird-profiles\/\*\*/);
   assert.match(androidLocalServer, /\/data\/bird-profiles\/index\.json/);
   assert.match(androidLocalServer, /serveBirdProfileAsset/);
 });

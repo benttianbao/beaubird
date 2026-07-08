@@ -1,3 +1,4 @@
+const { randomUUID } = require("node:crypto");
 const { URL } = require("node:url");
 
 const {
@@ -37,7 +38,7 @@ function createTextStreamReplyPayload(content, streamId) {
 function createCaptchaSessionStore(options = {}) {
   const ttlMs = Number(options.ttlMs) || 5 * 60 * 1000;
   const now = options.now || Date.now;
-  const idFactory = options.idFactory || (() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
+  const idFactory = options.idFactory || (() => randomUUID());
   const sessionsByKey = new Map();
   const imagesById = new Map();
 
@@ -226,7 +227,7 @@ function extractMessageFromDecryptedMessage(message) {
 
 function createEncryptedJsonReplyPayload(payload, { config, timestamp, nonce }) {
   const outputTimestamp = String(timestamp || Math.floor(Date.now() / 1000));
-  const outputNonce = String(nonce || Math.random().toString(36).slice(2, 12));
+  const outputNonce = String(nonce || randomUUID().replaceAll("-", "").slice(0, 12));
   const encrypted = encryptWecomMessage(JSON.stringify(payload), {
     encodingAesKey: config.encodingAesKey,
     corpId: config.corpId || ""
@@ -246,6 +247,19 @@ function createEncryptedJsonReplyPayload(payload, { config, timestamp, nonce }) 
 
 function getSessionKey(options = {}) {
   return String(options.sessionKey || "global");
+}
+
+function withSessionRuntime(options = {}, sessionKey = "") {
+  const resolvedSessionKey = String(sessionKey || options.sessionKey || "global");
+  if (typeof options.getSessionRuntime !== "function") {
+    return { ...options, sessionKey: resolvedSessionKey };
+  }
+  const runtime = options.getSessionRuntime(resolvedSessionKey) || {};
+  return {
+    ...options,
+    ...runtime,
+    sessionKey: resolvedSessionKey
+  };
 }
 
 function getPublicBaseUrl(options = {}) {
@@ -359,9 +373,19 @@ async function handleIncomingText(text, options = {}) {
   }
 }
 
-async function readBody(request) {
+async function readBody(request, options = {}) {
+  const maxBodyBytes = Math.max(1, Number(options.maxBodyBytes) || 64 * 1024);
+  const declaredLength = Number(request.headers["content-length"]);
+  if (Number.isFinite(declaredLength) && declaredLength > maxBodyBytes) {
+    throw new RequestBodyTooLargeError();
+  }
   const chunks = [];
+  let total = 0;
   for await (const chunk of request) {
+    total += chunk.length;
+    if (total > maxBodyBytes) {
+      throw new RequestBodyTooLargeError();
+    }
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString("utf8");
@@ -393,7 +417,7 @@ function writeJson(response, statusCode, payload) {
 
 function verifyWecomQuery(query, config) {
   if (!config.token) {
-    return true;
+    return Boolean(config.allowUnsignedCallbacks);
   }
   return verifyWecomSignature({
     token: config.token,
@@ -407,7 +431,11 @@ function verifyWecomQuery(query, config) {
 async function handleWecomGet(requestUrl, response, config) {
   const query = requestUrl.searchParams;
   const echo = query.get("echostr") || "";
-  if (config.token && !verifyWecomQuery(query, config)) {
+  if (!config.token && !config.allowUnsignedCallbacks) {
+    writeJson(response, 503, { success: false, error: "WeCom token is not configured" });
+    return;
+  }
+  if (!verifyWecomQuery(query, config)) {
     write(response, 403, "invalid signature", "text/plain; charset=utf-8");
     return;
   }
@@ -444,7 +472,8 @@ async function handleJsonCallback(payload, requestUrl, response, options) {
     });
     const message = extractMessageFromDecryptedMessage(plainMessage);
     const text = message.text;
-    const replyPayload = await handleIncomingText(text, { ...options, config, sendGroupWebhook: null, sessionKey: message.sessionKey || options.sessionKey });
+    const sessionOptions = withSessionRuntime({ ...options, config, sendGroupWebhook: null }, message.sessionKey || options.sessionKey);
+    const replyPayload = await handleIncomingText(text, sessionOptions);
     const content = replyPayload?.text?.content || "";
     const streamPayload = createTextStreamReplyPayload(content, extractDateCommand(text));
     writeJson(
@@ -460,7 +489,8 @@ async function handleJsonCallback(payload, requestUrl, response, options) {
   }
 
   const message = extractMessageFromJson(payload);
-  const replyPayload = await handleIncomingText(message.text, { ...options, sendGroupWebhook: null, sessionKey: message.sessionKey || options.sessionKey });
+  const sessionOptions = withSessionRuntime({ ...options, sendGroupWebhook: null }, message.sessionKey || options.sessionKey);
+  const replyPayload = await handleIncomingText(message.text, sessionOptions);
   writeJson(response, 200, replyPayload);
 }
 
@@ -488,8 +518,11 @@ async function handleXmlCallback(xml, requestUrl, response, options) {
   const room = parseXmlValue(plainXml, "ToUserName");
   const user = parseXmlValue(plainXml, "FromUserName");
   const text = parseXmlValue(plainXml, "Content");
-  await handleIncomingText(text, { ...options, sessionKey: room || user ? `${room || "direct"}:${user || "unknown"}` : options.sessionKey });
   write(response, 200, "success", "text/plain; charset=utf-8");
+  const sessionOptions = withSessionRuntime(options, room || user ? `${room || "direct"}:${user || "unknown"}` : options.sessionKey);
+  Promise.resolve(handleIncomingText(text, sessionOptions)).catch((error) => {
+    console.error("Failed to process WeCom XML callback:", error);
+  });
 }
 
 function createRareBotHttpHandler(options = {}) {
@@ -521,6 +554,11 @@ function createRareBotHttpHandler(options = {}) {
         return;
       }
 
+      if (!config.token && !config.allowUnsignedCallbacks) {
+        writeJson(response, 503, { success: false, error: "WeCom token is not configured" });
+        return;
+      }
+
       if (request.method === "GET") {
         await handleWecomGet(requestUrl, response, config);
         return;
@@ -531,7 +569,7 @@ function createRareBotHttpHandler(options = {}) {
         return;
       }
 
-      const body = await readBody(request);
+      const body = await readBody(request, { maxBodyBytes: options.maxBodyBytes });
       const contentType = String(request.headers["content-type"] || "");
       if (contentType.includes("application/json") || body.trim().startsWith("{")) {
         await handleJsonCallback(JSON.parse(body || "{}"), requestUrl, response, { ...options, config, routePath, captchaStore });
@@ -540,10 +578,16 @@ function createRareBotHttpHandler(options = {}) {
 
       await handleXmlCallback(body, requestUrl, response, { ...options, config, routePath, captchaStore });
     } catch (error) {
+      if (error instanceof RequestBodyTooLargeError) {
+        writeJson(response, 413, { success: false, error: "Request body too large" });
+        return;
+      }
       writeJson(response, 500, { success: false, error: error?.message || "Internal server error" });
     }
   };
 }
+
+class RequestBodyTooLargeError extends Error {}
 
 module.exports = {
   createRareBotHttpHandler,

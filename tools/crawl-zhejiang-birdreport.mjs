@@ -1,5 +1,6 @@
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
@@ -321,6 +322,18 @@ function runInTransaction(db, callback) {
   }
 }
 
+async function runInTransactionAsync(db, callback) {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = await callback();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export function upsertReport(db, report) {
   db.prepare(`
     INSERT INTO reports (
@@ -434,22 +447,21 @@ export async function writeReportWithObservations({ db, jsonlPath, report, rawTa
   }
 
   const { observations, filteredRedSpeciesCount } = prepareObservationsForReport(report, rawTaxa);
-  runInTransaction(db, () => {
+  await runInTransactionAsync(db, async () => {
     upsertReport(db, report);
     replaceObservations(db, report.report_id, observations);
-  });
-
-  await appendJsonlRecord(jsonlPath, {
-    event: "report-detail",
-    runId,
-    reportKind: report.report_kind,
-    reportId: report.report_id,
-    serialId: report.serial_id,
-    rawTaxaCount: Array.isArray(rawTaxa) ? rawTaxa.length : 0,
-    savedTaxaCount: observations.length,
-    filteredRedSpeciesCount,
-    report,
-    rawTaxa
+    await appendJsonlRecord(jsonlPath, {
+      event: "report-detail",
+      runId,
+      reportKind: report.report_kind,
+      reportId: report.report_id,
+      serialId: report.serial_id,
+      rawTaxaCount: Array.isArray(rawTaxa) ? rawTaxa.length : 0,
+      savedTaxaCount: observations.length,
+      filteredRedSpeciesCount,
+      report,
+      rawTaxa
+    });
   });
 
   return {
@@ -634,7 +646,9 @@ export function getVerifiedCaptchaTrainingPath(code, datasetPath = DEFAULT_CAPTC
   if (!/^[A-Za-z0-9]+$/.test(normalizedCode)) {
     throw new Error("验证码只能包含字母或数字，无法保存为训练集文件名。");
   }
-  return resolve(datasetPath || DEFAULT_CAPTCHA_TRAINING_DATASET_PATH, `${normalizedCode}.png`);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").replace(/Z$/, "");
+  const suffix = randomUUID().replaceAll("-", "").slice(0, 8);
+  return resolve(datasetPath || DEFAULT_CAPTCHA_TRAINING_DATASET_PATH, `${normalizedCode}_${timestamp}_${suffix}.png`);
 }
 
 export async function saveVerifiedCaptchaImage(captchaBody, code, datasetPath = DEFAULT_CAPTCHA_TRAINING_DATASET_PATH) {
@@ -1133,6 +1147,7 @@ export async function crawlZhejiangBirdreport(options = {}) {
     captcha: snapshotCaptchaStats(resolvedOptions)
   };
 
+  try {
   console.log(`开始抓取 BirdReport 浙江数据，runId=${runId}`);
   const summary = await fetchSummary(client, resolvedOptions);
   const normalSummaryTotal = integer(summary?.data?.report_num_1);
@@ -1200,13 +1215,15 @@ export async function crawlZhejiangBirdreport(options = {}) {
   console.log(`抓取完成：保存报告 ${stats.savedReports}，跳过 ${stats.skippedReports}，鸟种记录 ${stats.savedObservations}`);
   console.log(`标红报告中过滤红色鸟种 ${stats.filteredRedSpecies} 条，失败报告 ${stats.failedReports} 条。`);
   console.log(`验证码统计：输入提示 ${stats.captcha.promptCount} 次，累计触发 ${stats.captcha.triggerCount} 次，合并等待 ${stats.captcha.sharedWaitCount} 次。`);
-  if (!resolvedOptions.db) {
-    db.close();
-  }
   return {
     runId,
     stats
   };
+  } finally {
+    if (!resolvedOptions.db) {
+      db.close();
+    }
+  }
 }
 
 async function main() {

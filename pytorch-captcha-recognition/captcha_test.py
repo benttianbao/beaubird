@@ -1,16 +1,23 @@
 # -*- coding: UTF-8 -*-
 import numpy as np
 import torch
+from pathlib import Path
 from torch.autograd import Variable
 import captcha_setting
 import my_dataset
 from captcha_cnn_model import CNN
 import one_hot_encoding
 
+def load_model_state(model_path):
+    try:
+        return torch.load(model_path, map_location="cpu", weights_only=True)
+    except TypeError:
+        return torch.load(model_path, map_location="cpu")
+
 def main():
     cnn = CNN()
     cnn.eval()
-    cnn.load_state_dict(torch.load('model.pkl'))
+    cnn.load_state_dict(load_model_state(Path(__file__).with_name("model.pkl")))
     print("load cnn net.")
 
     test_dataloader = my_dataset.get_test_data_loader()

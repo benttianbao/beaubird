@@ -1,5 +1,6 @@
 # -*- coding: UTF-8 -*-
 import os
+from pathlib import Path
 from torch.utils.data import DataLoader,Dataset
 import torchvision.transforms as transforms
 from PIL import Image
@@ -17,10 +18,9 @@ class mydataset(Dataset):
 
     def __getitem__(self, idx):
         image_root = self.train_image_file_paths[idx]
-        image_name = image_root.split(os.path.sep)[-1]
-        image = Image.open(image_root)
-        if self.transform is not None:
-            image = self.transform(image)
+        image_name = Path(image_root).stem
+        with Image.open(image_root) as source_image:
+            image = self.transform(source_image) if self.transform is not None else source_image.copy()
         label = ohe.encode(image_name.split('_')[0]) # 为了方便，在生成图片的时候，图片文件的命名格式 "4个数字或者数字_时间戳.PNG", 4个字母或者即是图片的验证码的值，字母大写,同时对该值做 one-hot 处理
         return image, label
 

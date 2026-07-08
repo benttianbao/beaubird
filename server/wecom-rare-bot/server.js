@@ -55,7 +55,8 @@ function loadConfigFromEnv() {
     token: process.env.WECOM_TOKEN || process.env.WECHAT_WORK_BOT_TOKEN || "",
     encodingAesKey: process.env.WECOM_ENCODING_AES_KEY || process.env.WECHAT_WORK_ENCODING_AES_KEY || "",
     groupWebhookUrl: process.env.WECOM_GROUP_WEBHOOK_URL || process.env.WECHAT_WORK_GROUP_WEBHOOK_URL || "",
-    publicBaseUrl: process.env.WECOM_PUBLIC_BASE_URL || process.env.WECHAT_WORK_PUBLIC_BASE_URL || ""
+    publicBaseUrl: process.env.WECOM_PUBLIC_BASE_URL || process.env.WECHAT_WORK_PUBLIC_BASE_URL || "",
+    allowUnsignedCallbacks: process.env.ALLOW_UNSIGNED_WECOM_CALLBACKS === "1"
   };
 }
 
@@ -93,16 +94,28 @@ function createGroupWebhookSender(groupWebhookUrl, fetchImpl = fetch) {
   };
 }
 
+function createSessionRuntimeStore() {
+  const runtimes = new Map();
+  return function getSessionRuntime(sessionKey = "global") {
+    const key = String(sessionKey || "global");
+    let runtime = runtimes.get(key);
+    if (!runtime) {
+      const birdreportClient = createBirdreportClient();
+      runtime = {
+        birdreportClient,
+        service: createRareBirdQueryService({ birdreportClient })
+      };
+      runtimes.set(key, runtime);
+    }
+    return runtime;
+  };
+}
+
 function createServer() {
   const config = loadConfigFromEnv();
-  const birdreportClient = createBirdreportClient();
-  const service = createRareBirdQueryService({
-    birdreportClient
-  });
   const handler = createRareBotHttpHandler({
     config,
-    service,
-    birdreportClient,
+    getSessionRuntime: createSessionRuntimeStore(),
     sendGroupWebhook: createGroupWebhookSender(config.groupWebhookUrl)
   });
   return http.createServer(handler);
@@ -118,6 +131,7 @@ if (require.main === module) {
 
 module.exports = {
   createGroupWebhookSender,
+  createSessionRuntimeStore,
   createServer,
   getListenOptions,
   loadConfigFromEnv,

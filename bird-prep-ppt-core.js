@@ -122,7 +122,10 @@
     const preparedSlides = normalizedSlides.map((slide) => {
       const photo = normalizeSlidePhoto(slide.photo);
       if (!photo) {
-        return slide;
+        return {
+          ...slide,
+          photo: null
+        };
       }
 
       mediaIndex += 1;
@@ -203,9 +206,6 @@
     if (type === "image/png" || ext === "png") {
       return "image/png";
     }
-    if (type === "image/webp" || ext === "webp") {
-      return "image/webp";
-    }
     return "";
   }
 
@@ -213,9 +213,6 @@
     const ext = String(fallback || "").trim().replace(/^\./, "").toLowerCase();
     if (contentType === "image/png") {
       return "png";
-    }
-    if (contentType === "image/webp") {
-      return "webp";
     }
     return ext === "jpeg" ? "jpg" : ext || "jpg";
   }

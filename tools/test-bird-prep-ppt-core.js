@@ -251,6 +251,31 @@ test("createBirdPrepPptx embeds bird photos with media relationships and attribu
   assert.match(slideRels, /Target="\.\.\/media\/image1\.jpg"/);
 });
 
+test("createBirdPrepPptx skips WebP photos instead of embedding unsupported PPT media", () => {
+  const bytes = createBirdPrepPptx([
+    {
+      speciesName: "Little Egret",
+      latinName: "Egretta garzetta",
+      photo: {
+        bytes: Uint8Array.from([0x52, 0x49, 0x46, 0x46]),
+        contentType: "image/webp",
+        extension: "webp"
+      },
+      sections: [
+        { title: "Appearance", body: "White plumage." },
+        { title: "Identification", body: "Dark bill and legs." },
+        { title: "Habitat", body: "Wetland edges." },
+        { title: "Range", body: "Common resident." }
+      ]
+    }
+  ]);
+
+  const entries = listStoredZipEntries(bytes);
+  assert.ok(!entries.some((entry) => entry.name.startsWith("ppt/media/")));
+  const slideRels = readStoredZipEntry(bytes, "ppt/slides/_rels/slide1.xml.rels").toString("utf8");
+  assert.doesNotMatch(slideRels, /relationships\/image/);
+});
+
 test("buildBirdPrepPptxFilename includes location and timestamp-safe suffix", () => {
   assert.match(
     buildBirdPrepPptxFilename({ province: "浙江省", city: "杭州市", date: new Date("2026-05-09T08:07:06") }),

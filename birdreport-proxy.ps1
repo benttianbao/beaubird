@@ -798,9 +798,9 @@ try {
         }
 
         $assetUrl = "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/$assetId/1200"
-        $assetResponse = Invoke-MacaulayCurlRequest -RemotePath $assetUrl -Accept "image/jpeg,image/png,image/webp"
+        $assetResponse = Invoke-MacaulayCurlRequest -RemotePath $assetUrl -Accept "image/jpeg,image/png"
         $assetContentType = ([string]$assetResponse.ContentType).Split(";")[0].ToLowerInvariant()
-        if ($assetContentType -notin @("image/jpeg", "image/png", "image/webp")) {
+        if ($assetContentType -notin @("image/jpeg", "image/png")) {
           Write-JsonResponse -Context $context -StatusCode 502 -Body '{"success":false,"error":"Macaulay Library asset was not a supported image"}'
           continue
         }

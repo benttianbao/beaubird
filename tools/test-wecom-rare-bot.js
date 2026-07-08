@@ -397,6 +397,28 @@ test("birdreport client throws BirdReport business errors", async () => {
   );
 });
 
+test("birdreport client treats numeric BirdReport captcha codes as business errors", async () => {
+  const client = createBirdreportClient({
+    signRequest(data) {
+      return { body: `page=${data.page}`, headers: {} };
+    },
+    async fetchImpl() {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ code: 405, msg: "闇€瑕侀獙璇佺爜" })
+      };
+    }
+  });
+
+  await assert.rejects(
+    () => client.fetchAllTaxa({ province: "Zhejiang" }),
+    {
+      name: "BirdreportCaptchaError"
+    }
+  );
+});
+
 test("birdreport client fetches captcha images and verifies codes with the same cookie jar", async () => {
   const calls = [];
   const client = createBirdreportClient({
@@ -656,6 +678,132 @@ test("captcha image route serves pending captcha bytes", async () => {
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("content-type"), "image/png");
     assert.equal(body.toString("utf8"), "image-bytes");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("rare bot rejects callback traffic when WeCom token is not configured", async () => {
+  let called = false;
+  const server = http.createServer(
+    createRareBotHttpHandler({
+      config: {},
+      service: {
+        async queryDateSpecies() {
+          called = true;
+          return { reply: "should not run" };
+        }
+      }
+    })
+  );
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    const { port } = server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/wecom/rare-bot`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: { content: "@bot 2026-05-07" } })
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 503);
+    assert.equal(body.error, "WeCom token is not configured");
+    assert.equal(called, false);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("rare bot allows unsigned callbacks only when explicitly enabled", async () => {
+  const server = http.createServer(
+    createRareBotHttpHandler({
+      config: { allowUnsignedCallbacks: true },
+      service: {
+        async queryDateSpecies(date) {
+          assert.equal(date, "2026-05-07");
+          return { reply: "ok" };
+        }
+      }
+    })
+  );
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    const { port } = server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/wecom/rare-bot`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: { content: "@bot 2026-05-07" } })
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), createTextReplyPayload("ok"));
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("rare bot resolves BirdReport clients per callback session", async () => {
+  const sessionKeys = [];
+  const server = http.createServer(
+    createRareBotHttpHandler({
+      config: { allowUnsignedCallbacks: true },
+      getSessionRuntime(sessionKey) {
+        return {
+          service: {
+            async queryDateSpecies(date) {
+              sessionKeys.push(`${sessionKey}:${date}`);
+              return { reply: sessionKey };
+            }
+          }
+        };
+      }
+    })
+  );
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    const { port } = server.address();
+    for (const room of ["room-a", "room-b"]) {
+      const response = await fetch(`http://127.0.0.1:${port}/wecom/rare-bot`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatid: room, userid: "user-1", text: { content: "@bot 2026-05-07" } })
+      });
+      assert.equal(response.status, 200);
+    }
+
+    assert.deepEqual(sessionKeys, ["room-a:user-1:2026-05-07", "room-b:user-1:2026-05-07"]);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+test("rare bot rejects callback bodies over the configured limit", async () => {
+  const server = http.createServer(
+    createRareBotHttpHandler({
+      config: { allowUnsignedCallbacks: true },
+      maxBodyBytes: 8,
+      service: {
+        async queryDateSpecies() {
+          throw new Error("large bodies should not reach the service");
+        }
+      }
+    })
+  );
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+
+  try {
+    const { port } = server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/wecom/rare-bot`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: { content: "@bot 2026-05-07" } })
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 413);
+    assert.equal(body.error, "Request body too large");
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

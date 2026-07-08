@@ -30,6 +30,7 @@ const ALL_BIRDS_FULL_SCRIPT_URL = "./all_birds_full.js";
 const ALL_BIRDS_FULL_GLOBAL = "BEAUBIRD_ALL_BIRDS_FULL";
 const BIRD_PREP_LOGIN_EXPIRED_MESSAGE = "登录已过期，请重新登录后再生成 PPT。";
 const BIRD_PREP_MACAULAY_MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+const BIRD_PREP_MACAULAY_MAX_TOTAL_IMAGE_BYTES = 48 * 1024 * 1024;
 const BIRD_PREP_MACAULAY_FETCH_TIMEOUT_MS = 90 * 1000;
 const BIRD_PREP_MACAULAY_FETCH_ATTEMPTS = 2;
 const BIRD_PREP_IMAGE_DIMENSION_TIMEOUT_MS = 5000;
@@ -45,6 +46,35 @@ const BIRDREPORT_RARE_SPECIES_PROVINCE = "浙江省";
 const BIRDREPORT_RARE_SPECIES_THRESHOLD = 500;
 const BIRDREPORT_MONITOR_INTERVAL_MS = 60 * 60 * 1000;
 const UNLOCKED_SPECIES_VISIBLE_ROW_COUNT = 15;
+
+function safeLocalStorageGet(key, fallback = "") {
+  try {
+    const value = localStorage.getItem(key);
+    return value == null ? fallback : value;
+  } catch (error) {
+    console.warn("Failed to read localStorage:", error);
+    return fallback;
+  }
+}
+
+function safeLocalStorageSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (error) {
+    console.warn("Failed to write localStorage:", error);
+    return false;
+  }
+}
+
+function safeLocalStorageRemove(key) {
+  try {
+    localStorage.removeItem(key);
+  } catch (error) {
+    console.warn("Failed to remove localStorage:", error);
+  }
+}
+
 const BEAUBIRD_UTILS = window.BeauBirdUtils || {};
 const BEAUBIRD_DATA = window.BeauBirdData || {};
 const formatCompactTimestamp = typeof BEAUBIRD_UTILS.formatCompactTimestamp === "function"
@@ -1357,29 +1387,29 @@ async function syncEbirdRecords() {
 }
 
 function hydrateEbirdInputs() {
-  elements.ebirdApiKey.value = localStorage.getItem(EBIRD_API_KEY_STORAGE) || "";
-  elements.ebirdRegionCode.value = localStorage.getItem(EBIRD_REGION_STORAGE) || "";
-  elements.ebirdBackDays.value = localStorage.getItem(EBIRD_BACK_STORAGE) || "14";
+  elements.ebirdApiKey.value = safeLocalStorageGet(EBIRD_API_KEY_STORAGE, "");
+  elements.ebirdRegionCode.value = safeLocalStorageGet(EBIRD_REGION_STORAGE, "");
+  elements.ebirdBackDays.value = safeLocalStorageGet(EBIRD_BACK_STORAGE, "14");
 }
 
 function persistEbirdSettings() {
   const backDays = clampBackDays(elements.ebirdBackDays.value);
   elements.ebirdBackDays.value = String(backDays);
-  localStorage.setItem(EBIRD_API_KEY_STORAGE, elements.ebirdApiKey.value.trim());
-  localStorage.setItem(EBIRD_REGION_STORAGE, elements.ebirdRegionCode.value.trim());
-  localStorage.setItem(EBIRD_BACK_STORAGE, String(backDays));
+  safeLocalStorageSet(EBIRD_API_KEY_STORAGE, elements.ebirdApiKey.value.trim());
+  safeLocalStorageSet(EBIRD_REGION_STORAGE, elements.ebirdRegionCode.value.trim());
+  safeLocalStorageSet(EBIRD_BACK_STORAGE, String(backDays));
 }
 
 function clearEbirdApiKey() {
   elements.ebirdApiKey.value = "";
-  localStorage.removeItem(EBIRD_API_KEY_STORAGE);
+  safeLocalStorageRemove(EBIRD_API_KEY_STORAGE);
   setEbirdMessage("已清除本地保存的 eBird API 密钥。");
 }
 
 function hydrateEbirdSeasonalInputs() {
   let settings = {};
   try {
-    settings = JSON.parse(localStorage.getItem(EBIRD_SEASONAL_SETTINGS_STORAGE) || "{}");
+    settings = JSON.parse(safeLocalStorageGet(EBIRD_SEASONAL_SETTINGS_STORAGE, "{}"));
   } catch (error) {
     settings = {};
   }
@@ -1397,7 +1427,7 @@ function hydrateEbirdSeasonalInputs() {
 
 function persistEbirdSeasonalSettings() {
   const settings = getEbirdSeasonalSettings();
-  localStorage.setItem(EBIRD_SEASONAL_SETTINGS_STORAGE, JSON.stringify(settings));
+  safeLocalStorageSet(EBIRD_SEASONAL_SETTINGS_STORAGE, JSON.stringify(settings));
 }
 
 function getEbirdSeasonalSettings() {
@@ -1640,7 +1670,7 @@ function renderEbirdSeasonalDetail(entry) {
 }
 
 function clearEbirdSeasonalCache() {
-  localStorage.removeItem(EBIRD_SEASONAL_CACHE_STORAGE);
+  safeLocalStorageRemove(EBIRD_SEASONAL_CACHE_STORAGE);
   setEbirdSeasonalMessage("已清除浙江当季分析的历史缓存；下次分析会重新请求 eBird。");
 }
 
@@ -1780,7 +1810,7 @@ function normalizeEbirdSeasonalObservationList(payload) {
 
 function loadEbirdSeasonalCache() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(EBIRD_SEASONAL_CACHE_STORAGE) || "{}");
+    const parsed = JSON.parse(safeLocalStorageGet(EBIRD_SEASONAL_CACHE_STORAGE, "{}"));
     return {
       version: 1,
       days: parsed?.days && typeof parsed.days === "object" ? parsed.days : {}
@@ -1792,7 +1822,7 @@ function loadEbirdSeasonalCache() {
 }
 
 function saveEbirdSeasonalCache(cache) {
-  localStorage.setItem(
+  safeLocalStorageSet(
     EBIRD_SEASONAL_CACHE_STORAGE,
     JSON.stringify({
       version: 1,
@@ -3945,6 +3975,7 @@ async function loadBirdPrepMacaulayPhotos(selectedSpecies, slides, options = {})
   });
   const taxonomyBySciName = await loadBirdPrepMacaulayTaxonomyBySciName(scientificNames);
   let attachedCount = 0;
+  let attachedImageBytes = 0;
   let missingCount = 0;
   let firstErrorMessage = "";
 
@@ -3962,7 +3993,14 @@ async function loadBirdPrepMacaulayPhotos(selectedSpecies, slides, options = {})
     try {
       const photo = await fetchBirdPrepMacaulayPhoto(taxon, taxonomyBySciName, slide);
       if (photo) {
+        const imageBytes = Number(photo.bytes?.byteLength || photo.bytes?.length) || 0;
+        if (attachedImageBytes + imageBytes > BIRD_PREP_MACAULAY_MAX_TOTAL_IMAGE_BYTES) {
+          firstErrorMessage = firstErrorMessage || "Macaulay Library 图片总大小超过限制。";
+          missingCount += 1;
+          continue;
+        }
         slide.photo = photo;
+        attachedImageBytes += imageBytes;
         attachedCount += 1;
       } else {
         missingCount += 1;
@@ -3981,7 +4019,7 @@ async function loadBirdPrepMacaulayPhotos(selectedSpecies, slides, options = {})
     });
   }
 
-  return { attachedCount, missingCount, firstErrorMessage };
+  return { attachedCount, missingCount, firstErrorMessage, attachedImageBytes };
 }
 
 async function loadBirdPrepMacaulayTaxonomyBySciName(scientificNames) {
@@ -4044,7 +4082,7 @@ function normalizeScientificName(value) {
 }
 
 function getStoredEbirdApiKey() {
-  return String(elements.ebirdApiKey?.value || localStorage.getItem(EBIRD_API_KEY_STORAGE) || "").trim();
+  return String(elements.ebirdApiKey?.value || safeLocalStorageGet(EBIRD_API_KEY_STORAGE, "")).trim();
 }
 
 async function birdreportProxyGetJson(path) {
@@ -4071,7 +4109,7 @@ async function birdreportProxyGetImage(path) {
   }
 
   const contentType = String(response.headers.get("content-type") || "").split(";")[0].toLowerCase();
-  if (!["image/jpeg", "image/png", "image/webp"].includes(contentType)) {
+  if (!["image/jpeg", "image/png"].includes(contentType)) {
     throw new Error(`Macaulay Library 返回了不支持的图片类型：${contentType || "unknown"}`);
   }
   const blob = await response.blob();
@@ -4173,9 +4211,6 @@ function readImageDimensions(blob) {
 function getImageExtensionFromContentType(contentType) {
   if (contentType === "image/png") {
     return "png";
-  }
-  if (contentType === "image/webp") {
-    return "webp";
   }
   return "jpg";
 }
@@ -5887,12 +5922,12 @@ function calendarColor(count, maxCount) {
 
 function loadPersonalRecords() {
   try {
-    const personalRaw = localStorage.getItem(PERSONAL_STORAGE_KEY);
+    const personalRaw = safeLocalStorageGet(PERSONAL_STORAGE_KEY, "");
     if (personalRaw) {
       return normalizeRecords(JSON.parse(personalRaw));
     }
 
-    const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    const legacyRaw = safeLocalStorageGet(LEGACY_STORAGE_KEY, "");
     if (!legacyRaw) {
       return [];
     }
@@ -5906,7 +5941,7 @@ function loadPersonalRecords() {
 
 function loadUnlockedSpeciesCache() {
   try {
-    const raw = localStorage.getItem(BIRDREPORT_UNLOCKED_SPECIES_CACHE_STORAGE);
+    const raw = safeLocalStorageGet(BIRDREPORT_UNLOCKED_SPECIES_CACHE_STORAGE, "");
     if (!raw) {
       return createEmptyUnlockedSpeciesCache();
     }
@@ -5953,16 +5988,16 @@ function saveUnlockedSpeciesCache() {
     observed: normalizeBirdreportTaxa(state.unlockedObservedSpecies),
     missing: normalizeBirdreportTaxa(state.unlockedMissingSpecies)
   };
-  localStorage.setItem(BIRDREPORT_UNLOCKED_SPECIES_CACHE_STORAGE, JSON.stringify(payload));
+  safeLocalStorageSet(BIRDREPORT_UNLOCKED_SPECIES_CACHE_STORAGE, JSON.stringify(payload));
 }
 
 function clearUnlockedSpeciesCache() {
-  localStorage.removeItem(BIRDREPORT_UNLOCKED_SPECIES_CACHE_STORAGE);
+  safeLocalStorageRemove(BIRDREPORT_UNLOCKED_SPECIES_CACHE_STORAGE);
 }
 
 function loadZhejiangRareSpecies() {
   try {
-    const raw = localStorage.getItem(BIRDREPORT_RARE_SPECIES_STORAGE);
+    const raw = safeLocalStorageGet(BIRDREPORT_RARE_SPECIES_STORAGE, "");
     if (!raw) {
       return {
         province: BIRDREPORT_RARE_SPECIES_PROVINCE,
@@ -5999,12 +6034,12 @@ function loadZhejiangRareSpecies() {
 }
 
 function saveZhejiangRareSpeciesToStorage(payload) {
-  localStorage.setItem(BIRDREPORT_RARE_SPECIES_STORAGE, JSON.stringify(payload));
+  safeLocalStorageSet(BIRDREPORT_RARE_SPECIES_STORAGE, JSON.stringify(payload));
 }
 
 function loadZhejiangRareMonitor() {
   try {
-    const raw = localStorage.getItem(BIRDREPORT_RARE_MONITOR_STORAGE);
+    const raw = safeLocalStorageGet(BIRDREPORT_RARE_MONITOR_STORAGE, "");
     if (!raw) {
       return { enabled: false, targetDate: formatIsoDate(new Date()), lastCheckedAt: "", lastCheckedDate: "", lastHitAt: "" };
     }
@@ -6024,12 +6059,12 @@ function loadZhejiangRareMonitor() {
 }
 
 function saveZhejiangRareMonitor(payload) {
-  localStorage.setItem(BIRDREPORT_RARE_MONITOR_STORAGE, JSON.stringify(payload));
+  safeLocalStorageSet(BIRDREPORT_RARE_MONITOR_STORAGE, JSON.stringify(payload));
 }
 
 function loadZhejiangRareNotificationLog() {
   try {
-    const raw = localStorage.getItem(BIRDREPORT_RARE_NOTIFICATION_LOG_STORAGE);
+    const raw = safeLocalStorageGet(BIRDREPORT_RARE_NOTIFICATION_LOG_STORAGE, "");
     if (!raw) {
       return {};
     }
@@ -6043,11 +6078,11 @@ function loadZhejiangRareNotificationLog() {
 }
 
 function saveZhejiangRareNotificationLog(payload) {
-  localStorage.setItem(BIRDREPORT_RARE_NOTIFICATION_LOG_STORAGE, JSON.stringify(payload));
+  safeLocalStorageSet(BIRDREPORT_RARE_NOTIFICATION_LOG_STORAGE, JSON.stringify(payload));
 }
 
 function savePersonalRecords(records) {
-  localStorage.setItem(PERSONAL_STORAGE_KEY, JSON.stringify(records));
+  safeLocalStorageSet(PERSONAL_STORAGE_KEY, JSON.stringify(records));
 }
 
 function isLegacyRegionQueryRecord(record) {

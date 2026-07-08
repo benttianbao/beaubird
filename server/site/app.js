@@ -1,6 +1,6 @@
 const http = require("node:http");
 const { createReadStream, existsSync, statSync } = require("node:fs");
-const { extname, join, normalize, resolve, sep } = require("node:path");
+const { extname, join, normalize, relative: relativePath, resolve, sep } = require("node:path");
 
 const { adminPage, changePasswordPage, loginPage } = require("./pages");
 const {
@@ -32,11 +32,15 @@ const DEFAULT_REQUEST_LIMITS = {
   maxBodyBytes: 1024 * 1024,
   bodyTimeoutMs: 15_000
 };
+const DEFAULT_UPSTREAM_LIMITS = {
+  timeoutMs: 20_000,
+  maxResponseBytes: 10 * 1024 * 1024
+};
 const DEFAULT_BIRDREPORT_RATE_LIMIT = {
   windowMs: 60_000,
   maxRequests: 120
 };
-const MACAULAY_PPT_IMAGE_ACCEPT = "image/jpeg,image/png,image/webp";
+const MACAULAY_PPT_IMAGE_ACCEPT = "image/jpeg,image/png";
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -61,7 +65,9 @@ const PUBLIC_ROOT_FILES = new Set([
   "all_birds_full.json"
 ]);
 const PUBLIC_BIRD_PROFILE_PREFIX = "data/bird-profiles/";
-const PUBLIC_PREFIXES = [PUBLIC_BIRD_PROFILE_PREFIX, "data/", "vendor/"];
+const PUBLIC_PREFIXES = [PUBLIC_BIRD_PROFILE_PREFIX, "vendor/"];
+const PRIVATE_STATIC_EXTENSIONS = new Set([".db", ".db3", ".sqlite", ".sqlite3", ".jsonl"]);
+const ALLOWED_BIRDREPORT_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 const BIRDREPORT_ENDPOINTS = {
   "/api/birdreport/province": {
@@ -111,6 +117,7 @@ function createSiteServer(options = {}) {
     options.database || initializeSiteDatabase(options.databasePath || join(projectRoot, "data", "site.sqlite"));
   const security = { ...DEFAULT_SECURITY, ...(options.security || {}) };
   const requestLimits = { ...DEFAULT_REQUEST_LIMITS, ...(options.requestLimits || {}) };
+  const upstreamLimits = { ...DEFAULT_UPSTREAM_LIMITS, ...(options.upstreamLimits || {}) };
   const birdreportRateLimiter = createFixedWindowRateLimiter({
     ...DEFAULT_BIRDREPORT_RATE_LIMIT,
     ...(options.birdreportRateLimit || {})
@@ -131,7 +138,8 @@ function createSiteServer(options = {}) {
         requestLimits,
         response,
         secureCookies,
-        security
+        security,
+        upstreamLimits
       });
     } catch (error) {
       if (error instanceof RequestBodyTooLargeError) {
@@ -139,6 +147,12 @@ function createSiteServer(options = {}) {
       }
       if (error instanceof RequestBodyTimeoutError) {
         return json(response, 408, { error: "请求体读取超时。" });
+      }
+      if (error instanceof UpstreamTimeoutError) {
+        return json(response, 504, { error: "Upstream request timed out" });
+      }
+      if (error instanceof UpstreamBodyTooLargeError) {
+        return json(response, 502, { error: "Upstream response was too large" });
       }
       console.error(error);
       json(response, 500, { error: "服务器内部错误。" });
@@ -355,16 +369,21 @@ async function proxyBirdreport(context, pathname) {
     headers.cookie = cookieHeader;
   }
   const remote = typeof endpoint.remote === "function" ? endpoint.remote() : endpoint.remote;
-  const upstream = await context.fetchImpl(remote, {
+  const upstream = await fetchUpstream(context, remote, {
     method,
     headers,
     body
   });
   storeBirdreportSetCookies(cookieJar, upstream.headers);
+  const contentType = getResponseContentType(upstream);
+  if (pathname === "/api/birdreport/captcha" && upstream.ok && !ALLOWED_BIRDREPORT_IMAGE_TYPES.has(contentType)) {
+    return json(context.response, 502, { error: "BirdReport captcha was not a supported image" });
+  }
+  const responseBody = await readUpstreamBuffer(upstream, context.upstreamLimits.maxResponseBytes);
   context.response.writeHead(upstream.status, {
     "content-type": upstream.headers.get("content-type") || "application/json; charset=utf-8"
   });
-  context.response.end(Buffer.from(await upstream.arrayBuffer()));
+  context.response.end(responseBody);
 }
 
 function getBirdreportCookieJar(context) {
@@ -400,6 +419,78 @@ function storeBirdreportSetCookies(cookieJar, headers) {
   }
 }
 
+function getResponseContentType(response) {
+  return String(response.headers?.get?.("content-type") || "").split(";")[0].trim().toLowerCase();
+}
+
+async function fetchUpstream(context, url, init = {}) {
+  const timeoutMs = Math.max(1, Number(context.upstreamLimits?.timeoutMs) || DEFAULT_UPSTREAM_LIMITS.timeoutMs);
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  let timer;
+
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      if (controller) {
+        controller.abort();
+      }
+      reject(new UpstreamTimeoutError());
+    }, timeoutMs);
+  });
+
+  try {
+    const fetchOptions = controller ? { ...init, signal: controller.signal } : init;
+    return await Promise.race([Promise.resolve(context.fetchImpl(url, fetchOptions)), timeout]);
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new UpstreamTimeoutError();
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readUpstreamBuffer(response, maxResponseBytes = DEFAULT_UPSTREAM_LIMITS.maxResponseBytes) {
+  const limit = Math.max(1, Number(maxResponseBytes) || DEFAULT_UPSTREAM_LIMITS.maxResponseBytes);
+  const declaredLength = Number(response.headers?.get?.("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > limit) {
+    throw new UpstreamBodyTooLargeError();
+  }
+
+  if (response.body && typeof response.body.getReader === "function") {
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
+        const chunk = Buffer.from(value);
+        total += chunk.length;
+        if (total > limit) {
+          throw new UpstreamBodyTooLargeError();
+        }
+        chunks.push(chunk);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    return Buffer.concat(chunks);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > limit) {
+    throw new UpstreamBodyTooLargeError();
+  }
+  return buffer;
+}
+
+async function readUpstreamText(response, maxResponseBytes = DEFAULT_UPSTREAM_LIMITS.maxResponseBytes) {
+  return (await readUpstreamBuffer(response, maxResponseBytes)).toString("utf8");
+}
+
 async function proxyMacaulaySearch(context, url) {
   const taxonCode = String(url.searchParams.get("taxonCode") || "").trim();
   const query = String(url.searchParams.get("q") || "").trim();
@@ -409,7 +500,7 @@ async function proxyMacaulaySearch(context, url) {
 
   const upstreamUrl = createMacaulayApiSearchUrl({ taxonCode, query });
 
-  const upstream = await context.fetchImpl(upstreamUrl.toString(), {
+  const upstream = await fetchUpstream(context, upstreamUrl.toString(), {
     headers: {
       accept: "application/json",
       "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
@@ -421,7 +512,7 @@ async function proxyMacaulaySearch(context, url) {
   const contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
   if (upstream.ok && contentType.includes("application/json")) {
     try {
-      const payload = await upstream.json();
+      const payload = JSON.parse(await readUpstreamText(upstream, context.upstreamLimits.maxResponseBytes));
       results = normalizeMacaulaySearchResults(payload, { taxonCode, query });
     } catch (error) {
       upstreamError = `Macaulay Library search returned invalid JSON: ${error.message}`;
@@ -473,7 +564,7 @@ function createMacaulayApiSearchUrl({ taxonCode = "", query = "" } = {}) {
 
 async function fetchMacaulayCatalogSearchResults(context, { taxonCode = "", query = "" } = {}) {
   const catalogUrl = createMacaulayCatalogSearchUrl({ taxonCode, query });
-  const response = await context.fetchImpl(catalogUrl.toString(), {
+  const response = await fetchUpstream(context, catalogUrl.toString(), {
     headers: {
       accept: "text/html",
       "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
@@ -482,7 +573,7 @@ async function fetchMacaulayCatalogSearchResults(context, { taxonCode = "", quer
   if (!response.ok) {
     return [];
   }
-  return normalizeMacaulayCatalogSearchResults(await response.text());
+  return normalizeMacaulayCatalogSearchResults(await readUpstreamText(response, context.upstreamLimits.maxResponseBytes));
 }
 
 function createMacaulayCatalogSearchUrl({ taxonCode = "", query = "" } = {}) {
@@ -509,7 +600,7 @@ async function resolveMacaulayQueryTaxonCode(context, query) {
   taxonomyUrl.searchParams.set("fmt", "json");
   taxonomyUrl.searchParams.set("species", trimmedQuery);
   taxonomyUrl.searchParams.set("cat", "species");
-  const response = await context.fetchImpl(taxonomyUrl.toString(), {
+  const response = await fetchUpstream(context, taxonomyUrl.toString(), {
     headers: {
       accept: "application/json",
       "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
@@ -525,7 +616,7 @@ async function resolveMacaulayQueryTaxonCode(context, query) {
 
   let payload;
   try {
-    payload = await response.json();
+    payload = JSON.parse(await readUpstreamText(response, context.upstreamLimits.maxResponseBytes));
   } catch {
     return "";
   }
@@ -548,7 +639,7 @@ async function proxyMacaulayAsset(context, rawAssetId) {
   }
 
   const upstreamUrl = `https://cdn.download.ams.birds.cornell.edu/api/v1/asset/${assetId}/1200`;
-  const upstream = await context.fetchImpl(upstreamUrl, {
+  const upstream = await fetchUpstream(context, upstreamUrl, {
     headers: {
       accept: MACAULAY_PPT_IMAGE_ACCEPT,
       "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
@@ -558,15 +649,16 @@ async function proxyMacaulayAsset(context, rawAssetId) {
   if (!upstream.ok) {
     return json(context.response, upstream.status, { error: `Macaulay Library asset returned HTTP ${upstream.status}` });
   }
-  if (!["image/jpeg", "image/png", "image/webp"].includes(contentType)) {
+  if (!["image/jpeg", "image/png"].includes(contentType)) {
     return json(context.response, 502, { error: "Macaulay Library asset was not a supported image" });
   }
+  const body = await readUpstreamBuffer(upstream, context.upstreamLimits.maxResponseBytes);
 
   context.response.writeHead(200, {
     "content-type": contentType,
     "x-content-type-options": "nosniff"
   });
-  context.response.end(Buffer.from(await upstream.arrayBuffer()));
+  context.response.end(body);
 }
 
 function normalizeMacaulayAssetId(value) {
@@ -697,15 +789,15 @@ function normalizeMacaulayTaxonomyName(value) {
 }
 
 function serveStatic(context, pathname) {
-  const relative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
-  const publicRelative = relative.replace(/\\/g, "/");
-  if (!PUBLIC_ROOT_FILES.has(publicRelative) && !PUBLIC_PREFIXES.some((prefix) => publicRelative.startsWith(prefix))) {
-    return text(context.response, 404, "Not found");
-  }
-  const resolved = normalize(resolve(context.projectRoot, relative));
   const root = normalize(context.projectRoot);
+  const requestedRelative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+  const resolved = normalize(resolve(root, requestedRelative));
   if (resolved !== root && !resolved.startsWith(root + sep)) {
     return text(context.response, 403, "Forbidden");
+  }
+  const publicRelative = relativePath(root, resolved).replace(/\\/g, "/");
+  if (!isPublicStaticPath(publicRelative)) {
+    return text(context.response, 404, "Not found");
   }
   if (!existsSync(resolved) || !statSync(resolved).isFile()) {
     return text(context.response, 404, "Not found");
@@ -713,6 +805,31 @@ function serveStatic(context, pathname) {
   const type = MIME_TYPES[extname(resolved).toLowerCase()] || "application/octet-stream";
   setBaseHeaders(context.response, type);
   createReadStream(resolved).pipe(context.response);
+}
+
+function isPublicStaticPath(publicRelative) {
+  const normalizedRelative = String(publicRelative || "").replace(/\\/g, "/");
+  if (!normalizedRelative || normalizedRelative.startsWith("../") || normalizedRelative.includes("/../")) {
+    return false;
+  }
+  const segments = normalizedRelative.split("/");
+  if (segments.some((segment) => !segment || segment.startsWith("."))) {
+    return false;
+  }
+  const lower = normalizedRelative.toLowerCase();
+  if (lower.endsWith(".env") || lower.includes("/.env") || PRIVATE_STATIC_EXTENSIONS.has(extname(lower))) {
+    return false;
+  }
+  if (PUBLIC_ROOT_FILES.has(normalizedRelative)) {
+    return true;
+  }
+  if (normalizedRelative.startsWith(PUBLIC_BIRD_PROFILE_PREFIX)) {
+    return [".js", ".json"].includes(extname(lower));
+  }
+  if (PUBLIC_PREFIXES.some((prefix) => prefix !== PUBLIC_BIRD_PROFILE_PREFIX && normalizedRelative.startsWith(prefix))) {
+    return Object.prototype.hasOwnProperty.call(MIME_TYPES, extname(lower));
+  }
+  return false;
 }
 
 function verifyCsrf(context, request) {
@@ -742,7 +859,7 @@ function readCookie(request, name) {
 }
 
 function getClientIp(request) {
-  return String(request.headers["x-forwarded-for"] || request.socket.remoteAddress || "").split(",")[0].trim();
+  return String(request.headers["x-real-ip"] || request.socket.remoteAddress || "").split(",")[0].trim();
 }
 
 async function readRaw(request, limits = DEFAULT_REQUEST_LIMITS) {
@@ -847,6 +964,8 @@ function cleanupRateLimitBuckets(buckets, now) {
 
 class RequestBodyTooLargeError extends Error {}
 class RequestBodyTimeoutError extends Error {}
+class UpstreamTimeoutError extends Error {}
+class UpstreamBodyTooLargeError extends Error {}
 
 function setBaseHeaders(response, contentType) {
   response.setHeader("Content-Type", contentType);

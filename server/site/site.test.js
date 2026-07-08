@@ -458,6 +458,52 @@ test("rejects request bodies over the configured limit", async () => {
   }
 });
 
+test("locks login attempts by the reverse-proxy real ip instead of spoofable forwarded chains", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+
+    await withServer(
+      {
+        database: db,
+        projectRoot: process.cwd(),
+        security: { maxLoginFailures: 1, lockoutMs: 60_000 }
+      },
+      async ({ request }) => {
+        const failed = await request("/api/auth/login", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-forwarded-for": "203.0.113.10",
+            "x-real-ip": "198.51.100.5"
+          },
+          body: JSON.stringify({ username: "admin", password: "wrong-password" })
+        });
+        assert.equal(failed.status, 401);
+
+        const locked = await request("/api/auth/login", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-forwarded-for": "203.0.113.11",
+            "x-real-ip": "198.51.100.5"
+          },
+          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+        });
+        assert.equal(locked.status, 429);
+      }
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("rate limits authenticated BirdReport proxy requests", async () => {
   const temp = createTempDatabase();
   try {
@@ -853,8 +899,50 @@ test("proxies Macaulay Library assets and rejects invalid asset ids", async () =
         assert.equal(proxied.headers.get("content-type"), "image/jpeg");
         assert.equal(await proxied.text(), "jpg-bytes");
         assert.equal(upstreamCalls[0].url, "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/123456789/1200");
-        assert.equal(upstreamCalls[0].init.headers.accept, "image/jpeg,image/png,image/webp");
-        assert.doesNotMatch(upstreamCalls[0].init.headers.accept, /image\/avif/);
+        assert.equal(upstreamCalls[0].init.headers.accept, "image/jpeg,image/png");
+        assert.doesNotMatch(upstreamCalls[0].init.headers.accept, /image\/webp|image\/avif/);
+      }
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("rejects oversized Macaulay Library assets before buffering", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+
+    await withServer(
+      {
+        database: db,
+        projectRoot: process.cwd(),
+        upstreamLimits: { timeoutMs: 15_000, maxResponseBytes: 4 },
+        fetchImpl: async () =>
+          new Response(Buffer.from("jpg-bytes"), {
+            status: 200,
+            headers: { "content-type": "image/jpeg", "content-length": "9" }
+          })
+      },
+      async ({ request }) => {
+        const login = await request("/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+        });
+        const adminCookie = cookieFrom(login);
+
+        const proxied = await request("/api/media/macaulay/asset/ML123456789", {
+          headers: { cookie: adminCookie }
+        });
+        assert.equal(proxied.status, 502);
+        assert.equal((await json(proxied)).error, "Upstream response was too large");
       }
     );
   } finally {
@@ -883,6 +971,44 @@ test("does not serve server-side source files as static assets", async () => {
 
       const source = await request("/server/site/store.js", { headers: { cookie: adminCookie } });
       assert.equal(source.status, 404);
+
+      const encodedTraversal = await request("/vendor/%2e%2e/server/site/store.js", { headers: { cookie: adminCookie } });
+      assert.equal(encodedTraversal.status, 404);
+    });
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("does not serve private data files from broad static prefixes", async () => {
+  const temp = createTempDatabase();
+  try {
+    mkdirSync(join(temp.dir, "data", "bird-profiles"), { recursive: true });
+    writeFileSync(join(temp.dir, "data", "site.sqlite"), "private database", "utf8");
+    writeFileSync(join(temp.dir, "data", "bird-profiles", "index.json"), "{}", "utf8");
+
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+
+    await withServer({ database: db, projectRoot: temp.dir }, async ({ request }) => {
+      const login = await request("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+      });
+      const adminCookie = cookieFrom(login);
+
+      const databaseFile = await request("/data/site.sqlite", { headers: { cookie: adminCookie } });
+      assert.equal(databaseFile.status, 404);
+
+      const shardIndex = await request("/data/bird-profiles/index.json", { headers: { cookie: adminCookie } });
+      assert.equal(shardIndex.status, 200);
+      assert.equal(await shardIndex.text(), "{}");
     });
   } finally {
     temp.cleanup();
