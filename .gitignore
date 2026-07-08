@@ -4,10 +4,28 @@ server/wecom-rare-bot/.env
 server/site/.env
 data/site.sqlite
 data/site.sqlite-*
+data/birdreport-zhejiang.sqlite
+data/birdreport-zhejiang.sqlite-*
+data/birdreport-zhejiang.jsonl
+data/birdreport-captcha.png
 
 android/.gradle/
 android/**/build/
 android/local.properties
+
+beaubird/
+dist/
+
+pytorch-captcha-recognition/.venv/
+pytorch-captcha-recognition/dataset/
+pytorch-captcha-recognition/__pycache__/
+pytorch-captcha-recognition/*.log
+pytorch-captcha-recognition/*.pkl
+pytorch-captcha-recognition/*.pkl.corrupt-*
+pytorch-captcha-recognition-master.zip
+
+server-site.*.log
+*.log
 
 *.apk
 *.ap_
