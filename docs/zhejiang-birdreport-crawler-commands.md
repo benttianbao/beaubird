@@ -19,6 +19,7 @@ node tools/crawl-zhejiang-birdreport.mjs --auto-captcha --manual-captcha --open-
 - 遇到验证码时，会保存图片到 `data/birdreport-captcha.png`，先用 `pytorch-captcha-recognition/model-finetune1.pkl` 自动预测并提交
 - 自动预测默认最多尝试 10 张新验证码；每次预测或校验失败都会重新获取新的验证码图片再预测
 - 如果自动预测 10 次仍未通过，会自动打开最新验证码图片，然后让你在终端输入验证码
+- 校验失败的验证码图片会保存到 `pytorch-captcha-recognition/dataset/yanzhengma_false`，文件名格式为“错误验证码_时间.png”
 - 终端会显示验证码频率，例如第几次人工输入提示、距离上次验证码多久、并发请求被合并等待了几次
 
 如果你已经在旧版本脚本里落了很多数据，第一次换新版跑时建议加一次：

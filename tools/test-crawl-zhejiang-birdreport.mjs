@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { test } from "node:test";
 
@@ -9,6 +9,12 @@ const TEST_ROOT = resolve(".tmp/crawl-zhejiang-birdreport-captcha-test");
 
 async function removeFileIfExists(path) {
   await rm(path, { force: true });
+}
+
+async function clearDirectoryFiles(path) {
+  await mkdir(path, { recursive: true });
+  const entries = await readdir(path);
+  await Promise.all(entries.map((entry) => rm(resolve(path, entry), { force: true })));
 }
 
 test("handleCaptchaChallenge saves verified captcha image to the training dataset", async () => {
@@ -86,11 +92,13 @@ test("handleCaptchaChallenge verifies model-predicted captcha before prompting",
 test("handleCaptchaChallenge fetches a new captcha for each failed automatic prediction", async () => {
   const captchaPath = resolve(TEST_ROOT, "auto-retry", "captcha.png");
   const trainingDir = resolve(TEST_ROOT, "auto-retry", "dataset");
+  const failedDir = resolve(TEST_ROOT, "auto-retry", "dataset_false");
   const images = [Buffer.from("wrong-image"), Buffer.from("right-image")];
   let fetchCount = 0;
   let verifyCount = 0;
   await mkdir(dirname(captchaPath), { recursive: true });
   await mkdir(trainingDir, { recursive: true });
+  await clearDirectoryFiles(failedDir);
   await removeFileIfExists(captchaPath);
 
   const result = await handleCaptchaChallenge(
@@ -114,6 +122,7 @@ test("handleCaptchaChallenge fetches a new captcha for each failed automatic pre
       manualCaptcha: false,
       captchaPath,
       captchaTrainingDatasetPath: trainingDir,
+      failedCaptchaDatasetPath: failedDir,
       predictCaptchaCode: async () => (fetchCount === 1 ? "1111" : "2468")
     },
     "test captcha"
@@ -123,6 +132,10 @@ test("handleCaptchaChallenge fetches a new captcha for each failed automatic pre
   assert.equal(verifyCount, 2);
   assert.match(basename(result.captchaTrainingPath), /^2468_[0-9T-]+_[a-f0-9]+\.png$/);
   assert.deepEqual(await readFile(result.captchaTrainingPath), images[1]);
+  const failedFiles = await readdir(failedDir);
+  assert.equal(failedFiles.length, 1);
+  assert.match(failedFiles[0], /^1111_[0-9T-]+\.png$/);
+  assert.deepEqual(await readFile(resolve(failedDir, failedFiles[0])), images[0]);
 });
 
 test("parseArgs enables automatic captcha prediction with an overrideable model path", () => {
@@ -181,11 +194,13 @@ test("handleCaptchaChallenge keeps repeated verified captcha samples instead of 
   assert.deepEqual(await readFile(second.captchaTrainingPath), Buffer.from("second-image"));
 });
 
-test("handleCaptchaChallenge does not save failed captcha attempts to the training dataset", async () => {
+test("handleCaptchaChallenge saves failed captcha attempts outside the verified training dataset", async () => {
   const captchaPath = resolve(TEST_ROOT, "failure", "captcha.png");
   const trainingPath = resolve(TEST_ROOT, "failure", "dataset", "9999.png");
+  const failedDir = resolve(TEST_ROOT, "failure", "dataset_false");
   await mkdir(dirname(captchaPath), { recursive: true });
   await mkdir(dirname(trainingPath), { recursive: true });
+  await clearDirectoryFiles(failedDir);
   await removeFileIfExists(captchaPath);
   await removeFileIfExists(trainingPath);
 
@@ -204,6 +219,7 @@ test("handleCaptchaChallenge does not save failed captcha attempts to the traini
           manualCaptcha: true,
           captchaPath,
           captchaTrainingDatasetPath: dirname(trainingPath),
+          failedCaptchaDatasetPath: failedDir,
           promptCaptchaCode: async () => "9999"
         },
         "test captcha"
@@ -212,6 +228,10 @@ test("handleCaptchaChallenge does not save failed captcha attempts to the traini
   );
 
   await assert.rejects(() => readFile(trainingPath), { code: "ENOENT" });
+  const failedFiles = await readdir(failedDir);
+  assert.equal(failedFiles.length, 1);
+  assert.match(failedFiles[0], /^9999_[0-9T-]+\.png$/);
+  assert.deepEqual(await readFile(resolve(failedDir, failedFiles[0])), Buffer.from("failed-captcha-image"));
 });
 
 test("writeReportWithObservations rolls back SQLite writes when JSONL append fails", async () => {

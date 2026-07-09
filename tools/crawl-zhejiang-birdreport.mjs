@@ -15,6 +15,7 @@ const DEFAULT_DB_PATH = resolve("data/birdreport-zhejiang.sqlite");
 const DEFAULT_JSONL_PATH = resolve("data/birdreport-zhejiang.jsonl");
 const DEFAULT_CAPTCHA_PATH = resolve("data/birdreport-captcha.png");
 const DEFAULT_CAPTCHA_TRAINING_DATASET_PATH = resolve("pytorch-captcha-recognition/dataset/yanzhengma");
+const DEFAULT_FAILED_CAPTCHA_DATASET_PATH = resolve("pytorch-captcha-recognition/dataset/yanzhengma_false");
 const DEFAULT_CAPTCHA_RECOGNITION_DIR = resolve("pytorch-captcha-recognition");
 const DEFAULT_CAPTCHA_MODEL_PATH = resolve(DEFAULT_CAPTCHA_RECOGNITION_DIR, "model-finetune1.pkl");
 const DEFAULT_CAPTCHA_PYTHON = process.platform === "win32"
@@ -755,6 +756,19 @@ export async function saveVerifiedCaptchaImage(captchaBody, code, datasetPath = 
   return captchaTrainingPath;
 }
 
+export function getFailedCaptchaPath(code, datasetPath = DEFAULT_FAILED_CAPTCHA_DATASET_PATH) {
+  const normalizedCode = String(code || "").trim().replace(/[^A-Za-z0-9]/g, "_") || "empty";
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").replace(/Z$/, "");
+  return resolve(datasetPath || DEFAULT_FAILED_CAPTCHA_DATASET_PATH, `${normalizedCode}_${timestamp}.png`);
+}
+
+export async function saveFailedCaptchaImage(captchaBody, code, datasetPath = DEFAULT_FAILED_CAPTCHA_DATASET_PATH) {
+  const failedCaptchaPath = getFailedCaptchaPath(code, datasetPath);
+  await mkdir(dirname(failedCaptchaPath), { recursive: true });
+  await writeFile(failedCaptchaPath, captchaBody);
+  return failedCaptchaPath;
+}
+
 function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 }
@@ -849,7 +863,17 @@ async function verifyCaptchaAndSave(client, captcha, code, options, captchaPath)
   if (!normalizedCode) {
     throw new Error("未输入验证码，已暂停并保留断点。");
   }
-  await client.verifyCaptcha(normalizedCode);
+  try {
+    await client.verifyCaptcha(normalizedCode);
+  } catch (error) {
+    try {
+      const failedCaptchaPath = await saveFailedCaptchaImage(captcha.body, normalizedCode, options.failedCaptchaDatasetPath);
+      console.warn(`错误验证码图片已保存：${failedCaptchaPath}`);
+    } catch (saveError) {
+      console.warn(`错误验证码图片保存失败：${saveError.message}`);
+    }
+    throw error;
+  }
   const captchaTrainingPath = await saveVerifiedCaptchaImage(captcha.body, normalizedCode, options.captchaTrainingDatasetPath);
   console.warn(`验证码图片已保存到训练集：${captchaTrainingPath}`);
   console.warn("验证码已通过，继续重试当前请求。");
