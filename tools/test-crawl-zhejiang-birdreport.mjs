@@ -132,7 +132,7 @@ test("parseArgs enables automatic captcha prediction with an overrideable model 
 
   assert.equal(defaults.autoCaptcha, true);
   assert.equal(basename(defaults.captchaModelPath), "model-finetune1.pkl");
-  assert.equal(defaults.autoCaptchaMaxAttempts, 3);
+  assert.equal(defaults.autoCaptchaMaxAttempts, 10);
   assert.equal(options.autoCaptcha, true);
   assert.equal(options.captchaModelPath, resolve(modelPath));
   assert.equal(options.autoCaptchaMaxAttempts, 0);

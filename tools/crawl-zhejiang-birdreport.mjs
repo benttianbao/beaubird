@@ -28,7 +28,7 @@ const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_MS = 1000;
 const DEFAULT_REQUEST_DELAY_MS = 0;
 const DEFAULT_FAST_RESUME_OVERLAP_PAGES = 5;
-const DEFAULT_AUTO_CAPTCHA_MAX_ATTEMPTS = 3;
+const DEFAULT_AUTO_CAPTCHA_MAX_ATTEMPTS = 10;
 
 const SUMMARY_URL = "https://api.birdreport.cn/front/record/chart/summary";
 const REPORT_LIST_URL = "https://api.birdreport.cn/front/record/activity/search";
@@ -506,7 +506,7 @@ Options:
   --captcha-path <path>             Captcha image path (default: data/birdreport-captcha.png)
   --captcha-model-path <path>       Captcha model path (default: pytorch-captcha-recognition/model-finetune1.pkl)
   --captcha-python <path>           Python executable for captcha prediction (default: pytorch-captcha-recognition/.venv/Scripts/python.exe on Windows)
-  --auto-captcha-max-attempts <n>   Automatic captcha attempts before manual fallback; 0 means keep trying (default: 3)
+  --auto-captcha-max-attempts <n>   Automatic captcha attempts before manual fallback; 0 means keep trying (default: 10)
   --no-resume                       Re-fetch reports already present in SQLite
   --help                            Show this help
 `);
