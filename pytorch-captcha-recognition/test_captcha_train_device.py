@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import torch
 
+import captcha_test
 import captcha_train
 
 
@@ -43,6 +44,9 @@ class CaptchaTrainDeviceTests(unittest.TestCase):
             "--save-every", "3",
             "--max-steps", "4",
             "--model-path", "F:\\beaubird\\.tmp\\captcha-smoke-model.pkl",
+            "--train-dir", "D:\\captcha-train",
+            "--num-workers", "2",
+            "--no-resume",
         ])
 
         self.assertEqual("cpu", args.device)
@@ -51,6 +55,58 @@ class CaptchaTrainDeviceTests(unittest.TestCase):
         self.assertEqual(3, args.save_every)
         self.assertEqual(4, args.max_steps)
         self.assertEqual("F:\\beaubird\\.tmp\\captcha-smoke-model.pkl", args.model_path)
+        self.assertEqual("D:\\captcha-train", args.train_dir)
+        self.assertEqual(2, args.num_workers)
+        self.assertTrue(args.no_resume)
+
+    def test_test_arg_parser_accepts_runtime_options(self):
+        args = captcha_test.build_arg_parser().parse_args([
+            "--model-path", "D:\\captcha-model.pkl",
+            "--test-dir", "D:\\captcha-test",
+            "--num-workers", "2",
+        ])
+
+        self.assertEqual("D:\\captcha-model.pkl", args.model_path)
+        self.assertEqual("D:\\captcha-test", args.test_dir)
+        self.assertEqual(2, args.num_workers)
+
+    def test_main_passes_training_directory_and_workers_to_loader(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_path = os.path.join(temp_dir, "model.pkl")
+            model = torch.nn.Linear(1, 1)
+            with patch.object(captcha_train, "CNN", return_value=model), \
+                    patch.object(captcha_train.my_dataset, "get_train_data_loader", return_value=[]) as loader:
+                captcha_train.main([
+                    "--device", "cpu",
+                    "--epochs", "0",
+                    "--model-path", model_path,
+                    "--train-dir", "D:\\captcha-train",
+                    "--num-workers", "2",
+                ])
+
+        loader.assert_called_once_with(
+            folder="D:\\captcha-train",
+            batch_size=64,
+            pin_memory=False,
+            num_workers=2,
+        )
+
+    def test_no_resume_skips_existing_model_load(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_path = os.path.join(temp_dir, "model.pkl")
+            torch.save(torch.nn.Linear(1, 1).state_dict(), model_path)
+            model = torch.nn.Linear(1, 1)
+            with patch.object(captcha_train, "CNN", return_value=model), \
+                    patch.object(captcha_train, "load_state_dict") as load_state, \
+                    patch.object(captcha_train.my_dataset, "get_train_data_loader", return_value=[]):
+                captcha_train.main([
+                    "--device", "cpu",
+                    "--epochs", "0",
+                    "--model-path", model_path,
+                    "--no-resume",
+                ])
+
+        load_state.assert_not_called()
 
     def test_save_model_retries_when_windows_temporarily_denies_replace(self):
         model = torch.nn.Linear(2, 1)

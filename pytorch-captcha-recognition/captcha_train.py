@@ -4,6 +4,7 @@ import time
 import torch
 import torch.nn as nn
 import os
+import captcha_setting
 import my_dataset
 from captcha_cnn_model import CNN
 
@@ -20,6 +21,9 @@ def build_arg_parser():
     parser.add_argument("--save-every", type=int, default=100)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--model-path", default="./model.pkl")
+    parser.add_argument("--train-dir", default=captcha_setting.TRAIN_DATASET_PATH)
+    parser.add_argument("--num-workers", type=int, default=0)
+    parser.add_argument("--no-resume", action="store_true")
     return parser
 
 
@@ -78,7 +82,7 @@ def main(argv=None):
     print("train device:", describe_device(device))
 
     cnn = CNN().to(device)
-    if os.path.exists(args.model_path):
+    if os.path.exists(args.model_path) and not args.no_resume:
         try:
             cnn.load_state_dict(load_state_dict(args.model_path, device))
             print("resume model")
@@ -91,8 +95,10 @@ def main(argv=None):
 
     # Train the Model
     train_dataloader = my_dataset.get_train_data_loader(
+        folder=args.train_dir,
         batch_size=args.batch_size,
         pin_memory=(device.type == "cuda"),
+        num_workers=args.num_workers,
     )
     for epoch in range(args.epochs):
         last_step = -1

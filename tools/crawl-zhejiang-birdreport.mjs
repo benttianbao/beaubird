@@ -1,7 +1,7 @@
-import { appendFile, mkdir, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, mkdtemp, rmdir, unlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { dirname, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
@@ -15,6 +15,11 @@ const DEFAULT_DB_PATH = resolve("data/birdreport-zhejiang.sqlite");
 const DEFAULT_JSONL_PATH = resolve("data/birdreport-zhejiang.jsonl");
 const DEFAULT_CAPTCHA_PATH = resolve("data/birdreport-captcha.png");
 const DEFAULT_CAPTCHA_TRAINING_DATASET_PATH = resolve("pytorch-captcha-recognition/dataset/yanzhengma");
+const DEFAULT_CAPTCHA_RECOGNITION_DIR = resolve("pytorch-captcha-recognition");
+const DEFAULT_CAPTCHA_MODEL_PATH = resolve(DEFAULT_CAPTCHA_RECOGNITION_DIR, "model-finetune1.pkl");
+const DEFAULT_CAPTCHA_PYTHON = process.platform === "win32"
+  ? resolve(DEFAULT_CAPTCHA_RECOGNITION_DIR, ".venv/Scripts/python.exe")
+  : resolve(DEFAULT_CAPTCHA_RECOGNITION_DIR, ".venv/bin/python");
 const DEFAULT_PROVINCE = "浙江省";
 const DEFAULT_VERSION = "CH4";
 const DEFAULT_REPORT_PAGE_LIMIT = 50;
@@ -23,6 +28,7 @@ const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_MS = 1000;
 const DEFAULT_REQUEST_DELAY_MS = 0;
 const DEFAULT_FAST_RESUME_OVERLAP_PAGES = 5;
+const DEFAULT_AUTO_CAPTCHA_MAX_ATTEMPTS = 3;
 
 const SUMMARY_URL = "https://api.birdreport.cn/front/record/chart/summary";
 const REPORT_LIST_URL = "https://api.birdreport.cn/front/record/activity/search";
@@ -494,9 +500,13 @@ Options:
   --bootstrap-progress-from-db      Initialize fast-resume progress from existing SQLite rows
   --no-fast-resume                  Disable progress fast-forward and check from page 1
   --manual-captcha                  Save captcha image and prompt for code when blocked
+  --auto-captcha                    Predict captcha with the configured .pkl model before prompting
   --open-captcha                    Open captcha image with the default image viewer
   --no-manual-captcha               Pause instead of prompting for captcha
   --captcha-path <path>             Captcha image path (default: data/birdreport-captcha.png)
+  --captcha-model-path <path>       Captcha model path (default: pytorch-captcha-recognition/model-finetune1.pkl)
+  --captcha-python <path>           Python executable for captcha prediction (default: pytorch-captcha-recognition/.venv/Scripts/python.exe on Windows)
+  --auto-captcha-max-attempts <n>   Automatic captcha attempts before manual fallback; 0 means keep trying (default: 3)
   --no-resume                       Re-fetch reports already present in SQLite
   --help                            Show this help
 `);
@@ -517,8 +527,12 @@ export function parseArgs(argv = process.argv.slice(2)) {
     fastResumeOverlapPages: DEFAULT_FAST_RESUME_OVERLAP_PAGES,
     bootstrapProgressFromDb: false,
     manualCaptcha: Boolean(stdin.isTTY),
+    autoCaptcha: false,
     openCaptcha: false,
     captchaPath: DEFAULT_CAPTCHA_PATH,
+    captchaModelPath: DEFAULT_CAPTCHA_MODEL_PATH,
+    captchaPython: DEFAULT_CAPTCHA_PYTHON,
+    autoCaptchaMaxAttempts: DEFAULT_AUTO_CAPTCHA_MAX_ATTEMPTS,
     resume: true,
     limitReports: null,
     limitNormalReports: null,
@@ -600,6 +614,9 @@ export function parseArgs(argv = process.argv.slice(2)) {
       case "--manual-captcha":
         options.manualCaptcha = true;
         break;
+      case "--auto-captcha":
+        options.autoCaptcha = true;
+        break;
       case "--open-captcha":
         options.openCaptcha = true;
         options.manualCaptcha = true;
@@ -609,6 +626,15 @@ export function parseArgs(argv = process.argv.slice(2)) {
         break;
       case "--captcha-path":
         options.captchaPath = resolve(readValue());
+        break;
+      case "--captcha-model-path":
+        options.captchaModelPath = resolve(readValue());
+        break;
+      case "--captcha-python":
+        options.captchaPython = resolve(readValue());
+        break;
+      case "--auto-captcha-max-attempts":
+        options.autoCaptchaMaxAttempts = readNonNegativeInteger();
         break;
       case "--no-resume":
         options.resume = false;
@@ -638,6 +664,77 @@ async function promptCaptchaCode(captchaPath, label) {
     return answer.trim();
   } finally {
     rl.close();
+  }
+}
+
+function parseCaptchaPredictionOutput(stdout) {
+  const lines = String(stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.reverse().find((line) => /^[A-Za-z0-9]{4}$/.test(line)) || "";
+}
+
+async function cleanupPredictTempDir(tempDir, predictImagePath) {
+  try {
+    await unlink(predictImagePath);
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+  try {
+    await rmdir(tempDir);
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
+export async function predictCaptchaCode(captchaPath, options = {}) {
+  const python = options.captchaPython || DEFAULT_CAPTCHA_PYTHON;
+  const modelPath = options.captchaModelPath || DEFAULT_CAPTCHA_MODEL_PATH;
+  const tempDir = await mkdtemp(resolve(dirname(captchaPath), "captcha-predict-"));
+  const imageExtension = extname(captchaPath) || ".png";
+  const predictImagePath = join(tempDir, `0000_${Date.now()}${imageExtension}`);
+
+  try {
+    await copyFile(captchaPath, predictImagePath);
+    const output = await new Promise((resolvePredict, rejectPredict) => {
+      const child = spawn(
+        python,
+        ["-u", join(DEFAULT_CAPTCHA_RECOGNITION_DIR, "captcha_predict.py"), "--model-path", modelPath, "--predict-dir", tempDir],
+        {
+          cwd: DEFAULT_CAPTCHA_RECOGNITION_DIR,
+          windowsHide: true
+        }
+      );
+      let stdoutText = "";
+      let stderrText = "";
+
+      child.stdout.on("data", (chunk) => {
+        stdoutText += chunk.toString("utf8");
+      });
+      child.stderr.on("data", (chunk) => {
+        stderrText += chunk.toString("utf8");
+      });
+      child.once("error", rejectPredict);
+      child.once("close", (code) => {
+        if (code === 0) {
+          resolvePredict(stdoutText);
+          return;
+        }
+        rejectPredict(new Error(`验证码模型预测失败，退出码 ${code}：${stderrText.trim() || stdoutText.trim()}`));
+      });
+    });
+    const code = parseCaptchaPredictionOutput(output);
+    if (!code) {
+      throw new Error("验证码模型没有输出 4 位验证码。");
+    }
+    return code;
+  } finally {
+    await cleanupPredictTempDir(tempDir, predictImagePath);
   }
 }
 
@@ -739,6 +836,57 @@ export async function openCaptchaFile(captchaPath) {
   });
 }
 
+async function fetchCaptchaToPath(client, captchaPath) {
+  const captcha = await client.fetchCaptchaImage();
+  await mkdir(dirname(captchaPath), { recursive: true });
+  await writeFile(captchaPath, captcha.body);
+  console.warn(`验证码图片已保存：${captchaPath}`);
+  return captcha;
+}
+
+async function verifyCaptchaAndSave(client, captcha, code, options, captchaPath) {
+  const normalizedCode = String(code || "").trim();
+  if (!normalizedCode) {
+    throw new Error("未输入验证码，已暂停并保留断点。");
+  }
+  await client.verifyCaptcha(normalizedCode);
+  const captchaTrainingPath = await saveVerifiedCaptchaImage(captcha.body, normalizedCode, options.captchaTrainingDatasetPath);
+  console.warn(`验证码图片已保存到训练集：${captchaTrainingPath}`);
+  console.warn("验证码已通过，继续重试当前请求。");
+  return { captchaPath, captchaTrainingPath };
+}
+
+async function tryAutomaticCaptcha(client, options, label, captchaPath) {
+  if (!options.autoCaptcha) {
+    return null;
+  }
+
+  const maxAttempts = integer(options.autoCaptchaMaxAttempts, DEFAULT_AUTO_CAPTCHA_MAX_ATTEMPTS);
+  const maxLabel = maxAttempts === 0 ? "无限" : String(maxAttempts);
+  const predictCode = options.predictCaptchaCode || predictCaptchaCode;
+  let attempt = 0;
+  let lastError = null;
+
+  while (maxAttempts === 0 || attempt < maxAttempts) {
+    attempt += 1;
+    const captcha = await fetchCaptchaToPath(client, captchaPath);
+    try {
+      const code = String(await predictCode(captchaPath, options, label, captcha.contentType) || "").trim();
+      console.warn(`验证码自动预测第 ${attempt}/${maxLabel} 次：${code || "(空)"}`);
+      return await verifyCaptchaAndSave(client, captcha, code, options, captchaPath);
+    } catch (error) {
+      lastError = error;
+      console.warn(`验证码自动预测第 ${attempt}/${maxLabel} 次未通过：${error.message}`);
+    }
+  }
+
+  if (!options.manualCaptcha) {
+    throw lastError || new Error("验证码自动预测未通过，已暂停并保留断点。");
+  }
+  console.warn("验证码自动预测未通过，改为手动输入新的验证码。");
+  return null;
+}
+
 let activeCaptchaChallenge = null;
 
 export async function runCaptchaChallengeOnce(client, options = {}, label = "BirdReport 请求") {
@@ -757,7 +905,7 @@ export async function runCaptchaChallengeOnce(client, options = {}, label = "Bir
 }
 
 export async function handleCaptchaChallenge(client, options = {}, label = "BirdReport 请求") {
-  if (!options.manualCaptcha) {
+  if (!options.manualCaptcha && !options.autoCaptcha) {
     throw new Error("BirdReport 触发验证码或访问限制，已暂停并保留断点。可加 --manual-captcha 手动输入验证码后继续。");
   }
   if (typeof client.fetchCaptchaImage !== "function" || typeof client.verifyCaptcha !== "function") {
@@ -765,9 +913,12 @@ export async function handleCaptchaChallenge(client, options = {}, label = "Bird
   }
 
   const captchaPath = resolve(options.captchaPath || DEFAULT_CAPTCHA_PATH);
-  const captcha = await client.fetchCaptchaImage();
-  await mkdir(dirname(captchaPath), { recursive: true });
-  await writeFile(captchaPath, captcha.body);
+  console.warn(`BirdReport 触发验证码：${label}`);
+
+  const automaticResult = await tryAutomaticCaptcha(client, options, label, captchaPath);
+  if (automaticResult) {
+    return automaticResult;
+  }
 
   const captchaStats = getCaptchaStats(options);
   const now = Date.now();
@@ -776,8 +927,7 @@ export async function handleCaptchaChallenge(client, options = {}, label = "Bird
   captchaStats.firstPromptAt ||= new Date(now).toISOString();
   captchaStats.lastPromptAt = new Date(now).toISOString();
 
-  console.warn(`BirdReport 触发验证码：${label}`);
-  console.warn(`验证码图片已保存：${captchaPath}`);
+  const captcha = await fetchCaptchaToPath(client, captchaPath);
   console.warn(
     previousPromptAt
       ? `验证码频率：第 ${captchaStats.promptCount} 次输入提示，距上次 ${formatDuration(now - previousPromptAt)}；累计触发 ${captchaStats.triggerCount} 次，合并等待 ${captchaStats.sharedWaitCount} 次。`
@@ -795,14 +945,7 @@ export async function handleCaptchaChallenge(client, options = {}, label = "Bird
 
   const askCode = options.promptCaptchaCode || promptCaptchaCode;
   const code = String(await askCode(captchaPath, label, captcha.contentType) || "").trim();
-  if (!code) {
-    throw new Error("未输入验证码，已暂停并保留断点。");
-  }
-  await client.verifyCaptcha(code);
-  const captchaTrainingPath = await saveVerifiedCaptchaImage(captcha.body, code, options.captchaTrainingDatasetPath);
-  console.warn(`验证码图片已保存到训练集：${captchaTrainingPath}`);
-  console.warn("验证码已通过，继续重试当前请求。");
-  return { captchaPath, captchaTrainingPath };
+  return verifyCaptchaAndSave(client, captcha, code, options, captchaPath);
 }
 
 export async function fetchSignedJson(client, url, referer, payload, options, label) {
@@ -815,7 +958,7 @@ export async function fetchSignedJson(client, url, referer, payload, options, la
       maxRetries: options.maxRetries,
       retryBaseMs: options.retryBaseMs,
       label,
-      handleCaptcha: options.manualCaptcha ? () => runCaptchaChallengeOnce(client, options, label) : null
+      handleCaptcha: options.manualCaptcha || options.autoCaptcha ? () => runCaptchaChallengeOnce(client, options, label) : null
     }
   );
 }
@@ -1096,8 +1239,11 @@ function startCrawlMeta(db, runId, options, summary, normalTotal, flaggedTotal) 
       fastResumeOverlapPages: options.fastResumeOverlapPages,
       bootstrapProgressFromDb: options.bootstrapProgressFromDb,
       manualCaptcha: options.manualCaptcha,
+      autoCaptcha: options.autoCaptcha,
+      autoCaptchaMaxAttempts: options.autoCaptchaMaxAttempts,
       openCaptcha: options.openCaptcha,
       captchaPath: options.captchaPath,
+      captchaModelPath: options.captchaModelPath,
       resume: options.resume,
       limitReports: options.limitReports,
       limitNormalReports: options.limitNormalReports,

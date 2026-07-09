@@ -30,15 +30,15 @@ transform = transforms.Compose([
     transforms.ToTensor(),
     # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 ])
-def get_train_data_loader(batch_size=64, pin_memory=False):
+def get_train_data_loader(batch_size=64, pin_memory=False, folder=captcha_setting.TRAIN_DATASET_PATH, num_workers=0):
 
-    dataset = mydataset(captcha_setting.TRAIN_DATASET_PATH, transform=transform)
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=pin_memory)
+    dataset = mydataset(folder, transform=transform)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=pin_memory, num_workers=num_workers)
 
-def get_test_data_loader():
-    dataset = mydataset(captcha_setting.TEST_DATASET_PATH, transform=transform)
-    return DataLoader(dataset, batch_size=1, shuffle=True)
+def get_test_data_loader(folder=captcha_setting.TEST_DATASET_PATH, num_workers=0):
+    dataset = mydataset(folder, transform=transform)
+    return DataLoader(dataset, batch_size=1, shuffle=True, num_workers=num_workers)
 
-def get_predict_data_loader():
-    dataset = mydataset(captcha_setting.PREDICT_DATASET_PATH, transform=transform)
+def get_predict_data_loader(folder=captcha_setting.PREDICT_DATASET_PATH):
+    dataset = mydataset(folder, transform=transform)
     return DataLoader(dataset, batch_size=1, shuffle=True)
