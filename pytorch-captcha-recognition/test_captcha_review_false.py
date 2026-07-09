@@ -25,15 +25,23 @@ class CaptchaReviewFalseTest(unittest.TestCase):
             root = Path(temp_dir)
             input_dir = root / "false"
             output_dir = root / "yanzhengma"
+            review_output_dir = root / "yanzhengma_xiugai"
             input_dir.mkdir()
             source = input_dir / "0038_2026-07-09T08-08-23-621.png"
             source.write_bytes(b"image")
 
-            target = captcha_review_false.move_corrected_captcha(source, "8038", output_dir)
+            target = captcha_review_false.move_corrected_captcha(
+                source,
+                "8038",
+                output_dir,
+                review_output_dir=review_output_dir,
+            )
 
             self.assertFalse(source.exists())
             self.assertEqual(target.name, "8038_2026-07-09T08-08-23-621.png")
             self.assertEqual(target.read_bytes(), b"image")
+            review_copy = review_output_dir / "8038_2026-07-09T08-08-23-621.png"
+            self.assertEqual(review_copy.read_bytes(), b"image")
 
     def test_move_corrected_captcha_avoids_overwriting_existing_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -69,16 +77,19 @@ class CaptchaReviewFalseTest(unittest.TestCase):
 
             self.assertEqual([path.name for path in images], ["a.jpg", "b.png"])
 
-    def test_arg_parser_accepts_input_and_output_directories(self):
+    def test_arg_parser_accepts_input_output_and_review_directories(self):
         args = captcha_review_false.build_arg_parser().parse_args([
             "--input-dir",
             "dataset/yanzhengma_false",
             "--output-dir",
             "dataset/yanzhengma",
+            "--review-output-dir",
+            "dataset/yanzhengma_xiugai",
         ])
 
         self.assertEqual(args.input_dir, "dataset/yanzhengma_false")
         self.assertEqual(args.output_dir, "dataset/yanzhengma")
+        self.assertEqual(args.review_output_dir, "dataset/yanzhengma_xiugai")
 
 
 if __name__ == "__main__":

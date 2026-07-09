@@ -151,7 +151,7 @@ node tools/crawl-zhejiang-birdreport.mjs --auto-captcha --manual-captcha --open-
 
 ## 7. 批量校正错误验证码文件名
 
-`dataset\yanzhengma_false` 里保存的是模型提交后被 BirdReport 判错的验证码图片。用下面的本地窗口工具逐张查看图片并输入正确验证码；保存后图片会按正确验证码重命名并移动到 `dataset\yanzhengma`，然后自动打开下一张：
+`dataset\yanzhengma_false` 里保存的是模型提交后被 BirdReport 判错的验证码图片。用下面的本地窗口工具逐张查看图片并输入正确验证码；保存后图片会按正确验证码重命名并移动到 `dataset\yanzhengma`，同时复制一份到 `dataset\yanzhengma_xiugai`，然后自动打开下一张。`dataset\yanzhengma_xiugai` 可以单独用于重新预测和统计校正样本准确率，避免和原有正确样本混淆。
 
 ```powershell
 .\.venv\Scripts\python.exe -u .\captcha_review_false.py
@@ -160,7 +160,7 @@ node tools/crawl-zhejiang-birdreport.mjs --auto-captcha --manual-captcha --open-
 如果要手动指定输入和输出目录：
 
 ```powershell
-.\.venv\Scripts\python.exe -u .\captcha_review_false.py --input-dir ".\dataset\yanzhengma_false" --output-dir ".\dataset\yanzhengma"
+.\.venv\Scripts\python.exe -u .\captcha_review_false.py --input-dir ".\dataset\yanzhengma_false" --output-dir ".\dataset\yanzhengma" --review-output-dir ".\dataset\yanzhengma_xiugai"
 ```
 
 快捷操作：

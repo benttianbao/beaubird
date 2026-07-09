@@ -1,5 +1,6 @@
 # -*- coding: UTF-8 -*-
 import argparse
+import shutil
 from pathlib import Path
 import secrets
 import tkinter as tk
@@ -10,6 +11,7 @@ from PIL import Image, ImageTk
 
 DEFAULT_INPUT_DIR = Path("dataset") / "yanzhengma_false"
 DEFAULT_OUTPUT_DIR = Path("dataset") / "yanzhengma"
+DEFAULT_REVIEW_OUTPUT_DIR = Path("dataset") / "yanzhengma_xiugai"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".gif"}
 
 
@@ -17,6 +19,7 @@ def build_arg_parser():
     parser = argparse.ArgumentParser(description="Review and correct failed captcha filenames.")
     parser.add_argument("--input-dir", default=str(DEFAULT_INPUT_DIR))
     parser.add_argument("--output-dir", default=str(DEFAULT_OUTPUT_DIR))
+    parser.add_argument("--review-output-dir", default=str(DEFAULT_REVIEW_OUTPUT_DIR))
     return parser
 
 
@@ -53,12 +56,29 @@ def unique_destination_path(source_path, code, output_dir, suffix_factory=None):
             return candidate
 
 
-def move_corrected_captcha(source_path, code, output_dir, suffix_factory=None):
+def copy_review_captcha(target_path, review_output_dir, suffix_factory=None):
+    review_output = Path(review_output_dir)
+    review_output.mkdir(parents=True, exist_ok=True)
+    target = Path(target_path)
+    review_target = review_output / target.name
+    if review_target.exists():
+        make_suffix = suffix_factory or (lambda: secrets.token_hex(4))
+        while True:
+            review_target = review_output / f"{target.stem}_{make_suffix()}{target.suffix}"
+            if not review_target.exists():
+                break
+    shutil.copy2(target, review_target)
+    return review_target
+
+
+def move_corrected_captcha(source_path, code, output_dir, suffix_factory=None, review_output_dir=None):
     source = Path(source_path)
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     target = unique_destination_path(source, code, output, suffix_factory=suffix_factory)
     source.replace(target)
+    if review_output_dir is not None:
+        copy_review_captcha(target, review_output_dir, suffix_factory=suffix_factory)
     return target
 
 
@@ -77,10 +97,11 @@ def list_image_paths(input_dir):
 
 
 class CaptchaReviewApp:
-    def __init__(self, root, input_dir, output_dir):
+    def __init__(self, root, input_dir, output_dir, review_output_dir):
         self.root = root
         self.input_dir = Path(input_dir)
         self.output_dir = Path(output_dir)
+        self.review_output_dir = Path(review_output_dir)
         self.files = list_image_paths(self.input_dir)
         self.initial_count = len(self.files)
         self.index = 0
@@ -175,7 +196,12 @@ class CaptchaReviewApp:
 
         source = self.files[self.index]
         try:
-            target = move_corrected_captcha(source, code, self.output_dir)
+            target = move_corrected_captcha(
+                source,
+                code,
+                self.output_dir,
+                review_output_dir=self.review_output_dir,
+            )
         except Exception as error:
             messagebox.showerror("保存失败", str(error))
             return
@@ -205,7 +231,7 @@ class CaptchaReviewApp:
 def main(argv=None):
     args = build_arg_parser().parse_args(argv)
     root = tk.Tk()
-    CaptchaReviewApp(root, args.input_dir, args.output_dir)
+    CaptchaReviewApp(root, args.input_dir, args.output_dir, args.review_output_dir)
     root.mainloop()
 
 
