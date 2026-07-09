@@ -149,7 +149,27 @@ Digit Accuracy by position:
 node tools/crawl-zhejiang-birdreport.mjs --auto-captcha --manual-captcha --open-captcha --captcha-model-path "pytorch-captcha-recognition\model-finetune.pkl"
 ```
 
-## 7. 排查训练集中损坏图片
+## 7. 批量校正错误验证码文件名
+
+`dataset\yanzhengma_false` 里保存的是模型提交后被 BirdReport 判错的验证码图片。用下面的本地窗口工具逐张查看图片并输入正确验证码；保存后图片会按正确验证码重命名并移动到 `dataset\yanzhengma`，然后自动打开下一张：
+
+```powershell
+.\.venv\Scripts\python.exe -u .\captcha_review_false.py
+```
+
+如果要手动指定输入和输出目录：
+
+```powershell
+.\.venv\Scripts\python.exe -u .\captcha_review_false.py --input-dir ".\dataset\yanzhengma_false" --output-dir ".\dataset\yanzhengma"
+```
+
+快捷操作：
+
+- `Enter`：保存当前输入的 4 位验证码并打开下一张
+- `Skip`：跳过当前图片
+- `Back`：回到上一张，不撤销已经保存的移动
+
+## 8. 排查训练集中损坏图片
 
 如果训练时报错类似：
 
@@ -193,7 +213,7 @@ for path, err, size in bad[:200]:
 - 如果 `--num-workers 2` 报错不直观，可以临时用 `--num-workers 0` 复现。
 - 先确认坏文件列表，再决定如何处理。
 
-## 8. 查看脚本参数
+## 9. 查看脚本参数
 
 ```powershell
 .\.venv\Scripts\python.exe -u .\captcha_gen.py --help
@@ -209,4 +229,8 @@ for path, err, size in bad[:200]:
 
 ```powershell
 .\.venv\Scripts\python.exe -u .\captcha_predict.py --help
+```
+
+```powershell
+.\.venv\Scripts\python.exe -u .\captcha_review_false.py --help
 ```
