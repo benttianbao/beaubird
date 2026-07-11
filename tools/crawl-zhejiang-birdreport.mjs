@@ -14,9 +14,9 @@ const { createBirdreportClient, decodeBirdreportPayload } = birdreportClientModu
 const DEFAULT_DB_PATH = resolve("data/birdreport-zhejiang.sqlite");
 const DEFAULT_JSONL_PATH = resolve("data/birdreport-zhejiang.jsonl");
 const DEFAULT_CAPTCHA_PATH = resolve("data/birdreport-captcha.png");
-const DEFAULT_CAPTCHA_TRAINING_DATASET_PATH = resolve("pytorch-captcha-recognition/dataset/yanzhengma");
-const DEFAULT_FAILED_CAPTCHA_DATASET_PATH = resolve("pytorch-captcha-recognition/dataset/yanzhengma_false");
-const DEFAULT_CAPTCHA_RECOGNITION_DIR = resolve("pytorch-captcha-recognition");
+const DEFAULT_CAPTCHA_TRAINING_DATASET_PATH = resolve("ml/captcha-recognition/dataset/yanzhengma");
+const DEFAULT_FAILED_CAPTCHA_DATASET_PATH = resolve("ml/captcha-recognition/dataset/yanzhengma_false");
+const DEFAULT_CAPTCHA_RECOGNITION_DIR = resolve("ml/captcha-recognition");
 const DEFAULT_CAPTCHA_MODEL_PATH = resolve(DEFAULT_CAPTCHA_RECOGNITION_DIR, "model-finetune1.pkl");
 const DEFAULT_CAPTCHA_PYTHON = process.platform === "win32"
   ? resolve(DEFAULT_CAPTCHA_RECOGNITION_DIR, ".venv/Scripts/python.exe")
@@ -30,9 +30,11 @@ const DEFAULT_RETRY_BASE_MS = 1000;
 const DEFAULT_REQUEST_DELAY_MS = 0;
 const DEFAULT_FAST_RESUME_OVERLAP_PAGES = 5;
 const DEFAULT_AUTO_CAPTCHA_MAX_ATTEMPTS = 10;
+const REPORT_TAXA_LIMIT = 1500;
 
 const SUMMARY_URL = "https://api.birdreport.cn/front/record/chart/summary";
 const REPORT_LIST_URL = "https://api.birdreport.cn/front/record/activity/search";
+const REPORT_DETAIL_URL = "https://api.birdreport.cn/front/activity/get";
 const REPORT_TAXA_URL = "https://api.birdreport.cn/front/activity/taxon";
 const PAGE_REFERER = "https://www.birdreport.cn/home/search/page.html";
 const REPORT_REFERER = "https://www.birdreport.cn/home/search/report.html";
@@ -60,6 +62,57 @@ function stringifyJson(value) {
   return JSON.stringify(value ?? {});
 }
 
+function nullableNumber(value) {
+  if (value == null || String(value).trim() === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function locationText(value) {
+  if (value == null) {
+    return "";
+  }
+  return typeof value === "object" ? stringifyJson(value) : text(value);
+}
+
+export function parseLocationCoordinates(location) {
+  let longitudeValue;
+  let latitudeValue;
+
+  if (Array.isArray(location)) {
+    [longitudeValue, latitudeValue] = location;
+  } else if (location && typeof location === "object") {
+    longitudeValue = location.longitude ?? location.lng ?? location.lon;
+    latitudeValue = location.latitude ?? location.lat;
+  } else {
+    [longitudeValue, latitudeValue] = String(location ?? "").split(",");
+  }
+
+  return {
+    longitude: nullableNumber(longitudeValue),
+    latitude: nullableNumber(latitudeValue)
+  };
+}
+
+export function normalizeReportDetail(detail) {
+  const location = detail?.location ?? "";
+  return {
+    point_id: text(detail?.pointId ?? detail?.point_id ?? detail?.pointid),
+    location: locationText(location),
+    ...parseLocationCoordinates(location),
+    location_metadata_fetched: 1
+  };
+}
+
+export function mergeReportDetail(report, detail) {
+  return {
+    ...report,
+    ...normalizeReportDetail(detail)
+  };
+}
+
 export function normalizeReportRow(row, reportKind, fetchedAt = new Date().toISOString()) {
   const report = {
     report_id: text(row?.reportId || row?.request_id || row?.id || row?.activity_id),
@@ -73,6 +126,11 @@ export function normalizeReportRow(row, reportKind, fetchedAt = new Date().toISO
     city_name: text(row?.city_name || row?.cityName || row?.city),
     district_name: text(row?.district_name || row?.districtName || row?.district),
     point_name: text(row?.point_name || row?.pointName || row?.pointname),
+    point_id: "",
+    location: "",
+    longitude: null,
+    latitude: null,
+    location_metadata_fetched: 0,
     state: integer(row?.state),
     taxon_count_reported: integer(row?.taxoncount ?? row?.taxon_count ?? row?.taxonCount),
     outside_count: integer(row?.outside_count ?? row?.outsideCount),
@@ -129,6 +187,23 @@ export function openCrawlerDatabase(dbPath = DEFAULT_DB_PATH) {
   return database;
 }
 
+function ensureReportsLocationColumns(db) {
+  const existingColumns = new Set(db.prepare("PRAGMA table_info(reports)").all().map((column) => column.name));
+  const columns = [
+    ["point_id", "TEXT"],
+    ["location", "TEXT"],
+    ["longitude", "REAL"],
+    ["latitude", "REAL"],
+    ["location_metadata_fetched", "INTEGER NOT NULL DEFAULT 0"]
+  ];
+
+  for (const [name, definition] of columns) {
+    if (!existingColumns.has(name)) {
+      db.exec(`ALTER TABLE reports ADD COLUMN ${name} ${definition}`);
+    }
+  }
+}
+
 export function initializeDatabase(db) {
   db.exec(`
     PRAGMA foreign_keys = ON;
@@ -162,6 +237,11 @@ export function initializeDatabase(db) {
       city_name TEXT,
       district_name TEXT,
       point_name TEXT,
+      point_id TEXT,
+      location TEXT,
+      longitude REAL,
+      latitude REAL,
+      location_metadata_fetched INTEGER NOT NULL DEFAULT 0,
       location_text TEXT,
       state INTEGER,
       taxon_count_reported INTEGER,
@@ -207,6 +287,8 @@ export function initializeDatabase(db) {
     CREATE INDEX IF NOT EXISTS idx_observations_taxon_name ON observations(taxon_name);
     CREATE INDEX IF NOT EXISTS idx_observations_taxon_id ON observations(taxon_id);
   `);
+  ensureReportsLocationColumns(db);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_reports_point_id ON reports(point_id)");
 }
 
 export function reportAlreadyCrawled(db, reportId) {
@@ -355,6 +437,11 @@ export function upsertReport(db, report) {
       city_name,
       district_name,
       point_name,
+      point_id,
+      location,
+      longitude,
+      latitude,
+      location_metadata_fetched,
       location_text,
       state,
       taxon_count_reported,
@@ -362,7 +449,7 @@ export function upsertReport(db, report) {
       fetched_at,
       raw_report_json
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(report_id) DO UPDATE SET
       serial_id = excluded.serial_id,
       report_kind = excluded.report_kind,
@@ -374,6 +461,11 @@ export function upsertReport(db, report) {
       city_name = excluded.city_name,
       district_name = excluded.district_name,
       point_name = excluded.point_name,
+      point_id = excluded.point_id,
+      location = excluded.location,
+      longitude = excluded.longitude,
+      latitude = excluded.latitude,
+      location_metadata_fetched = excluded.location_metadata_fetched,
       location_text = excluded.location_text,
       state = excluded.state,
       taxon_count_reported = excluded.taxon_count_reported,
@@ -392,6 +484,11 @@ export function upsertReport(db, report) {
     report.city_name,
     report.district_name,
     report.point_name,
+    text(report.point_id),
+    locationText(report.location),
+    nullableNumber(report.longitude),
+    nullableNumber(report.latitude),
+    integer(report.location_metadata_fetched),
     report.location_text,
     report.state,
     report.taxon_count_reported,
@@ -505,8 +602,8 @@ Options:
   --open-captcha                    Open captcha image with the default image viewer
   --no-manual-captcha               Pause instead of prompting for captcha
   --captcha-path <path>             Captcha image path (default: data/birdreport-captcha.png)
-  --captcha-model-path <path>       Captcha model path (default: pytorch-captcha-recognition/model-finetune1.pkl)
-  --captcha-python <path>           Python executable for captcha prediction (default: pytorch-captcha-recognition/.venv/Scripts/python.exe on Windows)
+  --captcha-model-path <path>       Captcha model path (default: ml/captcha-recognition/model-finetune1.pkl)
+  --captcha-python <path>           Python executable for captcha prediction (default: ml/captcha-recognition/.venv/Scripts/python.exe on Windows)
   --auto-captcha-max-attempts <n>   Automatic captcha attempts before manual fallback; 0 means keep trying (default: 10)
   --no-resume                       Re-fetch reports already present in SQLite
   --help                            Show this help
@@ -1060,12 +1157,24 @@ async function fetchReportList(client, options, reportKind) {
   };
 }
 
-async function fetchReportTaxa(client, options, report) {
+export async function fetchReportDetail(client, options, report) {
+  const response = await fetchSignedJson(
+    client,
+    REPORT_DETAIL_URL,
+    RECORD_REFERER,
+    { reportId: report.report_id },
+    options,
+    `report ${report.serial_id || report.report_id} metadata`
+  );
+  return decodeBirdreportPayload(response?.data);
+}
+
+export async function fetchReportTaxa(client, options, report) {
   const response = await fetchSignedJson(
     client,
     REPORT_TAXA_URL,
     RECORD_REFERER,
-    { reportId: report.report_id },
+    { reportId: report.report_id, limit: REPORT_TAXA_LIMIT },
     options,
     `报告 ${report.serial_id || report.report_id} 详情`
   );
@@ -1091,11 +1200,12 @@ async function processReportDetails({ client, options, db, jsonlPath, runId, sta
     }
 
     try {
+      const rawDetail = await fetchReportDetail(client, options, report);
       const rawTaxa = await fetchReportTaxa(client, options, report);
       const result = await writeReportWithObservations({
         db,
         jsonlPath,
-        report,
+        report: mergeReportDetail(report, rawDetail),
         rawTaxa,
         runId
       });

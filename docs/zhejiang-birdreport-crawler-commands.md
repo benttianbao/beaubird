@@ -16,10 +16,13 @@ node tools/crawl-zhejiang-birdreport.mjs --auto-captcha --manual-captcha --open-
 - 默认追加原始流水到 `data/birdreport-zhejiang.jsonl`
 - 默认断点续跑，会跳过 SQLite 里已有的 `report_id`
 - 默认启用快进续跑：脚本会记住每类报告完整处理到第几页，重跑时先扫描首页补新，再跳到水位线附近继续
-- 遇到验证码时，会保存图片到 `data/birdreport-captcha.png`，先用 `pytorch-captcha-recognition/model-finetune1.pkl` 自动预测并提交
+- 每份报告会请求官方详情元数据和鸟种表；鸟种表固定携带 `limit: 1500`，不会再只保存前 10 种
+- `reports` 同时保存 `point_id`、原始 `location`（`经度,纬度`）、`longitude`、`latitude`，供后续点位预测使用
+- 已有报告会自动补上上述 SQLite 列；如需补采旧报告的点位字段，使用一次 `--no-resume` 重新抓取对应范围
+- 遇到验证码时，会保存图片到 `data/birdreport-captcha.png`，先用 `ml/captcha-recognition/model-finetune1.pkl` 自动预测并提交
 - 自动预测默认最多尝试 10 张新验证码；每次预测或校验失败都会重新获取新的验证码图片再预测
 - 如果自动预测 10 次仍未通过，会自动打开最新验证码图片，然后让你在终端输入验证码
-- 校验失败的验证码图片会保存到 `pytorch-captcha-recognition/dataset/yanzhengma_false`，文件名格式为“错误验证码_时间.png”
+- 校验失败的验证码图片会保存到 `ml/captcha-recognition/dataset/yanzhengma_false`，文件名格式为“错误验证码_时间.png”
 - 终端会显示验证码频率，例如第几次人工输入提示、距离上次验证码多久、并发请求被合并等待了几次
 
 如果你已经在旧版本脚本里落了很多数据，第一次换新版跑时建议加一次：
@@ -105,13 +108,13 @@ node tools/crawl-zhejiang-birdreport.mjs --auto-captcha --manual-captcha --open-
 默认使用：
 
 ```text
-pytorch-captcha-recognition/model-finetune1.pkl
+ml/captcha-recognition/model-finetune1.pkl
 ```
 
 如果要换成其他 `.pkl` 模型：
 
 ```powershell
-node tools/crawl-zhejiang-birdreport.mjs --auto-captcha --manual-captcha --open-captcha --captcha-model-path "pytorch-captcha-recognition\model-finetune.pkl"
+node tools/crawl-zhejiang-birdreport.mjs --auto-captcha --manual-captcha --open-captcha --captcha-model-path "ml\captcha-recognition\model-finetune.pkl"
 ```
 
 如果希望模型一直尝试，不达到次数上限就退回手动输入：

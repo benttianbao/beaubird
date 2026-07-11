@@ -1,9 +1,20 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, readdir, rm } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-import { handleCaptchaChallenge, openCrawlerDatabase, parseArgs, writeReportWithObservations } from "./crawl-zhejiang-birdreport.mjs";
+import {
+  fetchReportDetail,
+  fetchReportTaxa,
+  handleCaptchaChallenge,
+  mergeReportDetail,
+  normalizeReportDetail,
+  openCrawlerDatabase,
+  parseArgs,
+  parseLocationCoordinates,
+  writeReportWithObservations
+} from "./crawl-zhejiang-birdreport.mjs";
 
 const TEST_ROOT = resolve(".tmp/crawl-zhejiang-birdreport-captcha-test");
 
@@ -140,7 +151,7 @@ test("handleCaptchaChallenge fetches a new captcha for each failed automatic pre
 
 test("parseArgs enables automatic captcha prediction with an overrideable model path", () => {
   const defaults = parseArgs(["--auto-captcha"]);
-  const modelPath = "pytorch-captcha-recognition/model-custom.pkl";
+  const modelPath = "ml/captcha-recognition/model-custom.pkl";
   const options = parseArgs(["--auto-captcha", "--captcha-model-path", modelPath, "--auto-captcha-max-attempts", "0"]);
 
   assert.equal(defaults.autoCaptcha, true);
@@ -149,6 +160,62 @@ test("parseArgs enables automatic captcha prediction with an overrideable model 
   assert.equal(options.autoCaptcha, true);
   assert.equal(options.captchaModelPath, resolve(modelPath));
   assert.equal(options.autoCaptchaMaxAttempts, 0);
+});
+
+test("report detail requests preserve point metadata and fetch all taxa", async () => {
+  const calls = [];
+  const client = {
+    async postBirdreport(url, referer, payload) {
+      calls.push({ url, referer, payload });
+      return {
+        data: url.endsWith("/get")
+          ? { pointId: "point-42", location: "120.1234,30.5678" }
+          : []
+      };
+    }
+  };
+  const options = {
+    maxRetries: 1,
+    retryBaseMs: 1,
+    requestDelayMs: 0,
+    manualCaptcha: false,
+    autoCaptcha: false
+  };
+  const report = { report_id: "report-42", serial_id: "42" };
+
+  assert.deepEqual(await fetchReportDetail(client, options, report), {
+    pointId: "point-42",
+    location: "120.1234,30.5678"
+  });
+  assert.deepEqual(await fetchReportTaxa(client, options, report), []);
+  assert.deepEqual(calls.map((call) => ({ url: call.url, payload: call.payload })), [
+    {
+      url: "https://api.birdreport.cn/front/activity/get",
+      payload: { reportId: "report-42" }
+    },
+    {
+      url: "https://api.birdreport.cn/front/activity/taxon",
+      payload: { reportId: "report-42", limit: 1500 }
+    }
+  ]);
+});
+
+test("normalizeReportDetail retains pointId and parses longitude and latitude", () => {
+  assert.deepEqual(parseLocationCoordinates("120.1234,30.5678"), {
+    longitude: 120.1234,
+    latitude: 30.5678
+  });
+  assert.deepEqual(normalizeReportDetail({ pointId: 0, location: "120.1234,30.5678" }), {
+    point_id: "0",
+    location: "120.1234,30.5678",
+    longitude: 120.1234,
+    latitude: 30.5678,
+    location_metadata_fetched: 1
+  });
+  assert.deepEqual(parseLocationCoordinates("not-a-coordinate"), {
+    longitude: null,
+    latitude: null
+  });
 });
 
 test("handleCaptchaChallenge keeps repeated verified captcha samples instead of overwriting", async () => {
@@ -232,6 +299,103 @@ test("handleCaptchaChallenge saves failed captcha attempts outside the verified 
   assert.equal(failedFiles.length, 1);
   assert.match(failedFiles[0], /^9999_[0-9T-]+\.png$/);
   assert.deepEqual(await readFile(resolve(failedDir, failedFiles[0])), Buffer.from("failed-captcha-image"));
+});
+
+test("openCrawlerDatabase migrates a legacy reports table with point metadata columns", async () => {
+  const dbPath = resolve(TEST_ROOT, "schema-migration", "crawler.sqlite");
+  await mkdir(dirname(dbPath), { recursive: true });
+  await removeFileIfExists(dbPath);
+
+  const legacyDb = new DatabaseSync(dbPath);
+  legacyDb.exec(`
+    CREATE TABLE reports (
+      report_id TEXT PRIMARY KEY,
+      serial_id TEXT,
+      report_kind TEXT NOT NULL,
+      source_outside_type INTEGER NOT NULL,
+      is_flagged_report INTEGER NOT NULL,
+      start_time TEXT,
+      end_time TEXT,
+      province_name TEXT,
+      city_name TEXT,
+      district_name TEXT,
+      point_name TEXT,
+      location_text TEXT,
+      state INTEGER,
+      taxon_count_reported INTEGER,
+      outside_count INTEGER,
+      fetched_at TEXT NOT NULL,
+      raw_report_json TEXT NOT NULL
+    )
+  `);
+  legacyDb.close();
+
+  const db = openCrawlerDatabase(dbPath);
+  try {
+    const columns = db.prepare("PRAGMA table_info(reports)").all().map((column) => column.name);
+    assert.ok(["point_id", "location", "longitude", "latitude", "location_metadata_fetched"].every((column) => columns.includes(column)));
+  } finally {
+    db.close();
+  }
+});
+
+test("writeReportWithObservations stores point metadata in SQLite and JSONL", async () => {
+  const dbPath = resolve(TEST_ROOT, "point-metadata", "crawler.sqlite");
+  const jsonlPath = resolve(TEST_ROOT, "point-metadata", "crawler.jsonl");
+  await mkdir(dirname(dbPath), { recursive: true });
+  await removeFileIfExists(dbPath);
+  await removeFileIfExists(jsonlPath);
+  const db = openCrawlerDatabase(dbPath);
+
+  try {
+    const report = mergeReportDetail(
+      {
+        report_id: "report-point-1",
+        serial_id: "serial-point-1",
+        report_kind: "normal",
+        source_outside_type: 0,
+        is_flagged_report: 0,
+        start_time: "2026-05-07",
+        end_time: "2026-05-07",
+        province_name: "Zhejiang",
+        city_name: "Hangzhou",
+        district_name: "",
+        point_name: "Wetland",
+        location_text: "ZhejiangHangzhouWetland",
+        state: 2,
+        taxon_count_reported: 1,
+        outside_count: 0,
+        fetched_at: "2026-05-07T00:00:00.000Z",
+        raw_report_json: "{}"
+      },
+      { pointId: "point-77", location: "120.1234,30.5678" }
+    );
+
+    await writeReportWithObservations({
+      db,
+      jsonlPath,
+      runId: "run-point-1",
+      report,
+      rawTaxa: [{ taxon_id: "100", taxonname: "Test Bird", outside_type: 0 }]
+    });
+
+    assert.deepEqual(
+      { ...db.prepare("SELECT point_id, location, longitude, latitude, location_metadata_fetched FROM reports WHERE report_id = ?").get("report-point-1") },
+      {
+        point_id: "point-77",
+        location: "120.1234,30.5678",
+        longitude: 120.1234,
+        latitude: 30.5678,
+        location_metadata_fetched: 1
+      }
+    );
+    const jsonlRecord = JSON.parse(await readFile(jsonlPath, "utf8"));
+    assert.equal(jsonlRecord.report.point_id, "point-77");
+    assert.equal(jsonlRecord.report.longitude, 120.1234);
+    assert.equal(jsonlRecord.report.latitude, 30.5678);
+  } finally {
+    db.close();
+  }
 });
 
 test("writeReportWithObservations rolls back SQLite writes when JSONL append fails", async () => {
