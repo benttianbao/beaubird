@@ -992,8 +992,10 @@ async function tryAutomaticCaptcha(client, options, label, captchaPath) {
     attempt += 1;
     const captcha = await fetchCaptchaToPath(client, captchaPath);
     try {
+      const predictStartedAt = Date.now();
+      console.warn(`验证码自动预测第 ${attempt}/${maxLabel} 次：模型预测中...`);
       const code = String(await predictCode(captchaPath, options, label, captcha.contentType) || "").trim();
-      console.warn(`验证码自动预测第 ${attempt}/${maxLabel} 次：${code || "(空)"}`);
+      console.warn(`验证码自动预测第 ${attempt}/${maxLabel} 次：${code || "(空)"}（耗时 ${formatDuration(Date.now() - predictStartedAt)}）`);
       return await verifyCaptchaAndSave(client, captcha, code, options, captchaPath);
     } catch (error) {
       lastError = error;

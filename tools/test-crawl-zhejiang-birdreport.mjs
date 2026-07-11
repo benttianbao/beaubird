@@ -100,7 +100,7 @@ test("handleCaptchaChallenge verifies model-predicted captcha before prompting",
   assert.deepEqual(await readFile(result.captchaTrainingPath), imageBody);
 });
 
-test("handleCaptchaChallenge fetches a new captcha for each failed automatic prediction", async () => {
+test("handleCaptchaChallenge keeps fetching new captchas with unlimited automatic prediction", async () => {
   const captchaPath = resolve(TEST_ROOT, "auto-retry", "captcha.png");
   const trainingDir = resolve(TEST_ROOT, "auto-retry", "dataset");
   const failedDir = resolve(TEST_ROOT, "auto-retry", "dataset_false");
@@ -129,7 +129,7 @@ test("handleCaptchaChallenge fetches a new captcha for each failed automatic pre
     },
     {
       autoCaptcha: true,
-      autoCaptchaMaxAttempts: 2,
+      autoCaptchaMaxAttempts: 0,
       manualCaptcha: false,
       captchaPath,
       captchaTrainingDatasetPath: trainingDir,
@@ -159,6 +159,26 @@ test("parseArgs enables automatic captcha prediction with an overrideable model 
   assert.equal(defaults.autoCaptchaMaxAttempts, 10);
   assert.equal(options.autoCaptcha, true);
   assert.equal(options.captchaModelPath, resolve(modelPath));
+  assert.equal(options.autoCaptchaMaxAttempts, 0);
+});
+
+test("parseArgs configures the full rebuild command with unlimited automatic captcha prediction", () => {
+  const options = parseArgs([
+    "--auto-captcha",
+    "--manual-captcha",
+    "--open-captcha",
+    "--detail-concurrency",
+    "1",
+    "--no-resume",
+    "--auto-captcha-max-attempts",
+    "0"
+  ]);
+
+  assert.equal(options.autoCaptcha, true);
+  assert.equal(options.manualCaptcha, true);
+  assert.equal(options.openCaptcha, true);
+  assert.equal(options.detailConcurrency, 1);
+  assert.equal(options.resume, false);
   assert.equal(options.autoCaptchaMaxAttempts, 0);
 });
 
