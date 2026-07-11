@@ -397,6 +397,29 @@ test("birdreport client throws BirdReport business errors", async () => {
   );
 });
 
+test("birdreport client accepts successful activity detail responses with errorCode 2", async () => {
+  const client = createBirdreportClient({
+    signRequest() {
+      return { body: "detail", headers: {} };
+    },
+    async fetchImpl() {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ success: true, errorCode: 2, data: "encrypted-detail" })
+      };
+    }
+  });
+
+  const response = await client.postBirdreport(
+    "https://api.birdreport.cn/front/activity/get",
+    "https://www.birdreport.cn/home/record/page.html",
+    { reportId: "report-1" }
+  );
+
+  assert.deepEqual(response, { success: true, errorCode: 2, data: "encrypted-detail" });
+});
+
 test("birdreport client treats numeric BirdReport captcha codes as business errors", async () => {
   const client = createBirdreportClient({
     signRequest(data) {
