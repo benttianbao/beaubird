@@ -1,5 +1,6 @@
 .gradle-home/
 .tmp/
+node_modules/
 server/wecom-rare-bot/.env
 server/site/.env
 data/site.sqlite
@@ -8,6 +9,12 @@ data/birdreport-zhejiang.sqlite
 data/birdreport-zhejiang.sqlite-*
 data/birdreport-zhejiang.jsonl
 data/birdreport-captcha.png
+data/birdreport-captcha.worker-*.png
+data/birdreport-zhejiang.jsonl.*
+data/captcha-predict-*/
+data/prediction-models/
+data/prediction-snapshots/
+data/quarantine/
 
 android/.gradle/
 android/**/build/
@@ -23,6 +30,13 @@ pytorch-captcha-recognition/*.log
 pytorch-captcha-recognition/*.pkl
 pytorch-captcha-recognition/*.pkl.corrupt-*
 pytorch-captcha-recognition-master.zip
+
+ml/captcha-recognition/.venv/
+ml/captcha-recognition/dataset/
+ml/captcha-recognition/__pycache__/
+ml/captcha-recognition/*.pkl
+ml/captcha-recognition/*.pkl.corrupt-*
+ml/bird-prediction/__pycache__/
 
 server-site.*.log
 *.log

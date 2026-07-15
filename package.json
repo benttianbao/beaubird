@@ -1,0 +1,10 @@
+{
+  "name": "beaubird",
+  "private": true,
+  "version": "0.0.0",
+  "description": "BeauBird site and offline bird prediction tooling",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "h3-js": "4.5.0"
+  }
+}
