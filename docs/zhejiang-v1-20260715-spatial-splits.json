@@ -1,0 +1,876 @@
+{
+  "schemaVersion": 1,
+  "algorithmVersion": "zhejiang-spatial-split-v1",
+  "seed": "1ac5227a96309a3260a3be31a70ed17e681065ce6010b539f0055256a9409469",
+  "sourceSnapshotSha256": "92602be9b9c3aeb3d7c6cf966c459710a5a9bf6bc078e604a3805ab05fc0b16a",
+  "inputHash": "ebecb430e35d2b1968279228eb028989b86d1b25c96d0230f72ac1fba440f316",
+  "constraints": {
+    "targetIndependent": true,
+    "taxonOutcomeFieldsRead": [],
+    "expectedCityCount": 11,
+    "minimumChecklists": 30,
+    "minimumObservers": 10,
+    "bufferRing": 1,
+    "allSelectedBuffersMutuallyDisjoint": true,
+    "releaseFoldCount": 5,
+    "developmentFoldCount": 5,
+    "maximumSearchStates": 500000
+  },
+  "candidateSummary": {
+    "candidateCount": 314,
+    "cityCount": 11,
+    "candidateCountByCity": {
+      "丽水市": 25,
+      "台州市": 27,
+      "嘉兴市": 25,
+      "宁波市": 43,
+      "杭州市": 75,
+      "温州市": 36,
+      "湖州市": 22,
+      "绍兴市": 14,
+      "舟山市": 25,
+      "衢州市": 5,
+      "金华市": 17
+    },
+    "supportQuantileTargets": [
+      0.25,
+      0.5,
+      0.75
+    ],
+    "targetAssignmentCityOrder": [
+      "宁波市",
+      "嘉兴市",
+      "杭州市",
+      "舟山市",
+      "金华市",
+      "温州市",
+      "湖州市",
+      "台州市",
+      "绍兴市",
+      "衢州市",
+      "丽水市"
+    ]
+  },
+  "viewedAnchors": {
+    "anchorCount": 3,
+    "anchorIds": [
+      "grid_r6:86309a9afffffff",
+      "grid_r6:86309aa57ffffff",
+      "grid_r6:86309bc97ffffff"
+    ],
+    "policy": "pinned_to_development_and_excluded_with_one_ring_from_sealed_release"
+  },
+  "development": {
+    "anchorCount": 12,
+    "cityCount": 11,
+    "cityCoverage": [
+      "丽水市",
+      "台州市",
+      "嘉兴市",
+      "宁波市",
+      "杭州市",
+      "温州市",
+      "湖州市",
+      "绍兴市",
+      "舟山市",
+      "衢州市",
+      "金华市"
+    ],
+    "coversExpectedCities": true,
+    "anchors": [
+      {
+        "unitId": "grid_r6:864194acfffffff",
+        "city": "丽水市",
+        "checklists": 97,
+        "observers": 16,
+        "centroid": {
+          "longitude": 119.25287782572829,
+          "latitude": 28.581611503504494
+        },
+        "supportQuantile": 0.75,
+        "supportBand": "high",
+        "targetSupportQuantile": 0.75,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "9e9b48365dc186bb3b0bd90cc3b3c1d6d45e51730e15a40868a600f3e871b213",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864194367ffffff",
+          "grid_r6:864194ac7ffffff",
+          "grid_r6:864194acfffffff",
+          "grid_r6:864194adfffffff",
+          "grid_r6:864194aefffffff",
+          "grid_r6:864195d97ffffff",
+          "grid_r6:864195db7ffffff"
+        ],
+        "foldId": 1
+      },
+      {
+        "unitId": "grid_r6:864b32957ffffff",
+        "city": "台州市",
+        "checklists": 95,
+        "observers": 29,
+        "centroid": {
+          "longitude": 121.33864462124164,
+          "latitude": 28.630512042982218
+        },
+        "supportQuantile": 0.730769,
+        "supportBand": "high",
+        "targetSupportQuantile": 0.75,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "0f88717de74a8c2aeac4a0ae92d775407c051362c029938ec3594f1b16679f04",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864b32827ffffff",
+          "grid_r6:864b3282fffffff",
+          "grid_r6:864b3290fffffff",
+          "grid_r6:864b32947ffffff",
+          "grid_r6:864b32957ffffff",
+          "grid_r6:864b3295fffffff",
+          "grid_r6:864b32977ffffff"
+        ],
+        "foldId": 1
+      },
+      {
+        "unitId": "grid_r6:86309aa57ffffff",
+        "city": "嘉兴市",
+        "checklists": 140,
+        "observers": 60,
+        "centroid": {
+          "longitude": 120.76683436110198,
+          "latitude": 30.70211705326803
+        },
+        "supportQuantile": 0.5,
+        "supportBand": "medium",
+        "targetSupportQuantile": 0.75,
+        "selectionReason": "previously_viewed_development_anchor",
+        "selectionHash": "b58edcd67eb3f239de1d9086444c771dfe1dfa3933a2842a5cf30b35125fe7d3",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:86309aa0fffffff",
+          "grid_r6:86309aa47ffffff",
+          "grid_r6:86309aa57ffffff",
+          "grid_r6:86309aa5fffffff",
+          "grid_r6:86309aa77ffffff",
+          "grid_r6:86309aae7ffffff",
+          "grid_r6:86309aaefffffff"
+        ],
+        "foldId": 4
+      },
+      {
+        "unitId": "grid_r6:86309bc97ffffff",
+        "city": "嘉兴市",
+        "checklists": 623,
+        "observers": 68,
+        "centroid": {
+          "longitude": 120.97725322523385,
+          "latitude": 30.528277508910318
+        },
+        "supportQuantile": 0.958333,
+        "supportBand": "high",
+        "targetSupportQuantile": 0.75,
+        "selectionReason": "previously_viewed_development_anchor",
+        "selectionHash": "4a20d628da1be7df4955d2ac21e4d0f1d8e4ecc7719dd083aaf4e6c542669beb",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:86309a267ffffff",
+          "grid_r6:86309a26fffffff",
+          "grid_r6:86309a34fffffff",
+          "grid_r6:86309bc87ffffff",
+          "grid_r6:86309bc97ffffff",
+          "grid_r6:86309bc9fffffff",
+          "grid_r6:86309bcb7ffffff"
+        ],
+        "foldId": 2
+      },
+      {
+        "unitId": "grid_r6:864b35cb7ffffff",
+        "city": "宁波市",
+        "checklists": 60,
+        "observers": 21,
+        "centroid": {
+          "longitude": 121.69362672576736,
+          "latitude": 29.954404065512822
+        },
+        "supportQuantile": 0.5,
+        "supportBand": "medium",
+        "targetSupportQuantile": 0.5,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "92ad0bcc67ca7d45aeef18d34a041befd29cdca708e170efc0dce88673be0398",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864b3434fffffff",
+          "grid_r6:864b3436fffffff",
+          "grid_r6:864b35c87ffffff",
+          "grid_r6:864b35c97ffffff",
+          "grid_r6:864b35ca7ffffff",
+          "grid_r6:864b35cb7ffffff",
+          "grid_r6:864b35d9fffffff"
+        ],
+        "foldId": 4
+      },
+      {
+        "unitId": "grid_r6:86419000fffffff",
+        "city": "杭州市",
+        "checklists": 75,
+        "observers": 56,
+        "centroid": {
+          "longitude": 118.898925375808,
+          "latitude": 29.55236185734217
+        },
+        "supportQuantile": 0.256757,
+        "supportBand": "low",
+        "targetSupportQuantile": 0.25,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "38eb1e43c7571a04d51ce27429d3cbd35b6106d9222de47b1aabf7f6cc7c5011",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864190007ffffff",
+          "grid_r6:86419000fffffff",
+          "grid_r6:86419001fffffff",
+          "grid_r6:86419002fffffff",
+          "grid_r6:864190057ffffff",
+          "grid_r6:864190077ffffff",
+          "grid_r6:8641900e7ffffff"
+        ],
+        "foldId": 5
+      },
+      {
+        "unitId": "grid_r6:8641b2d77ffffff",
+        "city": "温州市",
+        "checklists": 54,
+        "observers": 36,
+        "centroid": {
+          "longitude": 120.80102758964824,
+          "latitude": 27.785998201684297
+        },
+        "supportQuantile": 0.257143,
+        "supportBand": "low",
+        "targetSupportQuantile": 0.25,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "e2b1b09838dbc823104c4bff0c54a7c5b4b25cab497e50e6bc0c05f265803686",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:8641b2d0fffffff",
+          "grid_r6:8641b2d2fffffff",
+          "grid_r6:8641b2d47ffffff",
+          "grid_r6:8641b2d57ffffff",
+          "grid_r6:8641b2d67ffffff",
+          "grid_r6:8641b2d77ffffff",
+          "grid_r6:8641b66dfffffff"
+        ],
+        "foldId": 2
+      },
+      {
+        "unitId": "grid_r6:86309a9afffffff",
+        "city": "湖州市",
+        "checklists": 101,
+        "observers": 13,
+        "centroid": {
+          "longitude": 120.12692662473606,
+          "latitude": 30.840060532675782
+        },
+        "supportQuantile": 0.666667,
+        "supportBand": "medium",
+        "targetSupportQuantile": 0.5,
+        "selectionReason": "previously_viewed_development_anchor",
+        "selectionHash": "e24c3b23e9feff8d75006e6ebd2ed8e3f4a9b575d6ce4be35bd88fece4974b50",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:86309a837ffffff",
+          "grid_r6:86309a917ffffff",
+          "grid_r6:86309a91fffffff",
+          "grid_r6:86309a987ffffff",
+          "grid_r6:86309a98fffffff",
+          "grid_r6:86309a9a7ffffff",
+          "grid_r6:86309a9afffffff"
+        ],
+        "foldId": 5
+      },
+      {
+        "unitId": "grid_r6:864b34937ffffff",
+        "city": "绍兴市",
+        "checklists": 40,
+        "observers": 34,
+        "centroid": {
+          "longitude": 120.79497349720396,
+          "latitude": 30.181969003961946
+        },
+        "supportQuantile": 0.230769,
+        "supportBand": "low",
+        "targetSupportQuantile": 0.25,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "0bf3c75c973e1c17cb7a3db00e01f3aeb016a58de4505af7790274a6a91894cc",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:86309a29fffffff",
+          "grid_r6:86309a64fffffff",
+          "grid_r6:86309a66fffffff",
+          "grid_r6:864b34907ffffff",
+          "grid_r6:864b34917ffffff",
+          "grid_r6:864b34927ffffff",
+          "grid_r6:864b34937ffffff"
+        ],
+        "foldId": 5
+      },
+      {
+        "unitId": "grid_r6:864b26627ffffff",
+        "city": "舟山市",
+        "checklists": 63,
+        "observers": 45,
+        "centroid": {
+          "longitude": 122.75250397325037,
+          "latitude": 30.724353614065528
+        },
+        "supportQuantile": 0.5,
+        "supportBand": "medium",
+        "targetSupportQuantile": 0.5,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "f256ba2136b9467b60ffb9ab9968c484bd58e192acc3a32d6ade0179b01b6273",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864b26607ffffff",
+          "grid_r6:864b26627ffffff",
+          "grid_r6:864b2662fffffff",
+          "grid_r6:864b26637ffffff",
+          "grid_r6:864b2670fffffff",
+          "grid_r6:864b2671fffffff",
+          "grid_r6:864b26757ffffff"
+        ],
+        "foldId": 3
+      },
+      {
+        "unitId": "grid_r6:864190977ffffff",
+        "city": "衢州市",
+        "checklists": 37,
+        "observers": 28,
+        "centroid": {
+          "longitude": 119.11650704641981,
+          "latitude": 29.034721302456113
+        },
+        "supportQuantile": 0.5,
+        "supportBand": "medium",
+        "targetSupportQuantile": 0.5,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "06213221138b0d9913a5f8f6e047bfaf9911a17441c07f5e8a610830d16c1ea1",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:86419090fffffff",
+          "grid_r6:86419092fffffff",
+          "grid_r6:864190947ffffff",
+          "grid_r6:864190957ffffff",
+          "grid_r6:864190967ffffff",
+          "grid_r6:864190977ffffff",
+          "grid_r6:8641942dfffffff"
+        ],
+        "foldId": 1
+      },
+      {
+        "unitId": "grid_r6:86419479fffffff",
+        "city": "金华市",
+        "checklists": 137,
+        "observers": 25,
+        "centroid": {
+          "longitude": 119.64884446859544,
+          "latitude": 29.13323271918046
+        },
+        "supportQuantile": 0.75,
+        "supportBand": "high",
+        "targetSupportQuantile": 0.75,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "ba99ea0197eb3b269daaf3f6357449f346a08e2350f79d5c6e93b6ceea5657b4",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:8641946a7ffffff",
+          "grid_r6:8641946b7ffffff",
+          "grid_r6:864194787ffffff",
+          "grid_r6:86419478fffffff",
+          "grid_r6:864194797ffffff",
+          "grid_r6:86419479fffffff",
+          "grid_r6:864196b6fffffff"
+        ],
+        "foldId": 3
+      }
+    ],
+    "folds": [
+      {
+        "foldId": 1,
+        "anchorCount": 3,
+        "checklistCount": 229,
+        "observerCount": 73,
+        "cities": [
+          "丽水市",
+          "台州市",
+          "衢州市"
+        ],
+        "anchorIds": [
+          "grid_r6:864190977ffffff",
+          "grid_r6:864194acfffffff",
+          "grid_r6:864b32957ffffff"
+        ]
+      },
+      {
+        "foldId": 2,
+        "anchorCount": 2,
+        "checklistCount": 677,
+        "observerCount": 104,
+        "cities": [
+          "嘉兴市",
+          "温州市"
+        ],
+        "anchorIds": [
+          "grid_r6:86309bc97ffffff",
+          "grid_r6:8641b2d77ffffff"
+        ]
+      },
+      {
+        "foldId": 3,
+        "anchorCount": 2,
+        "checklistCount": 200,
+        "observerCount": 70,
+        "cities": [
+          "舟山市",
+          "金华市"
+        ],
+        "anchorIds": [
+          "grid_r6:86419479fffffff",
+          "grid_r6:864b26627ffffff"
+        ]
+      },
+      {
+        "foldId": 4,
+        "anchorCount": 2,
+        "checklistCount": 200,
+        "observerCount": 81,
+        "cities": [
+          "嘉兴市",
+          "宁波市"
+        ],
+        "anchorIds": [
+          "grid_r6:86309aa57ffffff",
+          "grid_r6:864b35cb7ffffff"
+        ]
+      },
+      {
+        "foldId": 5,
+        "anchorCount": 3,
+        "checklistCount": 216,
+        "observerCount": 103,
+        "cities": [
+          "杭州市",
+          "湖州市",
+          "绍兴市"
+        ],
+        "anchorIds": [
+          "grid_r6:86309a9afffffff",
+          "grid_r6:86419000fffffff",
+          "grid_r6:864b34937ffffff"
+        ]
+      }
+    ],
+    "balance": {
+      "minimumAnchorsPerFold": 2,
+      "maximumAnchorsPerFold": 3,
+      "minimumChecklistsPerFold": 200,
+      "maximumChecklistsPerFold": 677,
+      "checklistMaximumToMinimumRatio": 3.385
+    }
+  },
+  "sealedRelease": {
+    "anchorCount": 11,
+    "cityCount": 11,
+    "cityCoverage": [
+      "丽水市",
+      "台州市",
+      "嘉兴市",
+      "宁波市",
+      "杭州市",
+      "温州市",
+      "湖州市",
+      "绍兴市",
+      "舟山市",
+      "衢州市",
+      "金华市"
+    ],
+    "coversExpectedCities": true,
+    "anchors": [
+      {
+        "unitId": "grid_r6:864195c27ffffff",
+        "city": "丽水市",
+        "checklists": 72,
+        "observers": 53,
+        "centroid": {
+          "longitude": 119.02639934881236,
+          "latitude": 28.497276289125058
+        },
+        "supportQuantile": 0.5,
+        "supportBand": "medium",
+        "targetSupportQuantile": 0.5,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "f5086279db6e7fe5cf8933b80f38318175b86febaf3db0591df2472cc092c8ca",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864195c07ffffff",
+          "grid_r6:864195c27ffffff",
+          "grid_r6:864195c2fffffff",
+          "grid_r6:864195c37ffffff",
+          "grid_r6:864195d0fffffff",
+          "grid_r6:864195d1fffffff",
+          "grid_r6:864195d57ffffff"
+        ],
+        "foldId": 2
+      },
+      {
+        "unitId": "grid_r6:864b36a0fffffff",
+        "city": "台州市",
+        "checklists": 71,
+        "observers": 41,
+        "centroid": {
+          "longitude": 121.06955031735114,
+          "latitude": 29.16913793310022
+        },
+        "supportQuantile": 0.538462,
+        "supportBand": "medium",
+        "targetSupportQuantile": 0.5,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "8e25ba539f1b8146a7f40a6162cc774a43d319e373463ed16e94b0805261470c",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864b36a07ffffff",
+          "grid_r6:864b36a0fffffff",
+          "grid_r6:864b36a1fffffff",
+          "grid_r6:864b36a2fffffff",
+          "grid_r6:864b36a57ffffff",
+          "grid_r6:864b36a77ffffff",
+          "grid_r6:864b36ae7ffffff"
+        ],
+        "foldId": 2
+      },
+      {
+        "unitId": "grid_r6:86309a327ffffff",
+        "city": "嘉兴市",
+        "checklists": 139,
+        "observers": 26,
+        "centroid": {
+          "longitude": 120.67585755505245,
+          "latitude": 30.529630440397064
+        },
+        "supportQuantile": 0.458333,
+        "supportBand": "medium",
+        "targetSupportQuantile": 0.5,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "8d6d0e7d6cca7d2bd2eb392db8069826606c0dced96361001c735886a10c6ca9",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:86309a307ffffff",
+          "grid_r6:86309a327ffffff",
+          "grid_r6:86309a32fffffff",
+          "grid_r6:86309a337ffffff",
+          "grid_r6:86309aa8fffffff",
+          "grid_r6:86309aa9fffffff",
+          "grid_r6:86309aad7ffffff"
+        ],
+        "foldId": 5
+      },
+      {
+        "unitId": "grid_r6:864b35417ffffff",
+        "city": "宁波市",
+        "checklists": 40,
+        "observers": 26,
+        "centroid": {
+          "longitude": 121.92795940483576,
+          "latitude": 29.730810211511315
+        },
+        "supportQuantile": 0.261905,
+        "supportBand": "low",
+        "targetSupportQuantile": 0.25,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "708251427a811771eb2fa3c2d2224e602de65dc92548b4b820c32e383e922f16",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864b35407ffffff",
+          "grid_r6:864b35417ffffff",
+          "grid_r6:864b3541fffffff",
+          "grid_r6:864b35437ffffff",
+          "grid_r6:864b354a7ffffff",
+          "grid_r6:864b354afffffff",
+          "grid_r6:864b3558fffffff"
+        ],
+        "foldId": 1
+      },
+      {
+        "unitId": "grid_r6:86309a527ffffff",
+        "city": "杭州市",
+        "checklists": 447,
+        "observers": 216,
+        "centroid": {
+          "longitude": 120.01395562472308,
+          "latitude": 30.370619204865196
+        },
+        "supportQuantile": 0.756757,
+        "supportBand": "high",
+        "targetSupportQuantile": 0.75,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "591e09ec922654f50cbc29b152970add416ad2cf7c8da76bdd98b31e66430294",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:86309a507ffffff",
+          "grid_r6:86309a527ffffff",
+          "grid_r6:86309a52fffffff",
+          "grid_r6:86309a537ffffff",
+          "grid_r6:86309ac8fffffff",
+          "grid_r6:86309ac9fffffff",
+          "grid_r6:86309acd7ffffff"
+        ],
+        "foldId": 1
+      },
+      {
+        "unitId": "grid_r6:8641b2cf7ffffff",
+        "city": "温州市",
+        "checklists": 149,
+        "observers": 42,
+        "centroid": {
+          "longitude": 120.74938177162174,
+          "latitude": 28.012523700626886
+        },
+        "supportQuantile": 0.771429,
+        "supportBand": "high",
+        "targetSupportQuantile": 0.75,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "080103f320356c026b5baff691d91dcc7c8ac44a0f0511347ef9dbd4f13f2325",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:8641b2c1fffffff",
+          "grid_r6:8641b2c8fffffff",
+          "grid_r6:8641b2cafffffff",
+          "grid_r6:8641b2cc7ffffff",
+          "grid_r6:8641b2cd7ffffff",
+          "grid_r6:8641b2ce7ffffff",
+          "grid_r6:8641b2cf7ffffff"
+        ],
+        "foldId": 4
+      },
+      {
+        "unitId": "grid_r6:864192187ffffff",
+        "city": "湖州市",
+        "checklists": 44,
+        "observers": 23,
+        "centroid": {
+          "longitude": 119.47506504685967,
+          "latitude": 30.41835224687733
+        },
+        "supportQuantile": 0.238095,
+        "supportBand": "low",
+        "targetSupportQuantile": 0.25,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "2c701f4ebc3d72432e40893c4a97f71e663a96f6a54730a50d272e2c69d1093a",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864192187ffffff",
+          "grid_r6:86419218fffffff",
+          "grid_r6:864192197ffffff",
+          "grid_r6:86419219fffffff",
+          "grid_r6:8641921a7ffffff",
+          "grid_r6:8641921afffffff",
+          "grid_r6:8641921b7ffffff"
+        ],
+        "foldId": 4
+      },
+      {
+        "unitId": "grid_r6:86309a6f7ffffff",
+        "city": "绍兴市",
+        "checklists": 250,
+        "observers": 72,
+        "centroid": {
+          "longitude": 120.5838334291081,
+          "latitude": 30.00891529672711
+        },
+        "supportQuantile": 0.846154,
+        "supportBand": "high",
+        "targetSupportQuantile": 0.75,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "89c25c45e3711f82f1feaf45d5a7352002b5afb4921cbc90457816be25d28fef",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:86309a61fffffff",
+          "grid_r6:86309a68fffffff",
+          "grid_r6:86309a6afffffff",
+          "grid_r6:86309a6c7ffffff",
+          "grid_r6:86309a6d7ffffff",
+          "grid_r6:86309a6e7ffffff",
+          "grid_r6:86309a6f7ffffff"
+        ],
+        "foldId": 3
+      },
+      {
+        "unitId": "grid_r6:864b35ce7ffffff",
+        "city": "舟山市",
+        "checklists": 44,
+        "observers": 12,
+        "centroid": {
+          "longitude": 121.89172971537738,
+          "latitude": 30.03928464851878
+        },
+        "supportQuantile": 0.25,
+        "supportBand": "low",
+        "targetSupportQuantile": 0.25,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "7bc85ecfb1d2ffad9c622bea3b90e788cfeafbd86fedbb48f55214ce1f3423f9",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864b35c0fffffff",
+          "grid_r6:864b35c1fffffff",
+          "grid_r6:864b35c57ffffff",
+          "grid_r6:864b35cc7ffffff",
+          "grid_r6:864b35ce7ffffff",
+          "grid_r6:864b35cefffffff",
+          "grid_r6:864b35cf7ffffff"
+        ],
+        "foldId": 3
+      },
+      {
+        "unitId": "grid_r6:864195437ffffff",
+        "city": "衢州市",
+        "checklists": 35,
+        "observers": 22,
+        "centroid": {
+          "longitude": 118.91103724655427,
+          "latitude": 28.89924868917823
+        },
+        "supportQuantile": 0.25,
+        "supportBand": "low",
+        "targetSupportQuantile": 0.25,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "2f5e08710fbf5fca63625495478f944c7cb6e14cb06d67258ef2955603fdc142",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864195407ffffff",
+          "grid_r6:864195417ffffff",
+          "grid_r6:864195427ffffff",
+          "grid_r6:864195437ffffff",
+          "grid_r6:86419551fffffff",
+          "grid_r6:86419558fffffff",
+          "grid_r6:8641955afffffff"
+        ],
+        "foldId": 2
+      },
+      {
+        "unitId": "grid_r6:86419461fffffff",
+        "city": "金华市",
+        "checklists": 54,
+        "observers": 33,
+        "centroid": {
+          "longitude": 119.4961839994955,
+          "latitude": 29.125475105542634
+        },
+        "supportQuantile": 0.5,
+        "supportBand": "medium",
+        "targetSupportQuantile": 0.5,
+        "selectionReason": "target_independent_stratified_selection",
+        "selectionHash": "a4573ea5634c21622f9bfa3afad5eff8a6e6e11b2d38248fb9734e32e553c5b4",
+        "bufferRing": 1,
+        "bufferCellIds": [
+          "grid_r6:864194607ffffff",
+          "grid_r6:86419460fffffff",
+          "grid_r6:864194617ffffff",
+          "grid_r6:86419461fffffff",
+          "grid_r6:8641946afffffff",
+          "grid_r6:8641946e7ffffff",
+          "grid_r6:8641946f7ffffff"
+        ],
+        "foldId": 5
+      }
+    ],
+    "folds": [
+      {
+        "foldId": 1,
+        "anchorCount": 2,
+        "checklistCount": 487,
+        "observerCount": 242,
+        "cities": [
+          "宁波市",
+          "杭州市"
+        ],
+        "anchorIds": [
+          "grid_r6:86309a527ffffff",
+          "grid_r6:864b35417ffffff"
+        ]
+      },
+      {
+        "foldId": 2,
+        "anchorCount": 3,
+        "checklistCount": 178,
+        "observerCount": 116,
+        "cities": [
+          "丽水市",
+          "台州市",
+          "衢州市"
+        ],
+        "anchorIds": [
+          "grid_r6:864195437ffffff",
+          "grid_r6:864195c27ffffff",
+          "grid_r6:864b36a0fffffff"
+        ]
+      },
+      {
+        "foldId": 3,
+        "anchorCount": 2,
+        "checklistCount": 294,
+        "observerCount": 84,
+        "cities": [
+          "绍兴市",
+          "舟山市"
+        ],
+        "anchorIds": [
+          "grid_r6:86309a6f7ffffff",
+          "grid_r6:864b35ce7ffffff"
+        ]
+      },
+      {
+        "foldId": 4,
+        "anchorCount": 2,
+        "checklistCount": 193,
+        "observerCount": 65,
+        "cities": [
+          "温州市",
+          "湖州市"
+        ],
+        "anchorIds": [
+          "grid_r6:864192187ffffff",
+          "grid_r6:8641b2cf7ffffff"
+        ]
+      },
+      {
+        "foldId": 5,
+        "anchorCount": 2,
+        "checklistCount": 193,
+        "observerCount": 59,
+        "cities": [
+          "嘉兴市",
+          "金华市"
+        ],
+        "anchorIds": [
+          "grid_r6:86309a327ffffff",
+          "grid_r6:86419461fffffff"
+        ]
+      }
+    ],
+    "balance": {
+      "minimumAnchorsPerFold": 2,
+      "maximumAnchorsPerFold": 3,
+      "minimumChecklistsPerFold": 178,
+      "maximumChecklistsPerFold": 487,
+      "checklistMaximumToMinimumRatio": 2.735955056179775
+    }
+  },
+  "isolation": {
+    "developmentBufferCellCount": 84,
+    "sealedReleaseBufferCellCount": 77,
+    "overlapCellCount": 0,
+    "overlapCellIds": []
+  },
+  "search": {
+    "statesVisited": 22,
+    "maximumStates": 500000
+  },
+  "manifestHash": "400bcc27bde3bd30f03ef022b9f76175cd6093ea5afc98fcbfccb79bde234e4d"
+}
