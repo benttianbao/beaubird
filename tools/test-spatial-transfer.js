@@ -8,6 +8,7 @@ const test = require("node:test");
 
 const {
   SpatialTransferError,
+  FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1,
   adminCapForTaxon,
   buildAdminExposureCapCandidates,
   capEffectiveEvidence,
@@ -56,6 +57,14 @@ test("行政层调参候选一次生成完整且确定的 25 组笛卡尔积", (
   assert.deepEqual(candidates.at(-1), {
     id: "city=infinite,district=300",
     caps: { city: null, district: 300 }
+  });
+});
+
+test("冻结 development OOF 选择的 novel-grid 行政层暴露上限", () => {
+  assert.deepEqual(FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1, {
+    group_30_79: { city: 100, district: 300 },
+    group_80_199: { city: 100, district: 10 },
+    species_200_plus: { city: 100, district: 10 }
   });
 });
 

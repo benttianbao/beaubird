@@ -11,6 +11,11 @@ const ADMIN_EXPOSURE_CAP_CANDIDATES = Object.freeze({
   city: Object.freeze([0, 30, 100, 300, null]),
   district: Object.freeze([0, 10, 30, 100, 300])
 });
+const FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1 = Object.freeze({
+  group_30_79: Object.freeze({ city: 100, district: 300 }),
+  group_80_199: Object.freeze({ city: 100, district: 10 }),
+  species_200_plus: Object.freeze({ city: 100, district: 10 })
+});
 
 class SpatialTransferError extends Error {
   constructor(code, message, details = {}) {
@@ -158,6 +163,7 @@ function verifySpatialSplitManifest({
 module.exports = {
   ADMIN_EXPOSURE_CAP_CANDIDATES,
   ADMIN_TRANSFER_LEVELS,
+  FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1,
   SpatialTransferError,
   adminCapForTaxon,
   buildAdminExposureCapCandidates,

@@ -22,6 +22,8 @@ const {
   cliResultSummary,
   createArtifactSchema,
   createTrainingSnapshot,
+  crossFitSpatialCalibrators,
+  evaluateCachedSpatialRows,
   evaluateReleaseQuality,
   guardCalibrationCandidates,
   inspectSnapshotQuality,
@@ -278,6 +280,59 @@ test("nested calibration guard rejects harmful scopes and retains non-degrading 
   assert.equal(guarded.summary.acceptedCount, 1);
   assert.equal(guarded.summary.rejectedCount, 1);
   assert.equal(guarded.summary.identityCount, 1);
+});
+
+test("spatial calibration reuses cached rows, cross-fits five folds, and keeps inputs immutable", () => {
+  const folds = Array.from({ length: 5 }, (_, foldIndex) => ({
+    foldId: `fold-${foldIndex + 1}`,
+    scoreRows: Array.from({ length: 4 }, (_, contextIndex) => [
+      {
+        contextIndex,
+        taxonId: "common-a",
+        positiveCount: 300,
+        actualPositive: 8 + contextIndex,
+        total: 100,
+        rawProbability: 0.32 + contextIndex * 0.03,
+        baselineProbability: 0.2,
+        deepestLevel: "city"
+      },
+      {
+        contextIndex,
+        taxonId: "group-b",
+        positiveCount: 50,
+        actualPositive: 3 + (contextIndex % 2),
+        total: 100,
+        rawProbability: 0.18 + contextIndex * 0.02,
+        baselineProbability: 0.08,
+        deepestLevel: "district"
+      },
+      {
+        contextIndex,
+        taxonId: "group-c",
+        positiveCount: 45,
+        actualPositive: 2 + (contextIndex % 2),
+        total: 100,
+        rawProbability: 0.16 + contextIndex * 0.02,
+        baselineProbability: 0.06,
+        deepestLevel: "district"
+      }
+    ]).flat()
+  }));
+  const before = structuredClone(folds);
+  const raw = folds.map((fold) => evaluateCachedSpatialRows(fold.scoreRows));
+  const calibrated = crossFitSpatialCalibrators(folds);
+  assert.equal(calibrated.foldMetrics.length, 5);
+  assert.equal(calibrated.summary.heldoutFoldCount, 5);
+  assert.equal(calibrated.summary.fitFoldCount, 4);
+  assert.ok(calibrated.summary.acceptedCount >= 1);
+  assert.ok(calibrated.productionCalibrators.some((entry) => entry.scope === "species:common-a"));
+  assert.ok(calibrated.summary.scopes.some((entry) => entry.scope === "group:positive_30_59"));
+  for (let index = 0; index < folds.length; index += 1) {
+    assert.ok(calibrated.foldMetrics[index].brier <= raw[index].brier);
+    assert.equal(calibrated.foldMetrics[index].evaluatedWeight, raw[index].evaluatedWeight);
+    assert.equal(calibrated.foldMetrics[index].validationContexts, raw[index].validationContexts);
+  }
+  assert.deepEqual(folds, before);
 });
 
 test("temporal folds recompute recency weights and recent windows without decaying validation", () => {

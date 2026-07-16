@@ -45,6 +45,7 @@ const {
   adminCapForTaxon,
   buildAdminExposureCapCandidates,
   capEffectiveEvidence,
+  FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1,
   verifySpatialSplitManifest
 } = require("../server/prediction/spatial-transfer");
 const { scoreAdminCapTasks } = require("../server/prediction/spatial-transfer-worker");
@@ -104,6 +105,7 @@ const DEFAULT_OPTIONS = Object.freeze({
   forwardTopK: 100,
   reverseTopK: 300,
   materializationProfile: "full",
+  novelGridAdminExposureCapsByPrevalence: FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1,
   bandwidthCandidates: [7, 14, 21, 28],
   priorStrengthMultipliers: [0.5, 1, 2],
   qualityGate: PRODUCTION_QUALITY_GATE,
@@ -2336,7 +2338,9 @@ function summarizeCalibrationScopeBins(serialized) {
 function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evaluationOptions = {}) {
   const calibrationPoints = new Map();
   const collectAdminCapTasks = Boolean(evaluationOptions.collectAdminCapTasks);
+  const collectScoreRows = Boolean(evaluationOptions.collectScoreRows);
   const adminCapTasksByPrevalence = new Map();
+  const scoreRows = [];
   const contextSampleModulo = Math.max(1, Number(evaluationOptions.contextSampleModulo) || 1);
   const validationRows = artifact
     .prepare(
@@ -2349,7 +2353,7 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
                  reports.grid_r6_unit, reports.grid_r7_unit, reports.point_unit, reports.season_week`
     )
     .all();
-  if (!validationRows.length) return { metrics: null, calibrationPoints };
+  if (!validationRows.length) return { metrics: null, calibrationPoints, scoreRows, adminCapTasksByPrevalence };
 
   const contexts = new Map();
   const insertNeededUnit = artifact.prepare(
@@ -2424,7 +2428,7 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
       taxon_id: String(row.taxon_id),
       positive_count: Number(row.positive_count) || 0
     }));
-  if (!eligibleTaxa.length) return { metrics: null, calibrationPoints };
+  if (!eligibleTaxa.length) return { metrics: null, calibrationPoints, scoreRows, adminCapTasksByPrevalence };
 
   const exposures = new Map();
   const hits = new Map();
@@ -2496,7 +2500,9 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
   let baselineRecallHits = 0;
   let recallActual = 0;
   const fallbackLevels = new Map();
+  let contextIndex = 0;
   for (const context of contexts.values()) {
+    const currentContextIndex = contextIndex++;
     if (context.exposure <= 0) continue;
     const rows = [];
     for (const taxon of eligibleTaxa) {
@@ -2517,6 +2523,18 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
         : null;
       const probability = calibrateProbability(rawScore.probability, calibrator);
       const actualPositive = Math.min(context.exposure, Number(context.hits.get(taxonId)) || 0);
+      if (collectScoreRows) {
+        scoreRows.push({
+          contextIndex: currentContextIndex,
+          taxonId,
+          positiveCount: taxon.positive_count,
+          actualPositive,
+          total: context.exposure,
+          rawProbability: rawScore.probability,
+          baselineProbability: rawScore.baselineProbability,
+          deepestLevel: rawScore.deepestLevel
+        });
+      }
       if (collectAdminCapTasks && !rawScore.hasSupportedLocalUnit) {
         const group = prevalenceGroup(taxon.positive_count);
         if (!adminCapTasksByPrevalence.has(group)) adminCapTasksByPrevalence.set(group, []);
@@ -2603,7 +2621,7 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
     }
     recallActual += actualTaxa.length;
   }
-  if (!evaluatedWeight) return { metrics: null, calibrationPoints };
+  if (!evaluatedWeight) return { metrics: null, calibrationPoints, scoreRows, adminCapTasksByPrevalence };
   const brier = modelLoss / evaluatedWeight;
   const baselineBrier = baselineLoss / evaluatedWeight;
   const ece = eceBins.reduce((sum, bin) => {
@@ -2727,11 +2745,122 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
     fallbackLevels: Object.fromEntries([...fallbackLevels.entries()].sort()),
     evaluationModel: "hierarchical_spatiotemporal_oof",
     baselineModel: "province_week"
-  }, calibrationPoints, adminCapTasksByPrevalence };
+  }, calibrationPoints, scoreRows, adminCapTasksByPrevalence };
 }
 
 function evaluatePreparedHoldout(artifact, bandwidthDays, options) {
   return evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options).metrics;
+}
+
+function evaluateCachedSpatialRows(scoreRows, calibratorForRow = null) {
+  if (!scoreRows?.length) return null;
+  const eceBins = emptyEceBins();
+  const calibrationScopeBins = { species: new Map(), group: new Map() };
+  const prevalenceLosses = new Map(PREVALENCE_GROUPS.map((group) => [group, {
+    modelLoss: 0,
+    baselineLoss: 0,
+    evaluatedWeight: 0
+  }]));
+  const fallbackLevels = new Map();
+  const rowsByContext = new Map();
+  const evaluatedTaxa = new Set();
+  let modelLoss = 0;
+  let baselineLoss = 0;
+  let evaluatedWeight = 0;
+  for (const row of scoreRows) {
+    const calibrator = typeof calibratorForRow === "function" ? calibratorForRow(row) : null;
+    const probability = calibrateProbability(row.rawProbability, calibrator);
+    row.cachedProbability = probability;
+    const actualPositive = Number(row.actualPositive) || 0;
+    const total = Number(row.total) || 0;
+    const rowModelLoss = actualPositive * (1 - probability) ** 2 + (total - actualPositive) * probability ** 2;
+    const rowBaselineLoss =
+      actualPositive * (1 - row.baselineProbability) ** 2 +
+      (total - actualPositive) * row.baselineProbability ** 2;
+    modelLoss += rowModelLoss;
+    baselineLoss += rowBaselineLoss;
+    evaluatedWeight += total;
+    evaluatedTaxa.add(row.taxonId);
+    addEceObservation(eceBins, probability, actualPositive, total);
+    if (Number(row.positiveCount) >= 30) {
+      const scopeType = Number(row.positiveCount) >= 200 ? "species" : "group";
+      const scopeId = scopeType === "species" ? row.taxonId : calibrationGroup(row.positiveCount);
+      if (!calibrationScopeBins[scopeType].has(scopeId)) {
+        calibrationScopeBins[scopeType].set(scopeId, emptyEceBins());
+      }
+      addEceObservation(calibrationScopeBins[scopeType].get(scopeId), probability, actualPositive, total);
+    }
+    const prevalence = prevalenceLosses.get(prevalenceGroup(row.positiveCount));
+    prevalence.modelLoss += rowModelLoss;
+    prevalence.baselineLoss += rowBaselineLoss;
+    prevalence.evaluatedWeight += total;
+    fallbackLevels.set(row.deepestLevel, (fallbackLevels.get(row.deepestLevel) || 0) + 1);
+    if (!rowsByContext.has(row.contextIndex)) rowsByContext.set(row.contextIndex, []);
+    rowsByContext.get(row.contextIndex).push(row);
+  }
+  let recallHits = 0;
+  let baselineRecallHits = 0;
+  let recallActual = 0;
+  for (const rows of rowsByContext.values()) {
+    const actualTaxa = rows.filter((row) => Number(row.actualPositive) > 0);
+    if (!actualTaxa.length) continue;
+    const modelTop = new Set(
+      [...rows]
+        .sort((left, right) =>
+          right.cachedProbability - left.cachedProbability || left.taxonId.localeCompare(right.taxonId)
+        )
+        .slice(0, 20)
+        .map((row) => row.taxonId)
+    );
+    const baselineTop = new Set(
+      [...rows]
+        .sort((left, right) =>
+          right.baselineProbability - left.baselineProbability || left.taxonId.localeCompare(right.taxonId)
+        )
+        .slice(0, 20)
+        .map((row) => row.taxonId)
+    );
+    for (const row of actualTaxa) {
+      if (modelTop.has(row.taxonId)) recallHits += 1;
+      if (baselineTop.has(row.taxonId)) baselineRecallHits += 1;
+    }
+    recallActual += actualTaxa.length;
+  }
+  for (const row of scoreRows) delete row.cachedProbability;
+  const brier = modelLoss / evaluatedWeight;
+  const baselineBrier = baselineLoss / evaluatedWeight;
+  const serializedCalibrationScopeBins = serializeCalibrationScopeBins(calibrationScopeBins);
+  return {
+    brier,
+    baselineBrier,
+    brierSkill: baselineBrier > 0 ? 1 - brier / baselineBrier : null,
+    ece: eceFromBins(eceBins),
+    recallAt20: recallActual ? recallHits / recallActual : null,
+    baselineRecallAt20: recallActual ? baselineRecallHits / recallActual : null,
+    recallAt20Delta: recallActual ? (recallHits - baselineRecallHits) / recallActual : null,
+    recallHits,
+    baselineRecallHits,
+    recallActual,
+    calibrationBins: eceBins,
+    calibrationScopeBins: serializedCalibrationScopeBins,
+    calibrationEce: summarizeCalibrationScopeBins(serializedCalibrationScopeBins),
+    prevalenceMetrics: Object.fromEntries(
+      [...prevalenceLosses].map(([group, values]) => [group, {
+        brier: values.evaluatedWeight > 0 ? values.modelLoss / values.evaluatedWeight : null,
+        baselineBrier: values.evaluatedWeight > 0 ? values.baselineLoss / values.evaluatedWeight : null,
+        evaluatedWeight: values.evaluatedWeight
+      }])
+    ),
+    reverseNdcgAt10: null,
+    baselineReverseNdcgAt10: null,
+    reverseNdcgLift: null,
+    evaluatedWeight,
+    evaluatedTaxa: evaluatedTaxa.size,
+    validationContexts: rowsByContext.size,
+    fallbackLevels: Object.fromEntries([...fallbackLevels.entries()].sort()),
+    evaluationModel: "novel_grid_admin_capped_spatial_oof",
+    baselineModel: "province_week"
+  };
 }
 
 function aggregateHoldoutMetrics(folds) {
@@ -3136,6 +3265,140 @@ function aggregateAdminCapTuning(folds) {
   };
 }
 
+function spatialCalibrationScope(row) {
+  const positiveCount = Number(row.positiveCount) || 0;
+  if (positiveCount >= 200) return `species:${row.taxonId}`;
+  const group = calibrationGroup(positiveCount);
+  return group ? `group:${group}` : null;
+}
+
+function fitSpatialCalibratorMap(trainingRows, targetRows) {
+  const targetTaxa = new Map();
+  const trainingPoints = new Map();
+  for (const row of targetRows) {
+    targetTaxa.set(row.taxonId, Math.max(targetTaxa.get(row.taxonId) || 0, Number(row.positiveCount) || 0));
+  }
+  for (const row of trainingRows) {
+    if (!trainingPoints.has(row.taxonId)) trainingPoints.set(row.taxonId, []);
+    trainingPoints.get(row.taxonId).push({
+      probability: row.rawProbability,
+      positives: row.actualPositive,
+      total: row.total
+    });
+  }
+  const maps = new Map();
+  const groups = new Map();
+  for (const [taxonId, positiveCount] of targetTaxa) {
+    if (positiveCount >= 200) {
+      maps.set(`species:${taxonId}`, fitBetaCalibration(trainingPoints.get(taxonId) || []));
+      continue;
+    }
+    const group = calibrationGroup(positiveCount);
+    if (!group) continue;
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(taxonId);
+  }
+  for (const [group, taxonIds] of groups) {
+    maps.set(
+      `group:${group}`,
+      fitBetaCalibration(taxonIds.flatMap((taxonId) => trainingPoints.get(taxonId) || []))
+    );
+  }
+  return maps;
+}
+
+function crossFitSpatialCalibrators(folds) {
+  const foldMaps = [];
+  const scopeStats = new Map();
+  for (let heldoutIndex = 0; heldoutIndex < folds.length; heldoutIndex += 1) {
+    const trainingRows = folds.flatMap((fold, index) => index === heldoutIndex ? [] : fold.scoreRows || []);
+    const targetRows = folds[heldoutIndex].scoreRows || [];
+    const calibratorMap = fitSpatialCalibratorMap(trainingRows, targetRows);
+    foldMaps.push(calibratorMap);
+    for (const row of targetRows) {
+      const scope = spatialCalibrationScope(row);
+      if (!scope) continue;
+      if (!scopeStats.has(scope)) {
+        scopeStats.set(scope, {
+          rawLoss: 0,
+          candidateLoss: 0,
+          total: 0,
+          rawBins: emptyEceBins(),
+          candidateBins: emptyEceBins(),
+          fittedApplications: 0
+        });
+      }
+      const stats = scopeStats.get(scope);
+      const fit = calibratorMap.get(scope) || null;
+      const candidateProbability = calibrateProbability(row.rawProbability, fit);
+      const actual = Number(row.actualPositive) || 0;
+      const total = Number(row.total) || 0;
+      stats.rawLoss += actual * (1 - row.rawProbability) ** 2 + (total - actual) * row.rawProbability ** 2;
+      stats.candidateLoss +=
+        actual * (1 - candidateProbability) ** 2 + (total - actual) * candidateProbability ** 2;
+      stats.total += total;
+      if (fit?.fitted) stats.fittedApplications += 1;
+      addEceObservation(stats.rawBins, row.rawProbability, actual, total);
+      addEceObservation(stats.candidateBins, candidateProbability, actual, total);
+    }
+  }
+  const acceptedScopes = new Set();
+  const scopes = [];
+  for (const [scope, stats] of scopeStats) {
+    const rawBrier = stats.total > 0 ? stats.rawLoss / stats.total : null;
+    const candidateBrier = stats.total > 0 ? stats.candidateLoss / stats.total : null;
+    const rawEce = eceFromBins(stats.rawBins);
+    const candidateEce = eceFromBins(stats.candidateBins);
+    const relativeBrierDegradation = rawBrier > 1e-12
+      ? (candidateBrier - rawBrier) / rawBrier
+      : candidateBrier <= rawBrier + 1e-12 ? 0 : Number.POSITIVE_INFINITY;
+    const eceDegradation = candidateEce - rawEce;
+    const accepted =
+      stats.fittedApplications > 0 &&
+      relativeBrierDegradation <= NESTED_CALIBRATION_GUARD.maximumRelativeBrierDegradation &&
+      eceDegradation <= NESTED_CALIBRATION_GUARD.maximumEceDegradation;
+    if (accepted) acceptedScopes.add(scope);
+    scopes.push({
+      scope,
+      accepted,
+      fittedApplications: stats.fittedApplications,
+      rawBrier,
+      candidateBrier,
+      relativeBrierDegradation,
+      rawEce,
+      candidateEce,
+      eceDegradation
+    });
+  }
+  const foldMetrics = folds.map((fold, index) =>
+    evaluateCachedSpatialRows(
+      fold.scoreRows,
+      (row) => {
+        const scope = spatialCalibrationScope(row);
+        return scope && acceptedScopes.has(scope) ? foldMaps[index].get(scope) || null : null;
+      }
+    )
+  );
+  const allRows = folds.flatMap((fold) => fold.scoreRows || []);
+  const productionMap = fitSpatialCalibratorMap(allRows, allRows);
+  return {
+    foldMetrics,
+    productionCalibrators: [...productionMap]
+      .filter(([scope]) => acceptedScopes.has(scope))
+      .map(([scope, fit]) => ({ scope, fit })),
+    summary: {
+      strategy: "development_spatial_oof_cross_fit_with_scope_guard",
+      fitFoldCount: Math.max(0, folds.length - 1),
+      heldoutFoldCount: folds.length,
+      maximumRelativeBrierDegradation: NESTED_CALIBRATION_GUARD.maximumRelativeBrierDegradation,
+      maximumEceDegradation: NESTED_CALIBRATION_GUARD.maximumEceDegradation,
+      acceptedCount: acceptedScopes.size,
+      rejectedCount: scopes.length - acceptedScopes.size,
+      scopes: scopes.sort((left, right) => left.scope.localeCompare(right.scope))
+    }
+  };
+}
+
 async function evaluateSpatialHoldout(artifact, temporal, options) {
   prepareHoldoutTables(artifact);
   const settings = options.holdoutEvaluation;
@@ -3251,11 +3514,15 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
       ...options,
       priorStrengthsByPrevalence: nestedCalibration.priorStrengthsByPrevalence
     };
+    const collectFrozenScoreRows = Boolean(frozenSplit);
     const rawDetails = evaluatePreparedHoldoutDetails(
       artifact,
       nestedCalibration.bandwidthDays,
       nestedOptions,
-      { collectAdminCapTasks: adminCapCandidates.length > 0 }
+      {
+        collectAdminCapTasks: adminCapCandidates.length > 0,
+        collectScoreRows: collectFrozenScoreRows
+      }
     );
     const rawMetrics = rawDetails.metrics;
     const foldAdminCapTuning = adminCapCandidates.length
@@ -3266,10 +3533,15 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
           chunkRecords: options.workerTaskChunkRecords
         })
       : null;
-    const metrics = nestedCalibration.hasActiveCalibration
-      ? evaluatePreparedHoldoutDetails(artifact, nestedCalibration.bandwidthDays, nestedOptions, {
-          calibratorForTaxon: nestedCalibration.calibratorForTaxon
-        }).metrics
+    const temporalCalibratedMetrics = nestedCalibration.hasActiveCalibration
+      ? collectFrozenScoreRows
+        ? evaluateCachedSpatialRows(
+            rawDetails.scoreRows,
+            (row) => nestedCalibration.calibratorForTaxon({ taxon_id: row.taxonId })
+          )
+        : evaluatePreparedHoldoutDetails(artifact, nestedCalibration.bandwidthDays, nestedOptions, {
+            calibratorForTaxon: nestedCalibration.calibratorForTaxon
+          }).metrics
       : rawMetrics;
     folds.push({
       foldId: evaluationFold.foldId,
@@ -3281,15 +3553,26 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
       nestedCalibration: nestedCalibration.summary,
       adminCapTuning: foldAdminCapTuning,
       rawMetrics,
-      metrics
+      temporalCalibratedMetrics,
+      metrics: temporalCalibratedMetrics,
+      scoreRows: rawDetails.scoreRows
     });
   }
   resetHoldoutTables(artifact);
+  const spatialCalibration = frozenSplit?.panelName === "development"
+    ? crossFitSpatialCalibrators(folds)
+    : null;
+  if (spatialCalibration) {
+    for (let index = 0; index < folds.length; index += 1) {
+      folds[index].metrics = spatialCalibration.foldMetrics[index];
+    }
+  }
   const metrics = aggregateHoldoutMetrics(folds);
   const rawMetrics = aggregateHoldoutMetrics(
     folds.map((fold) => ({ ...fold, metrics: fold.rawMetrics }))
   );
   const adminCapTuning = aggregateAdminCapTuning(folds);
+  for (const fold of folds) delete fold.scoreRows;
   return {
     status: metrics ? "evaluated" : "unavailable",
     split: frozenSplit
@@ -3310,6 +3593,12 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
     rawMetrics,
     metrics,
     adminCapTuning,
+    spatialCalibration: spatialCalibration
+      ? {
+          ...spatialCalibration.summary,
+          productionCalibrators: spatialCalibration.productionCalibrators
+        }
+      : null,
     folds
   };
 }
@@ -5312,6 +5601,8 @@ module.exports = {
   cliResultSummary,
   createArtifactSchema,
   createTrainingSnapshot,
+  crossFitSpatialCalibrators,
+  evaluateCachedSpatialRows,
   evaluateObserverHoldout,
   evaluateReleaseQuality,
   evaluateSpatialHoldout,
