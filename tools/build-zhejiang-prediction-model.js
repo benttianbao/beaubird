@@ -41,6 +41,12 @@ const {
   resolvePriorStrength
 } = require("../server/prediction/model");
 const { analyzeTaxonDetections } = require("../server/prediction/vagrant-events");
+const {
+  adminCapForTaxon,
+  buildAdminExposureCapCandidates,
+  capEffectiveEvidence,
+  verifySpatialSplitManifest
+} = require("../server/prediction/spatial-transfer");
 
 const PROBABILITY_DEFINITION =
   "P(某鸟在相似日期和地点的一份典型完整 BirdReport 清单中被记录到)，不是生态学绝对存在概率。";
@@ -94,6 +100,7 @@ const DEFAULT_OPTIONS = Object.freeze({
   outerCalibrationContextSampleModulo: 10,
   forwardTopK: 100,
   reverseTopK: 300,
+  materializationProfile: "full",
   bandwidthCandidates: [7, 14, 21, 28],
   priorStrengthMultipliers: [0.5, 1, 2],
   qualityGate: PRODUCTION_QUALITY_GATE,
@@ -189,6 +196,7 @@ function validateBuildSafetyOptions(options) {
     "minimumCoordinateCoverage",
     "minimumDateCoverage",
     "forwardTopK",
+    "reverseTopK",
     "vagrantEventGapDays",
     "vagrantDominantEventShare",
     "vagrantEventWeightCap",
@@ -233,6 +241,8 @@ function validateBuildSafetyOptions(options) {
   atLeast("minimumCoordinateCoverage", options.minimumCoordinateCoverage, DEFAULT_OPTIONS.minimumCoordinateCoverage);
   atLeast("minimumDateCoverage", options.minimumDateCoverage, DEFAULT_OPTIONS.minimumDateCoverage);
   atLeast("forwardTopK", options.forwardTopK, DEFAULT_OPTIONS.forwardTopK);
+  atLeast("reverseTopK", options.reverseTopK, DEFAULT_OPTIONS.reverseTopK);
+  if (options.materializationProfile !== "full") failures.push("materializationProfile");
   if (options.includeFlaggedCleanReports !== true) failures.push("includeFlaggedCleanReports");
   if (Number(options.vagrantEventGapDays) !== DEFAULT_OPTIONS.vagrantEventGapDays) failures.push("vagrantEventGapDays");
   if (Number(options.vagrantDominantEventShare) !== DEFAULT_OPTIONS.vagrantDominantEventShare) failures.push("vagrantDominantEventShare");
@@ -2040,6 +2050,12 @@ function prepareHoldoutTables(artifact) {
     CREATE TEMP TABLE IF NOT EXISTS evaluation_excluded_r6 (
       unit_id TEXT PRIMARY KEY
     ) WITHOUT ROWID;
+    CREATE TEMP TABLE IF NOT EXISTS evaluation_reserved_r6 (
+      unit_id TEXT PRIMARY KEY
+    ) WITHOUT ROWID;
+    CREATE TEMP TABLE IF NOT EXISTS evaluation_validation_r6 (
+      unit_id TEXT PRIMARY KEY
+    ) WITHOUT ROWID;
     CREATE TEMP TABLE IF NOT EXISTS evaluation_holdout_observers (
       observer_hash TEXT PRIMARY KEY
     ) WITHOUT ROWID;
@@ -2058,6 +2074,8 @@ function resetHoldoutTables(artifact) {
     DELETE FROM evaluation_validation_reports;
     DELETE FROM evaluation_needed_units;
     DELETE FROM evaluation_excluded_r6;
+    DELETE FROM evaluation_reserved_r6;
+    DELETE FROM evaluation_validation_r6;
     DELETE FROM evaluation_holdout_observers;
     DELETE FROM evaluation_group_counts;
   `);
@@ -2122,8 +2140,29 @@ function evaluationProbability({
   supports,
   bandwidthDays,
   options,
-  intervalMode = "none"
+  intervalMode = "none",
+  smoothedCache = null
 }) {
+  const cachedSmooth = (cacheKey, values) => {
+    if (!smoothedCache) return smoothWeekly(values, context.season_week, bandwidthDays);
+    if (!smoothedCache.has(cacheKey)) {
+      smoothedCache.set(cacheKey, smoothWeekly(values, context.season_week, bandwidthDays));
+    }
+    return smoothedCache.get(cacheKey);
+  };
+  const adminExposureCapsByPrevalence = options.novelGridAdminExposureCapsByPrevalence || null;
+  const hasSupportedLocalUnit = ["grid_r6", "grid_r7", "point"].some((level) => {
+    const unitId = context[HOLDOUT_LEVEL_COLUMNS[level]];
+    const support = unitId ? supports.get(unitId) : null;
+    const threshold = options.unitThresholds[level] || { checklists: 1, observers: 1 };
+    return Boolean(
+      support &&
+      support.checklists >= Number(threshold.checklists) &&
+      support.observers >= Number(threshold.observers)
+    );
+  });
+  const applyAdminTransferCaps = Boolean(adminExposureCapsByPrevalence && !hasSupportedLocalUnit);
+  const taxonPrevalenceGroup = prevalenceGroup(taxonPositiveCount);
   let alpha = 1;
   let beta = 1;
   let baselineProbability = null;
@@ -2143,12 +2182,24 @@ function evaluationProbability({
     ) {
       continue;
     }
-    const exposure = smoothWeekly(exposures.get(unitId) || Array(53).fill(0), context.season_week, bandwidthDays);
-    if (exposure <= 0) continue;
-    const detections = Math.min(
-      exposure,
-      smoothWeekly(hits.get(`${unitId}\u0000${taxonId}`) || Array(53).fill(0), context.season_week, bandwidthDays)
+    let exposure = cachedSmooth(
+      `exposure\u0000${unitId}\u0000${context.season_week}\u0000${bandwidthDays}`,
+      exposures.get(unitId) || Array(53).fill(0)
     );
+    let detections = Math.min(
+      exposure,
+      cachedSmooth(
+        `detection\u0000${unitId}\u0000${taxonId}\u0000${context.season_week}\u0000${bandwidthDays}`,
+        hits.get(`${unitId}\u0000${taxonId}`) || Array(53).fill(0)
+      )
+    );
+    if (applyAdminTransferCaps && (level === "city" || level === "district")) {
+      const cap = adminCapForTaxon(adminExposureCapsByPrevalence, taxonPrevalenceGroup, level);
+      const capped = capEffectiveEvidence(exposure, detections, cap);
+      exposure = capped.exposure;
+      detections = capped.detections;
+    }
+    if (exposure <= 0) continue;
     if (level === "province") {
       alpha = 1 + detections;
       beta = 1 + Math.max(0, exposure - detections);
@@ -2247,6 +2298,24 @@ function summarizeCalibrationScopeBins(serialized) {
 
 function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evaluationOptions = {}) {
   const calibrationPoints = new Map();
+  const adminCapCandidates = Array.isArray(evaluationOptions.adminCapCandidates)
+    ? evaluationOptions.adminCapCandidates
+    : [];
+  const adminCapLosses = new Map();
+  const adminCapOptionCache = new Map();
+  const smoothedCache = adminCapCandidates.length ? new Map() : null;
+  const optionsForAdminCapCandidate = (prevalence, candidate) => {
+    const key = `${prevalence}\u0000${candidate.id}`;
+    if (!adminCapOptionCache.has(key)) {
+      adminCapOptionCache.set(key, {
+        ...options,
+        novelGridAdminExposureCapsByPrevalence: {
+          [prevalence]: candidate.caps
+        }
+      });
+    }
+    return adminCapOptionCache.get(key);
+  };
   const contextSampleModulo = Math.max(1, Number(evaluationOptions.contextSampleModulo) || 1);
   const validationRows = artifact
     .prepare(
@@ -2419,13 +2488,49 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
         hits,
         supports,
         bandwidthDays,
-        options
+        options,
+        smoothedCache
       });
       const calibrator = typeof evaluationOptions.calibratorForTaxon === "function"
         ? evaluationOptions.calibratorForTaxon(taxon)
         : null;
       const probability = calibrateProbability(rawScore.probability, calibrator);
       const actualPositive = Math.min(context.exposure, Number(context.hits.get(taxonId)) || 0);
+      if (adminCapCandidates.length) {
+        const group = prevalenceGroup(taxon.positive_count);
+        if (!adminCapLosses.has(group)) adminCapLosses.set(group, new Map());
+        const groupLosses = adminCapLosses.get(group);
+        for (const candidate of adminCapCandidates) {
+          const candidateScore = evaluationProbability({
+            context,
+            taxonId,
+            taxonPositiveCount: taxon.positive_count,
+            exposures,
+            hits,
+            supports,
+            bandwidthDays,
+            options: optionsForAdminCapCandidate(group, candidate),
+            smoothedCache
+          });
+          if (!groupLosses.has(candidate.id)) {
+            groupLosses.set(candidate.id, {
+              id: candidate.id,
+              caps: candidate.caps,
+              modelLoss: 0,
+              baselineLoss: 0,
+              evaluatedWeight: 0
+            });
+          }
+          const loss = groupLosses.get(candidate.id);
+          loss.modelLoss +=
+            actualPositive * (1 - candidateScore.probability) ** 2 +
+            (context.exposure - actualPositive) * candidateScore.probability ** 2;
+          loss.baselineLoss +=
+            actualPositive * (1 - candidateScore.baselineProbability) ** 2 +
+            (context.exposure - actualPositive) * candidateScore.baselineProbability ** 2;
+          loss.evaluatedWeight += context.exposure;
+        }
+      }
       modelLoss +=
         actualPositive * (1 - probability) ** 2 +
         (context.exposure - actualPositive) * probability ** 2;
@@ -2594,6 +2699,28 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
         : null;
     }
   }
+  const adminCapTuning = adminCapCandidates.length
+    ? {
+        objective: "development_oof_raw_brier_by_prevalence",
+        sqlAggregationPolicy: "one_sql_aggregation_per_fold_then_all_candidates_scored_in_memory",
+        candidateCount: adminCapCandidates.length,
+        byPrevalence: Object.fromEntries(
+          [...adminCapLosses].map(([group, candidates]) => [
+            group,
+            [...candidates.values()]
+              .map((candidate) => ({
+                ...candidate,
+                brier: candidate.evaluatedWeight > 0 ? candidate.modelLoss / candidate.evaluatedWeight : null,
+                baselineBrier:
+                  candidate.evaluatedWeight > 0 ? candidate.baselineLoss / candidate.evaluatedWeight : null
+              }))
+              .sort((left, right) =>
+                left.brier - right.brier || left.id.localeCompare(right.id)
+              )
+          ])
+        )
+      }
+    : null;
   return { metrics: {
     brier,
     baselineBrier,
@@ -2618,7 +2745,7 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
     fallbackLevels: Object.fromEntries([...fallbackLevels.entries()].sort()),
     evaluationModel: "hierarchical_spatiotemporal_oof",
     baselineModel: "province_week"
-  }, calibrationPoints };
+  }, calibrationPoints, adminCapTuning };
 }
 
 function evaluatePreparedHoldout(artifact, bandwidthDays, options) {
@@ -2979,6 +3106,54 @@ function fitNestedCalibratorsForCurrentHoldout(artifact, options) {
   }
 }
 
+function aggregateAdminCapTuning(folds) {
+  const totals = new Map();
+  for (const fold of folds) {
+    for (const [group, candidates] of Object.entries(fold.adminCapTuning?.byPrevalence || {})) {
+      if (!totals.has(group)) totals.set(group, new Map());
+      const groupTotals = totals.get(group);
+      for (const candidate of candidates) {
+        if (!groupTotals.has(candidate.id)) {
+          groupTotals.set(candidate.id, {
+            id: candidate.id,
+            caps: candidate.caps,
+            modelLoss: 0,
+            baselineLoss: 0,
+            evaluatedWeight: 0
+          });
+        }
+        const total = groupTotals.get(candidate.id);
+        total.modelLoss += Number(candidate.modelLoss) || 0;
+        total.baselineLoss += Number(candidate.baselineLoss) || 0;
+        total.evaluatedWeight += Number(candidate.evaluatedWeight) || 0;
+      }
+    }
+  }
+  if (!totals.size) return null;
+  const byPrevalence = {};
+  const selectedMatrix = {};
+  for (const [group, candidates] of totals) {
+    const ranked = [...candidates.values()]
+      .map((candidate) => ({
+        ...candidate,
+        brier: candidate.evaluatedWeight > 0 ? candidate.modelLoss / candidate.evaluatedWeight : null,
+        baselineBrier:
+          candidate.evaluatedWeight > 0 ? candidate.baselineLoss / candidate.evaluatedWeight : null
+      }))
+      .filter((candidate) => Number.isFinite(candidate.brier))
+      .sort((left, right) => left.brier - right.brier || left.id.localeCompare(right.id));
+    byPrevalence[group] = ranked;
+    if (ranked[0]) selectedMatrix[group] = ranked[0].caps;
+  }
+  return {
+    status: "development_candidate_selected_not_release_validated",
+    objective: "micro_weighted_oof_raw_brier_within_prevalence_group",
+    sqlAggregationPolicy: "one_sql_aggregation_per_fold_then_all_candidates_scored_in_memory",
+    selectedMatrix,
+    byPrevalence
+  };
+}
+
 function evaluateSpatialHoldout(artifact, temporal, options) {
   prepareHoldoutTables(artifact);
   const settings = options.holdoutEvaluation;
@@ -2997,24 +3172,58 @@ function evaluateSpatialHoldout(artifact, temporal, options) {
       Number(row.checklist_count) >= Number(settings.spatialMinimumChecklists) &&
       Number(row.observer_count) >= Number(settings.spatialMinimumObservers)
   );
-  const anchors = [];
-  for (const candidate of [...candidates].sort((left, right) => stableHash(left.unit_id).localeCompare(stableHash(right.unit_id)))) {
-    if (anchors.some((anchor) => areAdjacentGridCells(anchor.unit_id, candidate.unit_id))) continue;
-    anchors.push(candidate);
-    if (anchors.length >= Number(settings.spatialMaximumFolds)) break;
+  const frozenSplit = options.verifiedSpatialSplit || null;
+  const anchors = frozenSplit
+    ? frozenSplit.panel.anchors.map((anchor) => ({
+        ...anchor,
+        unit_id: anchor.unitId,
+        checklist_count: anchor.checklists,
+        observer_count: anchor.observers
+      }))
+    : [];
+  if (!frozenSplit) {
+    for (const candidate of [...candidates].sort((left, right) => stableHash(left.unit_id).localeCompare(stableHash(right.unit_id)))) {
+      if (anchors.some((anchor) => areAdjacentGridCells(anchor.unit_id, candidate.unit_id))) continue;
+      anchors.push(candidate);
+      if (anchors.length >= Number(settings.spatialMaximumFolds)) break;
+    }
   }
+  const evaluationFolds = frozenSplit
+    ? frozenSplit.panel.folds.map((fold) => ({
+        foldId: String(fold.foldId),
+        anchorIds: [...fold.anchorIds].sort(),
+        cities: [...(fold.cities || [])].sort()
+      }))
+    : anchors.map((anchor) => ({ foldId: anchor.unit_id, anchorIds: [anchor.unit_id], cities: [] }));
   const insertExcluded = artifact.prepare("INSERT OR IGNORE INTO evaluation_excluded_r6(unit_id) VALUES (?)");
+  const insertReserved = artifact.prepare("INSERT OR IGNORE INTO evaluation_reserved_r6(unit_id) VALUES (?)");
+  const insertValidation = artifact.prepare("INSERT OR IGNORE INTO evaluation_validation_r6(unit_id) VALUES (?)");
+  const adminCapCandidates = frozenSplit?.panelName === "development"
+    ? buildAdminExposureCapCandidates()
+    : [];
   const folds = [];
-  for (const anchor of anchors) {
+  for (const evaluationFold of evaluationFolds) {
     resetHoldoutTables(artifact);
-    const excludedCells = cells.filter((cell) => areAdjacentGridCells(anchor.unit_id, cell.unit_id));
-    for (const cell of excludedCells) insertExcluded.run(cell.unit_id);
-    artifact
-      .prepare(
-        `INSERT INTO evaluation_validation_reports(report_id, evaluation_weight, local_recent)
-         SELECT report_id, weight, is_recent FROM training_reports WHERE grid_r6_unit = ?`
-      )
-      .run(anchor.unit_id);
+    const validationAnchors = anchors.filter((anchor) => evaluationFold.anchorIds.includes(anchor.unit_id));
+    const excludedIds = frozenSplit
+      ? [...new Set(validationAnchors.flatMap((anchor) => anchor.bufferCellIds || [anchor.unit_id]))].sort()
+      : cells
+          .filter((cell) => evaluationFold.anchorIds.some((anchorId) => areAdjacentGridCells(anchorId, cell.unit_id)))
+          .map((cell) => cell.unit_id)
+          .sort();
+    const reservedIds = frozenSplit?.panelName === "development"
+      ? [...new Set(frozenSplit.manifest.sealedRelease.anchors.flatMap((anchor) => anchor.bufferCellIds || []))].sort()
+      : [];
+    for (const unitId of excludedIds) insertExcluded.run(unitId);
+    for (const unitId of reservedIds) insertReserved.run(unitId);
+    for (const unitId of evaluationFold.anchorIds) insertValidation.run(unitId);
+    artifact.exec(`
+      INSERT INTO evaluation_validation_reports(report_id, evaluation_weight, local_recent)
+      SELECT reports.report_id, reports.weight, reports.is_recent
+      FROM training_reports reports
+      JOIN evaluation_validation_r6 validation ON validation.unit_id = reports.grid_r6_unit
+      WHERE reports.is_recent = 1;
+    `);
     artifact.exec(`
       INSERT INTO evaluation_training_reports(report_id, evaluation_weight, local_recent)
       SELECT reports.report_id, reports.weight, reports.is_recent
@@ -3022,6 +3231,9 @@ function evaluateSpatialHoldout(artifact, temporal, options) {
       WHERE reports.grid_r6_unit IS NOT NULL
         AND NOT EXISTS (
            SELECT 1 FROM evaluation_excluded_r6 excluded WHERE excluded.unit_id = reports.grid_r6_unit
+         )
+        AND NOT EXISTS (
+           SELECT 1 FROM evaluation_reserved_r6 reserved WHERE reserved.unit_id = reports.grid_r6_unit
          );
     `);
     const diagnostics = holdoutSelectionDiagnostics(artifact);
@@ -3035,27 +3247,49 @@ function evaluateSpatialHoldout(artifact, temporal, options) {
         )
         .get().count
     ) || 0;
+    const reservedLeakage = Number(
+      artifact
+        .prepare(
+          `SELECT COUNT(*) AS count
+           FROM training_reports reports
+           JOIN evaluation_training_reports selected USING (report_id)
+           JOIN evaluation_reserved_r6 reserved ON reserved.unit_id = reports.grid_r6_unit`
+        )
+        .get().count
+    ) || 0;
+    if (frozenSplit && (!validationAnchors.length || diagnostics.validationReports === 0)) {
+      throw new PredictionBuildError("EMPTY_FROZEN_SPATIAL_FOLD", "冻结空间开发折没有可评估的最近五年清单。", {
+        panel: frozenSplit.panelName,
+        foldId: evaluationFold.foldId,
+        anchorIds: evaluationFold.anchorIds
+      });
+    }
     const nestedCalibration = fitNestedCalibratorsForCurrentHoldout(artifact, options);
     const nestedOptions = {
       ...options,
       priorStrengthsByPrevalence: nestedCalibration.priorStrengthsByPrevalence
     };
-    const rawMetrics = evaluatePreparedHoldoutDetails(
+    const rawDetails = evaluatePreparedHoldoutDetails(
       artifact,
       nestedCalibration.bandwidthDays,
-      nestedOptions
-    ).metrics;
+      nestedOptions,
+      { adminCapCandidates }
+    );
+    const rawMetrics = rawDetails.metrics;
     const metrics = nestedCalibration.hasActiveCalibration
       ? evaluatePreparedHoldoutDetails(artifact, nestedCalibration.bandwidthDays, nestedOptions, {
           calibratorForTaxon: nestedCalibration.calibratorForTaxon
         }).metrics
       : rawMetrics;
     folds.push({
-      foldId: anchor.unit_id,
-      validationR6Units: [anchor.unit_id],
-      excludedR6Units: excludedCells.map((cell) => cell.unit_id).sort(),
-      diagnostics: { ...diagnostics, bufferLeakage },
+      foldId: evaluationFold.foldId,
+      cities: evaluationFold.cities,
+      validationR6Units: evaluationFold.anchorIds,
+      excludedR6Units: excludedIds,
+      reservedR6Units: reservedIds,
+      diagnostics: { ...diagnostics, bufferLeakage, reservedLeakage },
       nestedCalibration: nestedCalibration.summary,
+      adminCapTuning: rawDetails.adminCapTuning || null,
       rawMetrics,
       metrics
     });
@@ -3065,13 +3299,27 @@ function evaluateSpatialHoldout(artifact, temporal, options) {
   const rawMetrics = aggregateHoldoutMetrics(
     folds.map((fold) => ({ ...fold, metrics: fold.rawMetrics }))
   );
+  const adminCapTuning = aggregateAdminCapTuning(folds);
   return {
     status: metrics ? "evaluated" : "unavailable",
-    split: "h3_r6_block_with_one_ring_buffer",
-    candidateBlocks: candidates.length,
+    split: frozenSplit
+      ? `frozen_${frozenSplit.panelName}_h3_r6_block_with_one_ring_buffer`
+      : "h3_r6_block_with_one_ring_buffer",
+    splitManifest: frozenSplit
+      ? {
+          path: frozenSplit.manifestPath,
+          fileSha256: frozenSplit.fileSha256,
+          manifestHash: frozenSplit.manifestHash,
+          sourceSnapshotSha256: frozenSplit.manifest.sourceSnapshotSha256,
+          panel: frozenSplit.panelName,
+          sealedPanelViewed: frozenSplit.panelName === "sealed-release"
+        }
+      : null,
+    candidateBlocks: frozenSplit?.manifest?.candidateSummary?.candidateCount ?? candidates.length,
     foldCount: folds.filter((fold) => fold.metrics).length,
     rawMetrics,
     metrics,
+    adminCapTuning,
     folds
   };
 }
@@ -4473,7 +4721,7 @@ function dropTrainingTables(artifact) {
   `);
 }
 
-function validateArtifact(artifact) {
+function validateArtifact(artifact, options = {}) {
   const integrity = artifact.prepare("PRAGMA integrity_check").get().integrity_check;
   if (integrity !== "ok") {
     throw new PredictionBuildError("ARTIFACT_INTEGRITY_FAILED", `模型 SQLite 完整性检查失败：${integrity}`);
@@ -4481,6 +4729,7 @@ function validateArtifact(artifact) {
   const province = artifact.prepare("SELECT * FROM space_units WHERE id = 'province:zhejiang'").get();
   const taxonCount = Number(artifact.prepare("SELECT COUNT(*) AS count FROM taxa").get().count) || 0;
   const predictionCount = Number(artifact.prepare("SELECT COUNT(*) AS count FROM location_predictions").get().count) || 0;
+  const reverseHotspotCount = Number(artifact.prepare("SELECT COUNT(*) AS count FROM reverse_hotspots").get().count) || 0;
   const temporaryTableCount = Number(
     artifact
       .prepare(
@@ -4493,12 +4742,47 @@ function validateArtifact(artifact) {
       .get().count
   ) || 0;
   const freePages = Number(artifact.prepare("PRAGMA freelist_count").get().freelist_count) || 0;
-  if (!province?.supported || taxonCount === 0 || predictionCount === 0) {
+  if (!province?.supported || taxonCount === 0 || (options.requireOnlineIndexes && predictionCount === 0)) {
     throw new PredictionBuildError("ARTIFACT_EMPTY", "模型制品缺少省级支持、鸟种或正向预测。", {
       provinceSupported: Boolean(province?.supported),
       taxonCount,
       predictionCount
     });
+  }
+  if (options.requireOnlineIndexes) {
+    const supportedUnitCount = Number(
+      artifact.prepare("SELECT COUNT(*) AS count FROM space_units WHERE supported = 1").get().count
+    ) || 0;
+    const forwardBucketCount = Number(
+      artifact.prepare(
+        `SELECT COUNT(*) AS count FROM (
+           SELECT space_unit_id, season_bucket
+           FROM location_predictions
+           WHERE temporal_granularity = 'week'
+           GROUP BY space_unit_id, season_bucket
+         )`
+      ).get().count
+    ) || 0;
+    const publicTaxonCount = Number(
+      artifact.prepare("SELECT COUNT(*) AS count FROM taxa WHERE is_sensitive = 0").get().count
+    ) || 0;
+    const reverseTaxonCount = Number(
+      artifact.prepare("SELECT COUNT(DISTINCT taxon_id) AS count FROM reverse_hotspots").get().count
+    ) || 0;
+    if (
+      forwardBucketCount !== supportedUnitCount * 52 ||
+      reverseHotspotCount === 0 ||
+      reverseTaxonCount !== publicTaxonCount
+    ) {
+      throw new PredictionBuildError("ONLINE_INDEX_INCOMPLETE", "正式制品的正向预测或反向热点索引不完整。", {
+        supportedUnitCount,
+        expectedForwardBucketCount: supportedUnitCount * 52,
+        forwardBucketCount,
+        publicTaxonCount,
+        reverseTaxonCount,
+        reverseHotspotCount
+      });
+    }
   }
   if (temporaryTableCount || freePages) {
     throw new PredictionBuildError("ARTIFACT_NOT_SANITIZED", "模型制品仍含临时训练表或空闲页。", {
@@ -4506,7 +4790,13 @@ function validateArtifact(artifact) {
       freePages
     });
   }
-  return { taxonCount, predictionCount, freePages };
+  return {
+    taxonCount,
+    predictionCount,
+    reverseHotspotCount,
+    freePages,
+    materializationProfile: options.materializationProfile || "full"
+  };
 }
 
 function summarizeCalibrators(calibrators = []) {
@@ -4570,6 +4860,14 @@ async function buildPredictionArtifact(options = {}) {
   const snapshot = resolvedOptions.sourceIsSnapshot
     ? { snapshotPath: resolve(resolvedOptions.sourcePath), sha256: sha256File(resolvedOptions.sourcePath) }
     : await createTrainingSnapshot(resolvedOptions);
+  if (resolvedOptions.spatialSplitManifestPath) {
+    resolvedOptions.verifiedSpatialSplit = verifySpatialSplitManifest({
+      manifestPath: resolvedOptions.spatialSplitManifestPath,
+      sourceSnapshotSha256: snapshot.sha256,
+      panelName: resolvedOptions.spatialEvaluationPanel || "development",
+      sealedPanelConfirmation: resolvedOptions.sealedSpatialPanelConfirmation || null
+    });
+  }
   const source = new DatabaseSync(snapshot.snapshotPath, { readOnly: true });
   source.exec("PRAGMA query_only = ON");
   let artifact = null;
@@ -4691,11 +4989,26 @@ async function buildPredictionArtifact(options = {}) {
       "public_training_filter",
       "完整 normal + (保存有效鸟种数 + outside_count = 申报数) 的 flagged；逐条剔除 is_red_species=1 或 source_outside_type=1"
     );
+    const materializationProfile = resolvedOptions.materializationProfile || "full";
     manifestSet(artifact, "forward_top_k", resolvedOptions.forwardTopK);
-    emitProgress(resolvedOptions, "forward_materialization_started");
-    const forward = materializeLocationPredictions(artifact, resolvedOptions);
-    emitProgress(resolvedOptions, "reverse_index_started");
-    const reverse = buildReverseHotspots(artifact, resolvedOptions);
+    manifestSet(artifact, "reverse_top_k", resolvedOptions.reverseTopK);
+    manifestSet(artifact, "materialization_profile", materializationProfile);
+    manifestSet(artifact, "online_indexes_complete", materializationProfile === "full");
+    let forward;
+    let reverse;
+    if (materializationProfile === "full") {
+      emitProgress(resolvedOptions, "forward_materialization_started");
+      forward = materializeLocationPredictions(artifact, resolvedOptions);
+      emitProgress(resolvedOptions, "reverse_index_started");
+      reverse = buildReverseHotspots(artifact, resolvedOptions);
+    } else {
+      forward = { skipped: true, reason: "development_evaluation_only" };
+      reverse = { skipped: true, reason: "development_evaluation_only" };
+      artifact.exec("DROP TABLE reverse_candidates");
+      emitProgress(resolvedOptions, "online_materialization_skipped", {
+        reason: "development_evaluation_only"
+      });
+    }
     const occurrenceCandidateDetails = artifact.prepare(`
       SELECT taxon_id, common_name, scientific_name, positive_count, observer_count,
              raw_positive_reports, effective_positive_units, event_count,
@@ -4721,7 +5034,10 @@ async function buildPredictionArtifact(options = {}) {
     // observer hashes and point-level training rows cannot survive in freelist pages.
     artifact.exec("VACUUM");
     artifact.exec("PRAGMA optimize");
-    const validation = validateArtifact(artifact);
+    const validation = validateArtifact(artifact, {
+      requireOnlineIndexes: materializationProfile === "full",
+      materializationProfile
+    });
     artifact.close();
     artifact = null;
     source.close();
@@ -4876,7 +5192,15 @@ function parseCliArguments(argv) {
     else if (argument === "--pointer") options.pointerPath = value();
     else if (argument === "--no-publish") options.pointerPath = null;
     else if (argument === "--model-version") options.modelVersion = value();
+    else if (argument === "--spatial-split-manifest") options.spatialSplitManifestPath = value();
+    else if (argument === "--spatial-panel") options.spatialEvaluationPanel = value();
+    else if (argument === "--confirm-open-sealed-spatial-panel") options.sealedSpatialPanelConfirmation = value();
     else if (argument === "--forward-top-k") options.forwardTopK = Number(value());
+    else if (argument === "--evaluation-only") {
+      options.testOnly = true;
+      options.materializationProfile = "evaluation-only";
+      options.pointerPath = null;
+    }
     else if (argument === "--confirm-coordinate-system") {
       const coordinateSystem = String(value()).toLowerCase();
       if (coordinateSystem !== "bd09" && coordinateSystem !== "bd-09") {
@@ -4897,6 +5221,8 @@ function usage() {
     --source data/birdreport-zhejiang.sqlite \\
     --snapshot data/prediction-snapshots/zhejiang-YYYYMMDD.sqlite \\
     --output data/prediction-models/zhejiang-YYYYMMDD.sqlite \\
+    --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json \\
+    --spatial-panel development \\
     --no-publish \\
     --confirm-coordinate-system bd09
 

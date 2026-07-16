@@ -42,6 +42,47 @@
 
 点位漂移是固定快照上的目标无关坐标质量过滤，不使用鸟种标签，但没有在每个留出折内重新拟合。报告中以 `fixed_snapshot_coordinate_qc_target_independent_not_refit_per_fold` 明示该限制。
 
+## 2026-07-16 诊断回测
+
+修正空间/观察者外层折的嵌套校准后，校准点统一来自外层训练内部的分层时空 OOF 分数；不再用“省级×周”分数拟合后错误应用到区县、网格或点位分数。每个校准作用域另用最后一个内层年份做保护门验证，Brier 相对恶化超过 1% 或 ECE 恶化超过 0.01 时退回恒等映射。
+
+- 诊断模型：`data/prediction-models/zhejiang-v1-20260715-calibration-diagnostic.sqlite`
+- 模型 SHA-256：`d9e6f4070ea85c48cad1a402ee13774d09d943c805cb4096ed8ded88be809471`
+- 报告 SHA-256：`b4d93310f90bd781bdc7ffabcbf448f9d22a7a3d2f93d9479baef136bca7dbf9`
+- 构建耗时：7,939.271 秒
+- `quick_check=ok`、freelist 为 0；公开制品不含训练报告、观察者哈希、训练检出或精确事件网格表
+- 观察者 ID 覆盖率修正为 100%，不再因去重前计数而超过 100%
+
+| 留出 | Brier Skill | ECE | Recall@20 相对基线 | 最大逐鸟 ECE | 结论 |
+|---|---:|---:|---:|---:|---|
+| 时间总体 | +10.78% | 0.0021 | +5.41pp | 0.0461 | 通过 |
+| 2026 最终时间留出 | +12.78% | 0.0021 | +6.32pp | 0.0461 | 通过 |
+| 空间 raw | -1.13% | 0.0092 | +1.00pp | 0.2031 | 未通过 |
+| 空间 guard 校准后 | -0.17% | 0.0085 | +0.86pp | 0.2112 | 未通过 |
+| 观察者 raw | +16.87% | 0.0018 | +8.84pp | 0.0253 | 通过 |
+| 观察者 guard 校准后 | +16.08% | 0.0008 | +8.67pp | 0.0304 | 通过 |
+
+诊断制品仍为 no-go，仅剩 `spatial.brierSkill` 与 `spatial.species_calibration.maximumEce` 两个失败项。旧三块空间折全部回退到区县，说明剩余问题集中在未知网格的行政区统计迁移与空间专用逐鸟校准，不需要继续引入观察者权重复杂度。
+
+旧三块已经查看结果，只能继续作为开发诊断，不能再声称是独立发布测试。新的目标无关空间清单已在查看新结果前冻结：
+
+- 清单：`docs/zhejiang-v1-20260715-spatial-splits.json`
+- 文件 SHA-256：`7deafec542c95b1463c92fe6948831247666a22923921b22890bb24adac9accc`
+- manifest 哈希：`400bcc27bde3bd30f03ef022b9f76175cd6093ea5afc98fcbfccb79bde234e4d`
+- development：12 个锚点，覆盖 11 市，包含已查看的海盐、南湖、吴兴三块
+- sealed release：11 个新锚点，覆盖 11 市，固定 5 折
+- development 与 sealed release 的所有 H3 r6 一环缓冲全局无重叠
+
+下一步只在 development 面板选择 novel-grid 的市/区县可转移有效暴露上限和空间专用校准；参数与代码提交冻结后，才允许首次打开 sealed release 五折。sealed 结果一旦查看，不得换点或继续把它用于调参。
+
+开发调参的计算约束固定如下：
+
+- 每个空间折先从 SQLite 聚合一次清单暴露、鸟种命中和支持度；市级 × 区县级的 25 组暴露上限候选复用同一份聚合，在内存中同时评分，禁止为每个参数组合重复执行聚合 SQL。
+- 性能优化只改变计算路径，不减少时间、空间或观察者验证折，不抽掉鸟种，不放宽 Brier、ECE、Recall@20 或 NDCG@10 门槛。
+- development 阶段始终把 sealed release 的 11 个锚点及其一环缓冲从训练、校准和验证中排除；sealed 面板必须用冻结清单的 manifest 哈希显式解封，首次查看后不得再据其结果调参。
+- development 调参制品可使用 `evaluation-only`，跳过正向预测表和反向热点索引的物化；它强制标记为 `testOnly`、不能发布，也不能被线上模型当作完整制品加载。
+- 参数冻结且 sealed release 五折通过后，最终正式构建必须使用 `full` 物化配置，覆盖每个受支持空间单元的 52 个周桶，并为全部公共鸟种生成反向热点；缺任何正向周桶或反向鸟种都会以 `ONLINE_INDEX_INCOMPLETE` 阻止制品生成。
+
 ## 构建与测试
 
 复用已固定快照构建，不连接网站、不切换线上模型指针：
@@ -53,6 +94,9 @@ node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js `
   --snapshot data\prediction-snapshots\zhejiang-v1-20260715.sqlite `
   --output data\prediction-models\zhejiang-v1-20260715.sqlite `
   --model-version zhejiang-v1-20260715 `
+  --spatial-split-manifest docs\zhejiang-v1-20260715-spatial-splits.json `
+  --spatial-panel development `
+  --evaluation-only `
   --no-publish `
   --confirm-coordinate-system bd09
 ```
@@ -71,6 +115,8 @@ node --test tools\test-vagrant-events.js tools\test-zhejiang-prediction-model.js
 - `zhejiang-v1-20260715.sqlite.report.json.sha256`
 
 公共模型会在 `VACUUM` 前删除报告 ID、观察者哈希、训练明细和精确事件网格表；运行制品只保留聚合统计、校准参数与正反向索引。
+
+上面的命令是 development 调参命令，因此会跳过线上索引物化。正式发布构建不得带 `--evaluation-only`，并继续使用生产默认 `forwardTopK=100`、`reverseTopK=300`；构建器会额外验证所有受支持空间单元均有完整 52 周正向桶、全部公共鸟种均进入反向热点索引。
 
 ## 天气与 challenger
 
