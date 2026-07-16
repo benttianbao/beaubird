@@ -335,6 +335,68 @@ test("spatial calibration reuses cached rows, cross-fits five folds, and keeps i
   assert.deepEqual(folds, before);
 });
 
+test("runtime applies frozen transfer caps and spatial calibration only to novel-grid fallback", () => {
+  const database = new DatabaseSync(":memory:");
+  createArtifactSchema(database);
+  const setManifest = database.prepare("INSERT INTO manifest(key, value) VALUES (?, ?)");
+  for (const [key, value] of Object.entries({
+    schema_version: "2",
+    quality_gate: { passed: true, internalBuild: true },
+    test_only: false,
+    temporal_bandwidth_days: 14,
+    prior_strengths: { city: 24, district: 18, grid_r6: 14, grid_r7: 10, point: 8 },
+    novel_grid_admin_exposure_caps_by_prevalence: {
+      species_200_plus: { city: 100, district: 10 }
+    },
+    novel_grid_spatial_calibration_enabled: true,
+    novel_grid_spatial_calibrators: [
+      { scope: "species:common-a", fit: { a: 1, b: 1, c: -1, fitted: true } }
+    ]
+  })) setManifest.run(key, JSON.stringify(value));
+  database.prepare(`
+    INSERT INTO taxa
+      (taxon_id, common_name, positive_count, observer_count, calibration_scope)
+    VALUES ('common-a', '测试鸟', 300, 30, 'none')
+  `).run();
+  const insertUnit = database.prepare(`
+    INSERT INTO space_units
+      (id, level, code, name, parent_id, checklist_count, observer_count, support_years_json, supported)
+    VALUES (?, ?, ?, ?, ?, ?, ?, '[2025]', 1)
+  `);
+  insertUnit.run("province:zhejiang", "province", "zhejiang", "浙江省", null, 1000, 30);
+  insertUnit.run("city:test", "city", "test", "测试市", "province:zhejiang", 1000, 30);
+  insertUnit.run("district:test", "district", "test", "测试区", "city:test", 1000, 30);
+  insertUnit.run("grid_r6:test", "grid_r6", "test", "测试网格", "district:test", 50, 12);
+  const insertExposure = database.prepare(`
+    INSERT INTO checklist_exposure
+      (space_unit_id, season_week, effective_checklists, raw_checklists, observer_count, support_years_json)
+    VALUES (?, 26, ?, ?, 20, '[2025]')
+  `);
+  const insertDetection = database.prepare(`
+    INSERT INTO taxon_detection
+      (space_unit_id, season_week, taxon_id, effective_detections, raw_detections, observer_count, support_years_json)
+    VALUES (?, 26, 'common-a', ?, ?, 10, '[2025]')
+  `);
+  for (const [unitId, exposure, detections] of [
+    ["province:zhejiang", 1000, 100],
+    ["city:test", 1000, 800],
+    ["district:test", 1000, 800],
+    ["grid_r6:test", 50, 20]
+  ]) {
+    insertExposure.run(unitId, exposure, exposure);
+    insertDetection.run(unitId, detections, detections);
+  }
+  const model = new PredictionModel({ database, builderEvaluation: true });
+  const fallback = model.scoreUnitTaxonAtWeek("district:test", "common-a", 26);
+  const local = model.scoreUnitTaxonAtWeek("grid_r6:test", "common-a", 26);
+  assert.equal(fallback.effectiveChecklists, 10);
+  assert.ok(fallback.probability < fallback.rawProbability);
+  assert.equal(local.effectiveChecklists, 50);
+  assert.equal(local.probability, local.rawProbability);
+  model.close();
+  database.close();
+});
+
 test("temporal folds recompute recency weights and recent windows without decaying validation", () => {
   const database = new DatabaseSync(":memory:");
   createArtifactSchema(database);

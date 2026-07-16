@@ -49,6 +49,7 @@ const {
   verifySpatialSplitManifest
 } = require("../server/prediction/spatial-transfer");
 const { scoreAdminCapTasks } = require("../server/prediction/spatial-transfer-worker");
+const { loadSpatialParameterArtifact } = require("../server/prediction/spatial-parameters");
 
 const PROBABILITY_DEFINITION =
   "P(某鸟在相似日期和地点的一份典型完整 BirdReport 清单中被记录到)，不是生态学绝对存在概率。";
@@ -3559,13 +3560,39 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
     });
   }
   resetHoldoutTables(artifact);
-  const spatialCalibration = frozenSplit?.panelName === "development"
+  const developmentSpatialCalibration = frozenSplit?.panelName === "development"
     ? crossFitSpatialCalibrators(folds)
     : null;
-  if (spatialCalibration) {
+  let spatialCalibration = null;
+  if (developmentSpatialCalibration) {
     for (let index = 0; index < folds.length; index += 1) {
-      folds[index].metrics = spatialCalibration.foldMetrics[index];
+      folds[index].metrics = developmentSpatialCalibration.foldMetrics[index];
     }
+    spatialCalibration = {
+      ...developmentSpatialCalibration.summary,
+      productionCalibrators: developmentSpatialCalibration.productionCalibrators
+    };
+  } else if (frozenSplit?.panelName === "sealed-release") {
+    const parameters = options.verifiedSpatialParameters;
+    const calibratorMap = new Map(
+      parameters.artifact.calibrators.map((calibrator) => [calibrator.scope, calibrator.fit])
+    );
+    for (const fold of folds) {
+      fold.metrics = evaluateCachedSpatialRows(
+        fold.scoreRows,
+        (row) => calibratorMap.get(spatialCalibrationScope(row)) || null
+      );
+    }
+    spatialCalibration = {
+      strategy: "frozen_development_parameters_applied_once_to_sealed_release",
+      fittedOnPanel: "development",
+      evaluatedOnPanel: "sealed-release",
+      parameterPath: parameters.path,
+      parameterFileSha256: parameters.fileSha256,
+      developmentReportSha256: parameters.artifact.developmentReportSha256,
+      calibratorCount: parameters.artifact.calibrators.length,
+      productionCalibrators: parameters.artifact.calibrators
+    };
   }
   const metrics = aggregateHoldoutMetrics(folds);
   const rawMetrics = aggregateHoldoutMetrics(
@@ -3593,12 +3620,7 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
     rawMetrics,
     metrics,
     adminCapTuning,
-    spatialCalibration: spatialCalibration
-      ? {
-          ...spatialCalibration.summary,
-          productionCalibrators: spatialCalibration.productionCalibrators
-        }
-      : null,
+    spatialCalibration,
     folds
   };
 }
@@ -5147,6 +5169,38 @@ async function buildPredictionArtifact(options = {}) {
       sealedPanelConfirmation: resolvedOptions.sealedSpatialPanelConfirmation || null
     });
   }
+  if (resolvedOptions.spatialParametersPath) {
+    if (!resolvedOptions.verifiedSpatialSplit) {
+      throw new PredictionBuildError(
+        "SPATIAL_SPLIT_REQUIRED",
+        "加载冻结空间参数时必须同时提供冻结 spatial split manifest。"
+      );
+    }
+    if (resolvedOptions.verifiedSpatialSplit.panelName === "development") {
+      throw new PredictionBuildError(
+        "DEVELOPMENT_PARAMETER_LEAKAGE",
+        "development 面板禁止加载已拟合空间参数；必须继续使用交叉拟合。"
+      );
+    }
+    resolvedOptions.verifiedSpatialParameters = loadSpatialParameterArtifact(
+      resolvedOptions.spatialParametersPath,
+      {
+        sourceSnapshotSha256: snapshot.sha256,
+        spatialSplitManifestHash: resolvedOptions.verifiedSpatialSplit.manifestHash
+      }
+    );
+    resolvedOptions.novelGridAdminExposureCapsByPrevalence =
+      resolvedOptions.verifiedSpatialParameters.artifact.adminExposureCapsByPrevalence;
+  }
+  if (
+    resolvedOptions.verifiedSpatialSplit?.panelName === "sealed-release" &&
+    !resolvedOptions.verifiedSpatialParameters
+  ) {
+    throw new PredictionBuildError(
+      "SPATIAL_PARAMETERS_REQUIRED",
+      "sealed release 五折必须加载已经通过 development 门槛并冻结的空间参数制品。"
+    );
+  }
   const source = new DatabaseSync(snapshot.snapshotPath, { readOnly: true });
   source.exec("PRAGMA query_only = ON");
   let artifact = null;
@@ -5255,6 +5309,35 @@ async function buildPredictionArtifact(options = {}) {
     manifestSet(artifact, "test_only", Boolean(resolvedOptions.testOnly));
     manifestSet(artifact, "evaluation_workers", resolvedOptions.workers);
     manifestSet(artifact, "worker_task_chunk_records", resolvedOptions.workerTaskChunkRecords);
+    manifestSet(
+      artifact,
+      "novel_grid_admin_exposure_caps_by_prevalence",
+      resolvedOptions.novelGridAdminExposureCapsByPrevalence || null
+    );
+    const novelGridSpatialCalibrators =
+      resolvedOptions.verifiedSpatialParameters?.artifact?.calibrators ||
+      spatial?.spatialCalibration?.productionCalibrators ||
+      [];
+    manifestSet(
+      artifact,
+      "novel_grid_spatial_calibration_enabled",
+      novelGridSpatialCalibrators.length > 0
+    );
+    manifestSet(artifact, "novel_grid_spatial_calibrators", novelGridSpatialCalibrators);
+    manifestSet(
+      artifact,
+      "novel_grid_spatial_parameter_source",
+      resolvedOptions.verifiedSpatialParameters
+        ? {
+            path: resolvedOptions.verifiedSpatialParameters.path,
+            fileSha256: resolvedOptions.verifiedSpatialParameters.fileSha256,
+            developmentReportSha256:
+              resolvedOptions.verifiedSpatialParameters.artifact.developmentReportSha256,
+            spatialSplitManifestHash:
+              resolvedOptions.verifiedSpatialParameters.artifact.spatialSplitManifestHash
+          }
+        : null
+    );
     manifestSet(artifact, "prior_strengths", resolvedOptions.priorStrengths);
     manifestSet(
       artifact,
@@ -5477,6 +5560,7 @@ function parseCliArguments(argv) {
     else if (argument === "--model-version") options.modelVersion = value();
     else if (argument === "--spatial-split-manifest") options.spatialSplitManifestPath = value();
     else if (argument === "--spatial-panel") options.spatialEvaluationPanel = value();
+    else if (argument === "--spatial-parameters") options.spatialParametersPath = value();
     else if (argument === "--confirm-open-sealed-spatial-panel") options.sealedSpatialPanelConfirmation = value();
     else if (argument === "--forward-top-k") options.forwardTopK = Number(value());
     else if (argument === "--workers") options.workers = Number(value());

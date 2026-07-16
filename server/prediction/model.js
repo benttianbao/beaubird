@@ -15,6 +15,7 @@ const {
   confidenceLevel,
   probabilityLevel
 } = require("./math");
+const { adminCapForTaxon, capEffectiveEvidence } = require("./spatial-transfer");
 class SensitivePredictionModel {
   constructor() {
     throw new Error("当前离线模型不启用独立敏感鸟制品；所有有效鸟种统一来自公共训练快照。");
@@ -48,6 +49,15 @@ function prevalenceGroup(positiveCount) {
   if (count >= 80) return "group_80_199";
   if (count >= 30) return "group_30_79";
   return "rare_under_30";
+}
+
+function calibrationGroup(positiveCount) {
+  const count = Number(positiveCount) || 0;
+  if (count < 30) return null;
+  if (count < 60) return "positive_30_59";
+  if (count < 120) return "positive_60_119";
+  if (count < 200) return "positive_120_199";
+  return null;
 }
 
 function resolvePriorStrength(flatStrengths, strengthsByPrevalence, level, positiveCount) {
@@ -235,6 +245,8 @@ class PredictionModel {
     this.detectionCache = new Map();
     this.taxonCache = new Map();
     this.calibrationCache = new Map();
+    this.spatialCalibrationCache = new Map();
+    this.spatialCalibrationEnabled = false;
     this.locationPredictionsHaveResolvedUnit = false;
     this.sensitiveModel = null;
     try {
@@ -309,6 +321,27 @@ class PredictionModel {
           a: row.a,
           b: row.b,
           c: row.c
+        });
+      }
+      this.spatialCalibrationEnabled = this.manifestMap.get("novel_grid_spatial_calibration_enabled") === true;
+      const spatialCalibrators = this.manifestMap.get("novel_grid_spatial_calibrators") || [];
+      if (!Array.isArray(spatialCalibrators)) {
+        throw new Error("manifest.novel_grid_spatial_calibrators 必须是数组");
+      }
+      for (const calibrator of spatialCalibrators) {
+        const scope = String(calibrator?.scope || "");
+        const fit = calibrator?.fit || {};
+        if (
+          !/^(species:[^:]+|group:positive_(30_59|60_119|120_199))$/.test(scope) ||
+          ![fit.a, fit.b, fit.c].every((value) => Number.isFinite(Number(value))) ||
+          this.spatialCalibrationCache.has(scope)
+        ) {
+          throw new Error(`无效或重复的 novel-grid 空间校准参数：${scope || "<empty>"}`);
+        }
+        this.spatialCalibrationCache.set(scope, {
+          a: Number(fit.a),
+          b: Number(fit.b),
+          c: Number(fit.c)
         });
       }
       this.locationPredictionsHaveResolvedUnit = this.database
@@ -557,6 +590,14 @@ class PredictionModel {
     return null;
   }
 
+  #spatialCalibratorFor(taxon) {
+    if (Number(taxon.positiveCount) >= 200) {
+      return this.spatialCalibrationCache.get(`species:${taxon.taxonId}`) || null;
+    }
+    const group = calibrationGroup(taxon.positiveCount);
+    return group ? this.spatialCalibrationCache.get(`group:${group}`) || null : null;
+  }
+
   scoreUnitTaxonAtDay(unitId, taxonId, day) {
     const taxon = this.#getTaxon(taxonId);
     if (!taxon) {
@@ -572,15 +613,32 @@ class PredictionModel {
       ...(this.manifestMap.get("prior_strengths") || {})
     };
     const priorStrengthsByPrevalence = this.manifestMap.get("prior_strengths_by_prevalence") || {};
+    const adminExposureCapsByPrevalence =
+      this.manifestMap.get("novel_grid_admin_exposure_caps_by_prevalence") || null;
+    const hasSupportedLocalUnit = fullPath.some(
+      (unit) => unit.supported && ["grid_r6", "grid_r7", "point"].includes(unit.level)
+    );
+    const applyNovelGridTransfer = Boolean(adminExposureCapsByPrevalence && !hasSupportedLocalUnit);
+    const taxonPrevalenceGroup = prevalenceGroup(taxon.positiveCount);
     let alpha = 1;
     let beta = 1;
     let effective = 0;
     let deepest = path[0];
     let detectionSupport = { observers: 0, years: [] };
     for (const unit of path) {
-      const exposure = this.#smoothed(this.#readExposure(unit.id), day, "effective");
+      let exposure = this.#smoothed(this.#readExposure(unit.id), day, "effective");
       const detectionValues = this.#readDetection(unit.id, taxonId);
-      const detections = Math.min(exposure, this.#smoothed(detectionValues, day, "effective"));
+      let detections = Math.min(exposure, this.#smoothed(detectionValues, day, "effective"));
+      if (applyNovelGridTransfer && (unit.level === "city" || unit.level === "district")) {
+        const cap = adminCapForTaxon(
+          adminExposureCapsByPrevalence,
+          taxonPrevalenceGroup,
+          unit.level
+        );
+        const capped = capEffectiveEvidence(exposure, detections, cap);
+        exposure = capped.exposure;
+        detections = capped.detections;
+      }
       if (unit.level === "province") {
         alpha = 1 + detections;
         beta = 1 + Math.max(0, exposure - detections);
@@ -605,7 +663,9 @@ class PredictionModel {
     }
     const rawProbability = alpha / (alpha + beta);
     const rawInterval = betaInterval(alpha, beta, 0.9);
-    const calibrator = this.#calibratorFor(taxon);
+    const calibrator = applyNovelGridTransfer && this.spatialCalibrationEnabled
+      ? this.#spatialCalibratorFor(taxon)
+      : this.#calibratorFor(taxon);
     const probability = calibrateProbability(rawProbability, calibrator);
     const lower = calibrateProbability(rawInterval.lower, calibrator);
     const upper = calibrateProbability(rawInterval.upper, calibrator);
