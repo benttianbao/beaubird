@@ -47,6 +47,7 @@ const {
   capEffectiveEvidence,
   verifySpatialSplitManifest
 } = require("../server/prediction/spatial-transfer");
+const { scoreAdminCapTasks } = require("../server/prediction/spatial-transfer-worker");
 
 const PROBABILITY_DEFINITION =
   "P(某鸟在相似日期和地点的一份典型完整 BirdReport 清单中被记录到)，不是生态学绝对存在概率。";
@@ -98,6 +99,8 @@ const DEFAULT_OPTIONS = Object.freeze({
   priorTuningContextSampleModulo: 10,
   outerPriorTuningContextSampleModulo: 20,
   outerCalibrationContextSampleModulo: 10,
+  workers: 1,
+  workerTaskChunkRecords: 4096,
   forwardTopK: 100,
   reverseTopK: 300,
   materializationProfile: "full",
@@ -201,12 +204,22 @@ function validateBuildSafetyOptions(options) {
     "vagrantDominantEventShare",
     "vagrantEventWeightCap",
     "priorTuningContextSampleModulo",
-    "outerCalibrationContextSampleModulo"
+    "outerCalibrationContextSampleModulo",
+    "workers",
+    "workerTaskChunkRecords"
   ]) finite(key, options[key]);
   if (
     !Number.isInteger(Number(options.outerCalibrationContextSampleModulo)) ||
     Number(options.outerCalibrationContextSampleModulo) < 1
   ) failures.push("outerCalibrationContextSampleModulo.invalid");
+  if (!Number.isInteger(Number(options.workers)) || Number(options.workers) < 1 || Number(options.workers) > 32) {
+    failures.push("workers.invalid");
+  }
+  if (
+    !Number.isInteger(Number(options.workerTaskChunkRecords)) ||
+    Number(options.workerTaskChunkRecords) < 128 ||
+    Number(options.workerTaskChunkRecords) > 65_536
+  ) failures.push("workerTaskChunkRecords.invalid");
   for (const [key, value] of Object.entries(options.qualityGate || {})) {
     if (!key.startsWith("require")) finite(`qualityGate.${key}`, value);
   }
@@ -2141,7 +2154,8 @@ function evaluationProbability({
   bandwidthDays,
   options,
   intervalMode = "none",
-  smoothedCache = null
+  smoothedCache = null,
+  captureAdminEvidence = false
 }) {
   const cachedSmooth = (cacheKey, values) => {
     if (!smoothedCache) return smoothWeekly(values, context.season_week, bandwidthDays);
@@ -2163,6 +2177,13 @@ function evaluationProbability({
   });
   const applyAdminTransferCaps = Boolean(adminExposureCapsByPrevalence && !hasSupportedLocalUnit);
   const taxonPrevalenceGroup = prevalenceGroup(taxonPositiveCount);
+  const adminEvidence = captureAdminEvidence
+    ? {
+        province: { exposure: 0, detections: 0, strength: 0 },
+        city: { exposure: 0, detections: 0, strength: 0 },
+        district: { exposure: 0, detections: 0, strength: 0 }
+      }
+    : null;
   let alpha = 1;
   let beta = 1;
   let baselineProbability = null;
@@ -2193,6 +2214,20 @@ function evaluationProbability({
         hits.get(`${unitId}\u0000${taxonId}`) || Array(53).fill(0)
       )
     );
+    if (adminEvidence && (level === "province" || level === "city" || level === "district")) {
+      adminEvidence[level] = {
+        exposure,
+        detections,
+        strength: level === "province"
+          ? 0
+          : resolvePriorStrength(
+              options.priorStrengths,
+              options.priorStrengthsByPrevalence,
+              level,
+              taxonPositiveCount
+            )
+      };
+    }
     if (applyAdminTransferCaps && (level === "city" || level === "district")) {
       const cap = adminCapForTaxon(adminExposureCapsByPrevalence, taxonPrevalenceGroup, level);
       const capped = capEffectiveEvidence(exposure, detections, cap);
@@ -2246,7 +2281,9 @@ function evaluationProbability({
     baselineIntervalLower,
     baselineIntervalUpper,
     deepestLevel,
-    deepestUnitId
+    deepestUnitId,
+    hasSupportedLocalUnit,
+    adminEvidence
   };
 }
 
@@ -2298,24 +2335,8 @@ function summarizeCalibrationScopeBins(serialized) {
 
 function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evaluationOptions = {}) {
   const calibrationPoints = new Map();
-  const adminCapCandidates = Array.isArray(evaluationOptions.adminCapCandidates)
-    ? evaluationOptions.adminCapCandidates
-    : [];
-  const adminCapLosses = new Map();
-  const adminCapOptionCache = new Map();
-  const smoothedCache = adminCapCandidates.length ? new Map() : null;
-  const optionsForAdminCapCandidate = (prevalence, candidate) => {
-    const key = `${prevalence}\u0000${candidate.id}`;
-    if (!adminCapOptionCache.has(key)) {
-      adminCapOptionCache.set(key, {
-        ...options,
-        novelGridAdminExposureCapsByPrevalence: {
-          [prevalence]: candidate.caps
-        }
-      });
-    }
-    return adminCapOptionCache.get(key);
-  };
+  const collectAdminCapTasks = Boolean(evaluationOptions.collectAdminCapTasks);
+  const adminCapTasksByPrevalence = new Map();
   const contextSampleModulo = Math.max(1, Number(evaluationOptions.contextSampleModulo) || 1);
   const validationRows = artifact
     .prepare(
@@ -2489,47 +2510,30 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
         supports,
         bandwidthDays,
         options,
-        smoothedCache
+        captureAdminEvidence: collectAdminCapTasks
       });
       const calibrator = typeof evaluationOptions.calibratorForTaxon === "function"
         ? evaluationOptions.calibratorForTaxon(taxon)
         : null;
       const probability = calibrateProbability(rawScore.probability, calibrator);
       const actualPositive = Math.min(context.exposure, Number(context.hits.get(taxonId)) || 0);
-      if (adminCapCandidates.length) {
+      if (collectAdminCapTasks && !rawScore.hasSupportedLocalUnit) {
         const group = prevalenceGroup(taxon.positive_count);
-        if (!adminCapLosses.has(group)) adminCapLosses.set(group, new Map());
-        const groupLosses = adminCapLosses.get(group);
-        for (const candidate of adminCapCandidates) {
-          const candidateScore = evaluationProbability({
-            context,
-            taxonId,
-            taxonPositiveCount: taxon.positive_count,
-            exposures,
-            hits,
-            supports,
-            bandwidthDays,
-            options: optionsForAdminCapCandidate(group, candidate),
-            smoothedCache
-          });
-          if (!groupLosses.has(candidate.id)) {
-            groupLosses.set(candidate.id, {
-              id: candidate.id,
-              caps: candidate.caps,
-              modelLoss: 0,
-              baselineLoss: 0,
-              evaluatedWeight: 0
-            });
-          }
-          const loss = groupLosses.get(candidate.id);
-          loss.modelLoss +=
-            actualPositive * (1 - candidateScore.probability) ** 2 +
-            (context.exposure - actualPositive) * candidateScore.probability ** 2;
-          loss.baselineLoss +=
-            actualPositive * (1 - candidateScore.baselineProbability) ** 2 +
-            (context.exposure - actualPositive) * candidateScore.baselineProbability ** 2;
-          loss.evaluatedWeight += context.exposure;
-        }
+        if (!adminCapTasksByPrevalence.has(group)) adminCapTasksByPrevalence.set(group, []);
+        const values = adminCapTasksByPrevalence.get(group);
+        const evidence = rawScore.adminEvidence;
+        values.push(
+          actualPositive,
+          context.exposure,
+          evidence.province.exposure,
+          evidence.province.detections,
+          evidence.city.exposure,
+          evidence.city.detections,
+          evidence.city.strength,
+          evidence.district.exposure,
+          evidence.district.detections,
+          evidence.district.strength
+        );
       }
       modelLoss +=
         actualPositive * (1 - probability) ** 2 +
@@ -2699,28 +2703,6 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
         : null;
     }
   }
-  const adminCapTuning = adminCapCandidates.length
-    ? {
-        objective: "development_oof_raw_brier_by_prevalence",
-        sqlAggregationPolicy: "one_sql_aggregation_per_fold_then_all_candidates_scored_in_memory",
-        candidateCount: adminCapCandidates.length,
-        byPrevalence: Object.fromEntries(
-          [...adminCapLosses].map(([group, candidates]) => [
-            group,
-            [...candidates.values()]
-              .map((candidate) => ({
-                ...candidate,
-                brier: candidate.evaluatedWeight > 0 ? candidate.modelLoss / candidate.evaluatedWeight : null,
-                baselineBrier:
-                  candidate.evaluatedWeight > 0 ? candidate.baselineLoss / candidate.evaluatedWeight : null
-              }))
-              .sort((left, right) =>
-                left.brier - right.brier || left.id.localeCompare(right.id)
-              )
-          ])
-        )
-      }
-    : null;
   return { metrics: {
     brier,
     baselineBrier,
@@ -2745,7 +2727,7 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
     fallbackLevels: Object.fromEntries([...fallbackLevels.entries()].sort()),
     evaluationModel: "hierarchical_spatiotemporal_oof",
     baselineModel: "province_week"
-  }, calibrationPoints, adminCapTuning };
+  }, calibrationPoints, adminCapTasksByPrevalence };
 }
 
 function evaluatePreparedHoldout(artifact, bandwidthDays, options) {
@@ -3154,7 +3136,7 @@ function aggregateAdminCapTuning(folds) {
   };
 }
 
-function evaluateSpatialHoldout(artifact, temporal, options) {
+async function evaluateSpatialHoldout(artifact, temporal, options) {
   prepareHoldoutTables(artifact);
   const settings = options.holdoutEvaluation;
   const cells = artifact
@@ -3273,9 +3255,17 @@ function evaluateSpatialHoldout(artifact, temporal, options) {
       artifact,
       nestedCalibration.bandwidthDays,
       nestedOptions,
-      { adminCapCandidates }
+      { collectAdminCapTasks: adminCapCandidates.length > 0 }
     );
     const rawMetrics = rawDetails.metrics;
+    const foldAdminCapTuning = adminCapCandidates.length
+      ? await scoreAdminCapTasks({
+          tasksByPrevalence: rawDetails.adminCapTasksByPrevalence || new Map(),
+          candidates: adminCapCandidates,
+          workers: options.workers,
+          chunkRecords: options.workerTaskChunkRecords
+        })
+      : null;
     const metrics = nestedCalibration.hasActiveCalibration
       ? evaluatePreparedHoldoutDetails(artifact, nestedCalibration.bandwidthDays, nestedOptions, {
           calibratorForTaxon: nestedCalibration.calibratorForTaxon
@@ -3289,7 +3279,7 @@ function evaluateSpatialHoldout(artifact, temporal, options) {
       reservedR6Units: reservedIds,
       diagnostics: { ...diagnostics, bufferLeakage, reservedLeakage },
       nestedCalibration: nestedCalibration.summary,
-      adminCapTuning: rawDetails.adminCapTuning || null,
+      adminCapTuning: foldAdminCapTuning,
       rawMetrics,
       metrics
     });
@@ -4901,7 +4891,7 @@ async function buildPredictionArtifact(options = {}) {
     const temporal = tuneTemporalModel(artifact, resolvedOptions);
     emitProgress(resolvedOptions, "spatial_holdout_started");
     const spatial = resolvedOptions.qualityGate.requireSpatialHoldout
-      ? evaluateSpatialHoldout(artifact, temporal, resolvedOptions)
+      ? await evaluateSpatialHoldout(artifact, temporal, resolvedOptions)
       : null;
     emitProgress(resolvedOptions, "observer_holdout_started");
     const observer = resolvedOptions.qualityGate.requireObserverHoldout
@@ -4974,6 +4964,8 @@ async function buildPredictionArtifact(options = {}) {
     // the artifact can leave its `.building-*` path.
     manifestSet(artifact, "quality_gate", { passed: true, internalBuild: true });
     manifestSet(artifact, "test_only", Boolean(resolvedOptions.testOnly));
+    manifestSet(artifact, "evaluation_workers", resolvedOptions.workers);
+    manifestSet(artifact, "worker_task_chunk_records", resolvedOptions.workerTaskChunkRecords);
     manifestSet(artifact, "prior_strengths", resolvedOptions.priorStrengths);
     manifestSet(
       artifact,
@@ -5091,6 +5083,8 @@ async function buildPredictionArtifact(options = {}) {
         priorTuningContextSampleModulo: resolvedOptions.priorTuningContextSampleModulo,
         outerPriorTuningContextSampleModulo: resolvedOptions.outerPriorTuningContextSampleModulo,
         outerCalibrationContextSampleModulo: resolvedOptions.outerCalibrationContextSampleModulo,
+        workers: resolvedOptions.workers,
+        workerTaskChunkRecords: resolvedOptions.workerTaskChunkRecords,
         unitThresholds: resolvedOptions.unitThresholds,
         priorStrengths: resolvedOptions.priorStrengths,
         qualityGate: resolvedOptions.qualityGate,
@@ -5196,6 +5190,7 @@ function parseCliArguments(argv) {
     else if (argument === "--spatial-panel") options.spatialEvaluationPanel = value();
     else if (argument === "--confirm-open-sealed-spatial-panel") options.sealedSpatialPanelConfirmation = value();
     else if (argument === "--forward-top-k") options.forwardTopK = Number(value());
+    else if (argument === "--workers") options.workers = Number(value());
     else if (argument === "--evaluation-only") {
       options.testOnly = true;
       options.materializationProfile = "evaluation-only";
@@ -5223,6 +5218,7 @@ function usage() {
     --output data/prediction-models/zhejiang-YYYYMMDD.sqlite \\
     --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json \\
     --spatial-panel development \\
+    --workers 4 \\
     --no-publish \\
     --confirm-coordinate-system bd09
 

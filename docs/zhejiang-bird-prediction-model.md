@@ -83,6 +83,19 @@
 - development 调参制品可使用 `evaluation-only`，跳过正向预测表和反向热点索引的物化；它强制标记为 `testOnly`、不能发布，也不能被线上模型当作完整制品加载。
 - 参数冻结且 sealed release 五折通过后，最终正式构建必须使用 `full` 物化配置，覆盖每个受支持空间单元的 52 个周桶，并为全部公共鸟种生成反向热点；缺任何正向周桶或反向鸟种都会以 `ONLINE_INDEX_INCOMPLETE` 阻止制品生成。
 
+单线程 development-cap-tuning 基准已于 2026-07-16 完成：
+
+- 制品：`data/prediction-models/zhejiang-v1-20260715-development-cap-tuning.sqlite`
+- 模型 SHA-256：`6cd19d2d4fcd14c6b48122eed8937e84ccd4713f60a8aa3b24582ee6b7d5c96a`
+- 报告 SHA-256：`efa29bcf69565f1588b2d52a649990ee76cf2fbf9642e2f660d2deae543eba1b`
+- 耗时：8,964.7 秒；`quick_check=ok`、freelist 为 0、无私有训练表；`evaluation-only` 因而正向/反向索引均为 0 行且不可发布
+- 冻结 development 五折空间 Brier Skill `+2.6312%`、ECE `0.00582`、Recall@20 相对基线 `+2.8467pp`
+- 唯一剩余失败项：`spatial.species_calibration.maximumEce`；最差逐鸟 ECE `0.12117`，鸟种 ID `4356`
+- development OOF Brier 选择的行政层有效暴露上限：`species_200_plus={city:100,district:10}`、`group_80_199={city:100,district:10}`、`group_30_79={city:100,district:300}`
+- `sealedPanelViewed=false`，密封面板仍未查看
+
+候选评分支持 `--workers N`。主线程仍对每折只执行一次 SQLite 聚合；紧凑数值证据固定按 4,096 条记录切块后交给 Worker Threads，最多每个 worker 一个在途缓冲，结果严格按固定 jobId 顺序归并。worker 数量只改变调度，不改变任务分块、鸟种、验证折或求和顺序；自动测试要求 `workers=1/2/4` 的结果完全一致。实际数据多核复跑必须再与上述单线程基准逐字段核对后，才允许继续空间专用校准。
+
 ## 构建与测试
 
 复用已固定快照构建，不连接网站、不切换线上模型指针：
@@ -96,6 +109,7 @@ node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js `
   --model-version zhejiang-v1-20260715 `
   --spatial-split-manifest docs\zhejiang-v1-20260715-spatial-splits.json `
   --spatial-panel development `
+  --workers 4 `
   --evaluation-only `
   --no-publish `
   --confirm-coordinate-system bd09
