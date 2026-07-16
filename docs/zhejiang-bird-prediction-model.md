@@ -109,6 +109,37 @@
 
 空间专用校准继续复用每折首次聚合产生的紧凑评分行，不再为时间校准诊断或空间校准重复执行聚合 SQL。五个 development 折逐一作为 held-out：当前折的校准器只能由另外四折拟合；正例至少 200 的鸟种逐鸟拟合，30–199 按既有流行度组共享。各作用域只有在五折交叉拟合结果的 Brier 相对恶化不超过 1% 且 ECE 恶化不超过 0.01 时才接受，否则回退恒等映射。最终生产校准参数只在接受作用域上用全部 development OOF 行重拟合；sealed 面板仍不得参与拟合、筛选或保护门判断。
 
+### Development OOF 充分统计缓存
+
+逐鸟行政层迁移上限和稳健校准器的开发调试使用独立的 development-only OOF 缓存。缓存只在完整五折 development 聚合成功后一次性原子写入；它保存匿名折号、折内上下文序号、公共鸟种 ID、各外折及排除全部 sealed buffer 后的 development-pool 公共正例数、标签/权重、基线概率，以及重建 25 组市级 × 区县级上限所需的省/市/区县未封顶数值证据。它不保存报告 ID、观察者、经纬度、地点名称、H3/点位/行政单元 ID，也不保存 sealed 结果；名单判定也不读取 sealed 标签。
+
+缓存同时绑定快照 SHA、split 文件 SHA、split manifest hash、五折及上游证据生成契约。证据生成器哈希与下游评分器哈希分开；仅修改独立候选评分器或诊断报告代码不要求重新执行 SQLite 聚合。当前为保守绑定，证据生成器哈希仍覆盖整个模型构建器及相关证据模块，因此构建器中即使是不影响充分统计的改动也可能使缓存失效；后续只有把 OOF 生成核心抽成独立模块后才能进一步缩小失效范围。缓存和评分报告都属于 development diagnostic，不能直接供参数冻结、sealed 解封或正式发布使用。
+
+当前已完成的 development 制品在报告生成前删除了内存 OOF 行，并在删除训练私表后执行了 `VACUUM`，因此不能从现有 `.report.json` 或 evaluation-only SQLite 安全回填缓存。首次生成仍需在缓存实现通过短测试后执行一次完整 development；之后可反复离线评分，不再为每组候选重跑聚合。
+
+下一次完整 development 生成缓存时，在原命令中增加：
+
+```powershell
+  --write-spatial-oof-cache data\prediction-models\development-cache\zhejiang-v1-20260715-spatial-oof.sqlite
+```
+
+缓存生成后，独立评分命令为：
+
+```powershell
+node tools\score-zhejiang-spatial-oof-cache.js `
+  --cache data\prediction-models\development-cache\zhejiang-v1-20260715-spatial-oof.sqlite `
+  --snapshot data\prediction-snapshots\zhejiang-v1-20260715.sqlite `
+  --spatial-split-manifest docs\zhejiang-v1-20260715-spatial-splits.json `
+  --output data\prediction-models\development-cache\zhejiang-v1-20260715-spatial-candidates.json `
+  --workers 4
+```
+
+评分器固定使用已经定义的 25 组上限和 4,096 行分块。正例至少 200 的鸟种在每个 held-out 折上只用其余四折选择逐鸟上限，再对该折完整重算 Brier、十箱 ECE、逐鸟/共享组最大 ECE 和 Recall@20；生产候选仅用全部五个 development 折重选。截距校准、温度缩放及不同 ridge 的 beta 校准器也分别执行四折拟合、一折验证，并同时执行逐作用域及整体 Brier 相对恶化不超过 1%、ECE 恶化不超过 0.01 的保护门。十箱汇总只由逐行新概率重新生成，不能把旧报告中的箱级近似变换当正式评分。
+
+逐作用域保护门和校准器族推荐仍使用同一批 development OOF 标签做开发选择，所以离线报告中的质量门结果不是无偏发布指标；选定方案、扩展 runtime/参数 schema 并冻结代码后，必须重新运行完整 development 才能形成正式 go/no-go 依据。逐鸟上限的生产诊断名单使用缓存绑定的 development-pool 正例数，因此覆盖该开发池内全部 `positive_count >= 200` 公共鸟种，同时不接触 sealed 保留单元；若某个边界鸟种在五个外折中从未达到 200，它仍可获得全五折逐鸟上限诊断，但由于没有逐鸟作用域的 4/1 校准保护门，不生成该鸟的生产逐鸟校准器。
+
+当前 runtime 和空间参数制品仍只支持按流行度组查询行政层上限，因此逐鸟候选即使改善 development，也只能先作为诊断。只有在另行扩展运行时和参数 schema、重新完成全部 development 折并通过所有门槛后，才可能进入冻结流程。
+
 ## 构建与测试
 
 复用已固定快照构建，不连接网站、不切换线上模型指针：

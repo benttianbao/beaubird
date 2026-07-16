@@ -51,6 +51,10 @@ const {
 const { scoreAdminCapTasks } = require("../server/prediction/spatial-transfer-worker");
 const { loadSpatialParameterArtifact } = require("../server/prediction/spatial-parameters");
 const { loadSealedEvaluationReceipt } = require("../server/prediction/sealed-evaluation-receipt");
+const {
+  spatialOofCacheGenerationImplementationSha256,
+  writeSpatialOofCache
+} = require("../server/prediction/spatial-oof-cache");
 
 const PROBABILITY_DEFINITION =
   "P(某鸟在相似日期和地点的一份典型完整 BirdReport 清单中被记录到)，不是生态学绝对存在概率。";
@@ -89,10 +93,13 @@ const PREDICTION_IMPLEMENTATION_FILES = Object.freeze([
   "server/prediction/model.js",
   "server/prediction/sealed-evaluation-receipt.js",
   "server/prediction/spatial-parameters.js",
+  "server/prediction/spatial-oof-cache.js",
+  "server/prediction/spatial-candidate-scorer.js",
   "server/prediction/spatial-splits.js",
   "server/prediction/spatial-transfer.js",
   "server/prediction/spatial-transfer-worker.js",
-  "server/prediction/vagrant-events.js"
+  "server/prediction/vagrant-events.js",
+  "tools/score-zhejiang-spatial-oof-cache.js"
 ]);
 
 const DEFAULT_OPTIONS = Object.freeze({
@@ -233,8 +240,7 @@ function validateBuildSafetyOptions(options) {
   }
   if (
     !Number.isInteger(Number(options.workerTaskChunkRecords)) ||
-    Number(options.workerTaskChunkRecords) < 128 ||
-    Number(options.workerTaskChunkRecords) > 65_536
+    Number(options.workerTaskChunkRecords) !== DEFAULT_OPTIONS.workerTaskChunkRecords
   ) failures.push("workerTaskChunkRecords.invalid");
   for (const [key, value] of Object.entries(options.qualityGate || {})) {
     if (!key.startsWith("require")) finite(`qualityGate.${key}`, value);
@@ -255,6 +261,78 @@ function validateBuildSafetyOptions(options) {
   }
   if (failures.length) {
     throw new PredictionBuildError("INVALID_OPTIONS", "构建门槛包含非有限数值。", { failures });
+  }
+  if (options.writeSpatialOofCachePath !== undefined) {
+    const cacheFailures = [];
+    const exactJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+    if (
+      typeof options.writeSpatialOofCachePath !== "string" ||
+      !options.writeSpatialOofCachePath.trim()
+    ) cacheFailures.push("writeSpatialOofCachePath.invalid");
+    if (options.testOnly !== true) cacheFailures.push("testOnly.required");
+    if (options.materializationProfile !== "evaluation-only") {
+      cacheFailures.push("materializationProfile.evaluation_only_required");
+    }
+    if (!options.spatialSplitManifestPath) cacheFailures.push("spatialSplitManifestPath.required");
+    if (options.spatialEvaluationPanel !== "development") {
+      cacheFailures.push("spatialEvaluationPanel.explicit_development_required");
+    }
+    if (options.spatialParametersPath) cacheFailures.push("spatialParametersPath.forbidden");
+    if (options.sealedEvaluationReceiptPath) cacheFailures.push("sealedEvaluationReceiptPath.forbidden");
+    if (options.sealedSpatialPanelConfirmation) cacheFailures.push("sealedSpatialPanelConfirmation.forbidden");
+    if (options.qualityGate?.requireSpatialHoldout !== true) {
+      cacheFailures.push("qualityGate.requireSpatialHoldout.required");
+    }
+    for (const key of [
+      "minimumNormalReports",
+      "minimumCompleteCoverage",
+      "minimumRefreshCoverage",
+      "minimumCoordinateCoverage",
+      "minimumDateCoverage",
+      "pointDriftMeters",
+      "recencyHalfLifeYears",
+      "localHistoryYears",
+      "includeFlaggedCleanReports",
+      "vagrantEventGapDays",
+      "vagrantDominantEventShare",
+      "vagrantEventWeightCap",
+      "priorTuningContextSampleModulo",
+      "outerPriorTuningContextSampleModulo",
+      "outerCalibrationContextSampleModulo"
+    ]) {
+      if (options[key] !== DEFAULT_OPTIONS[key]) cacheFailures.push(`${key}.must_match_frozen_default`);
+    }
+    if (!exactJson(options.qualityGate, DEFAULT_OPTIONS.qualityGate)) {
+      cacheFailures.push("qualityGate.must_match_frozen_default");
+    }
+    if (!exactJson(options.holdoutEvaluation, DEFAULT_OPTIONS.holdoutEvaluation)) {
+      cacheFailures.push("holdoutEvaluation.must_match_frozen_default");
+    }
+    if (!exactJson(options.unitThresholds, DEFAULT_OPTIONS.unitThresholds)) {
+      cacheFailures.push("unitThresholds.must_match_frozen_default");
+    }
+    if (!exactJson(options.bandwidthCandidates, DEFAULT_OPTIONS.bandwidthCandidates)) {
+      cacheFailures.push("bandwidthCandidates.must_match_frozen_default");
+    }
+    if (!exactJson(options.priorStrengthMultipliers, DEFAULT_OPTIONS.priorStrengthMultipliers)) {
+      cacheFailures.push("priorStrengthMultipliers.must_match_frozen_default");
+    }
+    if (!exactJson(options.priorStrengths, DEFAULT_OPTIONS.priorStrengths)) {
+      cacheFailures.push("priorStrengths.must_match_frozen_default");
+    }
+    if (
+      !exactJson(
+        options.novelGridAdminExposureCapsByPrevalence,
+        DEFAULT_OPTIONS.novelGridAdminExposureCapsByPrevalence
+      )
+    ) cacheFailures.push("novelGridAdminExposureCapsByPrevalence.must_match_frozen_default");
+    if (cacheFailures.length) {
+      throw new PredictionBuildError(
+        "SPATIAL_OOF_CACHE_BUILD_FORBIDDEN",
+        "空间 OOF 缓存只能由显式 development 五折的 testOnly evaluation-only 构建生成。",
+        { failures: cacheFailures }
+      );
+    }
   }
   if (options.testOnly) return;
 
@@ -2121,6 +2199,50 @@ function resetHoldoutTables(artifact) {
   `);
 }
 
+function collectDevelopmentPoolPositiveCounts(artifact, reservedUnitIds) {
+  const reservedIds = [...new Set((reservedUnitIds || []).map(String))].sort();
+  if (!reservedIds.length) {
+    throw new PredictionBuildError(
+      "SPATIAL_OOF_CACHE_SEALED_RESERVATION_MISSING",
+      "development OOF 缓存必须显式排除冻结 split 中的全部 sealed buffer。"
+    );
+  }
+  prepareHoldoutTables(artifact);
+  resetHoldoutTables(artifact);
+  try {
+    const insertReserved = artifact.prepare("INSERT OR IGNORE INTO evaluation_reserved_r6(unit_id) VALUES (?)");
+    for (const unitId of reservedIds) insertReserved.run(unitId);
+    const storedReservedCount = Number(
+      artifact.prepare("SELECT COUNT(*) AS count FROM evaluation_reserved_r6").get().count
+    ) || 0;
+    if (storedReservedCount !== reservedIds.length) {
+      throw new PredictionBuildError(
+        "SPATIAL_OOF_CACHE_SEALED_RESERVATION_INCOMPLETE",
+        "development-pool 正例数聚合前未能完整恢复 sealed buffer 排除表。",
+        { expected: reservedIds.length, actual: storedReservedCount }
+      );
+    }
+    return new Map(
+      artifact.prepare(`
+        SELECT detections.taxon_id,
+               COUNT(DISTINCT CASE WHEN reports.observer_known = 1 THEN reports.group_key END) AS positive_count
+        FROM training_reports reports
+        JOIN training_detections detections USING (report_id)
+        WHERE reports.grid_r6_unit IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM evaluation_reserved_r6 reserved
+            WHERE reserved.unit_id = reports.grid_r6_unit
+          )
+        GROUP BY detections.taxon_id
+        ORDER BY detections.taxon_id
+      `).all().map((row) => [String(row.taxon_id), Number(row.positive_count)])
+    );
+  } finally {
+    resetHoldoutTables(artifact);
+  }
+}
+
 function holdoutSelectionDiagnostics(artifact) {
   const reportOverlap = Number(
     artifact
@@ -2375,7 +2497,9 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
        FROM training_reports reports
        JOIN evaluation_validation_reports selected USING (report_id)
        GROUP BY reports.province_unit, reports.city_unit, reports.district_unit,
-                 reports.grid_r6_unit, reports.grid_r7_unit, reports.point_unit, reports.season_week`
+                 reports.grid_r6_unit, reports.grid_r7_unit, reports.point_unit, reports.season_week
+       ORDER BY reports.province_unit, reports.city_unit, reports.district_unit,
+                reports.grid_r6_unit, reports.grid_r7_unit, reports.point_unit, reports.season_week`
     )
     .all();
   if (!validationRows.length) return { metrics: null, calibrationPoints, scoreRows, adminCapTasksByPrevalence };
@@ -2429,7 +2553,10 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
        JOIN training_detections detections USING (report_id)
        GROUP BY reports.province_unit, reports.city_unit, reports.district_unit,
                  reports.grid_r6_unit, reports.grid_r7_unit, reports.point_unit,
-                 reports.season_week, detections.taxon_id`
+                 reports.season_week, detections.taxon_id
+       ORDER BY reports.province_unit, reports.city_unit, reports.district_unit,
+                reports.grid_r6_unit, reports.grid_r7_unit, reports.point_unit,
+                reports.season_week, detections.taxon_id`
     )
     .iterate()) {
     const context = contexts.get(holdoutContextKey(row));
@@ -2557,7 +2684,9 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
           total: context.exposure,
           rawProbability: rawScore.probability,
           baselineProbability: rawScore.baselineProbability,
-          deepestLevel: rawScore.deepestLevel
+          deepestLevel: rawScore.deepestLevel,
+          hasSupportedLocalUnit: rawScore.hasSupportedLocalUnit,
+          ...(collectAdminCapTasks ? { adminEvidence: rawScore.adminEvidence } : {})
         });
       }
       if (collectAdminCapTasks && !rawScore.hasSupportedLocalUnit) {
@@ -3471,6 +3600,11 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
   const adminCapCandidates = frozenSplit?.panelName === "development"
     ? buildAdminExposureCapCandidates()
     : [];
+  const developmentReservedIds = frozenSplit?.panelName === "development"
+    ? [...new Set(
+        frozenSplit.manifest.sealedRelease.anchors.flatMap((anchor) => anchor.bufferCellIds || [])
+      )].sort()
+    : [];
   const folds = [];
   for (const evaluationFold of evaluationFolds) {
     resetHoldoutTables(artifact);
@@ -3481,9 +3615,7 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
           .filter((cell) => evaluationFold.anchorIds.some((anchorId) => areAdjacentGridCells(anchorId, cell.unit_id)))
           .map((cell) => cell.unit_id)
           .sort();
-    const reservedIds = frozenSplit?.panelName === "development"
-      ? [...new Set(frozenSplit.manifest.sealedRelease.anchors.flatMap((anchor) => anchor.bufferCellIds || []))].sort()
-      : [];
+    const reservedIds = developmentReservedIds;
     for (const unitId of excludedIds) insertExcluded.run(unitId);
     for (const unitId of reservedIds) insertReserved.run(unitId);
     for (const unitId of evaluationFold.anchorIds) insertValidation.run(unitId);
@@ -3583,6 +3715,13 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
       scoreRows: rawDetails.scoreRows
     });
   }
+  let developmentPoolPositiveCounts = null;
+  if (options.writeSpatialOofCachePath !== undefined && frozenSplit?.panelName === "development") {
+    developmentPoolPositiveCounts = collectDevelopmentPoolPositiveCounts(
+      artifact,
+      developmentReservedIds
+    );
+  }
   resetHoldoutTables(artifact);
   const developmentSpatialCalibration = frozenSplit?.panelName === "development"
     ? crossFitSpatialCalibrators(folds)
@@ -3623,6 +3762,79 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
     folds.map((fold) => ({ ...fold, metrics: fold.rawMetrics }))
   );
   const adminCapTuning = aggregateAdminCapTuning(folds);
+  let oofCache = null;
+  if (options.writeSpatialOofCachePath !== undefined) {
+    const expectedFoldCount = Number(frozenSplit?.panel?.folds?.length) || 0;
+    if (
+      frozenSplit?.panelName !== "development" ||
+      expectedFoldCount !== 5 ||
+      folds.length !== expectedFoldCount ||
+      folds.some((fold) => !fold.rawMetrics || !fold.metrics || !fold.scoreRows?.length) ||
+      !rawMetrics ||
+      !metrics
+    ) {
+      throw new PredictionBuildError(
+        "SPATIAL_OOF_CACHE_INCOMPLETE",
+        "空间 OOF 缓存要求冻结 development 面板的五折全部成功完成正式评分。",
+        {
+          expectedFoldCount,
+          actualFoldCount: folds.length,
+          successfulFoldCount: folds.filter((fold) => fold.rawMetrics && fold.metrics && fold.scoreRows?.length).length
+        }
+      );
+    }
+    oofCache = await writeSpatialOofCache({
+      cachePath: options.writeSpatialOofCachePath,
+      folds: folds.map((fold) => ({
+        foldId: fold.foldId,
+        scoreRows: fold.scoreRows,
+        evidenceConfiguration: {
+          bandwidthDays: fold.nestedCalibration.bandwidthDays,
+          calibrationContextSampleModulo: fold.nestedCalibration.calibrationContextSampleModulo,
+          calibrationFitYears: fold.nestedCalibration.calibrationFitYears,
+          calibrationGuardYear: fold.nestedCalibration.calibrationGuardYear,
+          hyperparameterSelectionYears: fold.nestedCalibration.hyperparameterSelectionYears,
+          priorStrengthsByPrevalence: fold.nestedCalibration.priorStrengthsByPrevalence,
+          validationYears: fold.nestedCalibration.validationYears
+        },
+        referenceRawMetrics: fold.rawMetrics
+      })),
+      verifiedSpatialSplit: frozenSplit,
+      sourceSnapshotSha256: options.sourceSnapshotSha256,
+      generationImplementationSha256: spatialOofCacheGenerationImplementationSha256(),
+      predictionImplementationSha256: options.implementationSha256,
+      baseAdminExposureCapsByPrevalence: options.novelGridAdminExposureCapsByPrevalence,
+      qualityThresholds: {
+        ...options.qualityGate,
+        maximumRelativeBrierDegradation: NESTED_CALIBRATION_GUARD.maximumRelativeBrierDegradation,
+        maximumEceDegradation: NESTED_CALIBRATION_GUARD.maximumEceDegradation
+      },
+      evidenceOptions: {
+        captureAdminEvidence: true,
+        levels: ["province", "city", "district"],
+        applyOnlyWithoutSupportedLocalUnit: true,
+        trainingDataContract: TRAINING_DATA_CONTRACT,
+        releaseEvaluationOccurrencePolicy: RELEASE_EVALUATION_OCCURRENCE_POLICY,
+        temporalEvaluationWeightingPolicy: TEMPORAL_EVALUATION_WEIGHTING_POLICY,
+        coordinateQcEvaluationScope: COORDINATE_QC_EVALUATION_SCOPE,
+        dataCutoffDate: options.dataCutoffDate,
+        includeFlaggedCleanReports: options.includeFlaggedCleanReports,
+        pointDriftMeters: options.pointDriftMeters,
+        recencyHalfLifeYears: options.recencyHalfLifeYears,
+        localHistoryYears: options.localHistoryYears,
+        bandwidthCandidates: options.bandwidthCandidates,
+        priorStrengthMultipliers: options.priorStrengthMultipliers,
+        priorStrengths: options.priorStrengths,
+        priorTuningContextSampleModulo: options.priorTuningContextSampleModulo,
+        outerPriorTuningContextSampleModulo: options.outerPriorTuningContextSampleModulo,
+        outerCalibrationContextSampleModulo: options.outerCalibrationContextSampleModulo,
+        holdoutEvaluation: options.holdoutEvaluation,
+        unitThresholds: options.unitThresholds,
+        workerTaskChunkRecords: options.workerTaskChunkRecords
+      },
+      developmentPoolPositiveCounts
+    });
+  }
   for (const fold of folds) delete fold.scoreRows;
   return {
     status: metrics ? "evaluated" : "unavailable",
@@ -3645,6 +3857,7 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
     metrics,
     adminCapTuning,
     spatialCalibration,
+    oofCache,
     folds
   };
 }
@@ -5182,10 +5395,43 @@ async function buildPredictionArtifact(options = {}) {
   if (existsSync(outputPath)) {
     throw new PredictionBuildError("OUTPUT_EXISTS", `模型输出已存在：${outputPath}`);
   }
+  if (resolvedOptions.writeSpatialOofCachePath !== undefined) {
+    const normalizePath = (path) => {
+      const normalized = resolve(path);
+      return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+    };
+    const cachePath = resolve(resolvedOptions.writeSpatialOofCachePath);
+    const cachePaths = [cachePath, `${cachePath}.sha256`].map(normalizePath);
+    const reportPath = resolve(resolvedOptions.reportPath || `${outputPath}.report.json`);
+    const reservedPaths = [
+      resolvedOptions.sourcePath,
+      resolvedOptions.snapshotPath,
+      outputPath,
+      `${outputPath}.sha256`,
+      `${outputPath}.building-${process.pid}`,
+      reportPath,
+      `${reportPath}.sha256`,
+      resolvedOptions.pointerPath
+    ].filter(Boolean).map(normalizePath);
+    if (cachePaths.some((path) => reservedPaths.includes(path))) {
+      throw new PredictionBuildError(
+        "SPATIAL_OOF_CACHE_PATH_CONFLICT",
+        "空间 OOF 缓存及其校验文件不得与训练输入、模型、报告或发布指针共用路径。"
+      );
+    }
+    if (existsSync(cachePath) || existsSync(`${cachePath}.sha256`)) {
+      throw new PredictionBuildError(
+        "SPATIAL_OOF_CACHE_OUTPUT_EXISTS",
+        `空间 OOF 缓存输出或其校验文件已存在：${cachePath}`
+      );
+    }
+    resolvedOptions.writeSpatialOofCachePath = cachePath;
+  }
   mkdirSync(dirname(outputPath), { recursive: true });
   const snapshot = resolvedOptions.sourceIsSnapshot
     ? { snapshotPath: resolve(resolvedOptions.sourcePath), sha256: sha256File(resolvedOptions.sourcePath) }
     : await createTrainingSnapshot(resolvedOptions);
+  resolvedOptions.sourceSnapshotSha256 = snapshot.sha256;
   if (resolvedOptions.spatialSplitManifestPath) {
     resolvedOptions.verifiedSpatialSplit = verifySpatialSplitManifest({
       manifestPath: resolvedOptions.spatialSplitManifestPath,
@@ -5193,6 +5439,18 @@ async function buildPredictionArtifact(options = {}) {
       panelName: resolvedOptions.spatialEvaluationPanel || "development",
       sealedPanelConfirmation: resolvedOptions.sealedSpatialPanelConfirmation || null
     });
+  }
+  if (
+    resolvedOptions.writeSpatialOofCachePath !== undefined &&
+    (
+      resolvedOptions.verifiedSpatialSplit?.panelName !== "development" ||
+      Number(resolvedOptions.verifiedSpatialSplit?.panel?.folds?.length) !== 5
+    )
+  ) {
+    throw new PredictionBuildError(
+      "SPATIAL_OOF_CACHE_SPLIT_INVALID",
+      "空间 OOF 缓存要求通过校验的冻结 development 五折 split manifest。"
+    );
   }
   if (resolvedOptions.spatialParametersPath) {
     if (!resolvedOptions.verifiedSpatialSplit) {
@@ -5642,6 +5900,7 @@ function parseCliArguments(argv) {
     else if (argument === "--spatial-parameters") options.spatialParametersPath = value();
     else if (argument === "--sealed-evaluation-receipt") options.sealedEvaluationReceiptPath = value();
     else if (argument === "--confirm-open-sealed-spatial-panel") options.sealedSpatialPanelConfirmation = value();
+    else if (argument === "--write-spatial-oof-cache") options.writeSpatialOofCachePath = value();
     else if (argument === "--forward-top-k") options.forwardTopK = Number(value());
     else if (argument === "--workers") options.workers = Number(value());
     else if (argument === "--evaluation-only") {
@@ -5671,7 +5930,9 @@ function usage() {
     --output data/prediction-models/zhejiang-YYYYMMDD.sqlite \\
     --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json \\
     --spatial-panel development \\
+    --write-spatial-oof-cache data/prediction-models/zhejiang-development-spatial-oof-cache.sqlite \\
     --workers 4 \\
+    --evaluation-only \\
     --no-publish \\
     --confirm-coordinate-system bd09
 
@@ -5763,6 +6024,7 @@ module.exports = {
   assertTrainingSourceContract,
   buildPredictionArtifact,
   cliResultSummary,
+  collectDevelopmentPoolPositiveCounts,
   createArtifactSchema,
   createTrainingSnapshot,
   crossFitSpatialCalibrators,
