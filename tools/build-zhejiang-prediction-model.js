@@ -50,6 +50,7 @@ const {
 } = require("../server/prediction/spatial-transfer");
 const { scoreAdminCapTasks } = require("../server/prediction/spatial-transfer-worker");
 const { loadSpatialParameterArtifact } = require("../server/prediction/spatial-parameters");
+const { loadSealedEvaluationReceipt } = require("../server/prediction/sealed-evaluation-receipt");
 
 const PROBABILITY_DEFINITION =
   "P(某鸟在相似日期和地点的一份典型完整 BirdReport 清单中被记录到)，不是生态学绝对存在概率。";
@@ -81,6 +82,18 @@ const NESTED_CALIBRATION_GUARD = Object.freeze({
   maximumRelativeBrierDegradation: 0.01,
   maximumEceDegradation: 0.01
 });
+const PREDICTION_IMPLEMENTATION_FILES = Object.freeze([
+  "tools/build-zhejiang-prediction-model.js",
+  "server/prediction/geo.js",
+  "server/prediction/math.js",
+  "server/prediction/model.js",
+  "server/prediction/sealed-evaluation-receipt.js",
+  "server/prediction/spatial-parameters.js",
+  "server/prediction/spatial-splits.js",
+  "server/prediction/spatial-transfer.js",
+  "server/prediction/spatial-transfer-worker.js",
+  "server/prediction/vagrant-events.js"
+]);
 
 const DEFAULT_OPTIONS = Object.freeze({
   minimumNormalReports: 1_000,
@@ -319,6 +332,17 @@ function sha256File(path) {
     }
   } finally {
     closeSync(descriptor);
+  }
+  return hash.digest("hex");
+}
+
+function predictionImplementationSha256(projectRoot = resolve(__dirname, "..")) {
+  const hash = createHash("sha256");
+  for (const relativePath of PREDICTION_IMPLEMENTATION_FILES) {
+    const normalized = relativePath.replaceAll("\\", "/");
+    hash.update(`${normalized}\0`, "utf8");
+    hash.update(readFileSync(resolve(projectRoot, relativePath)));
+    hash.update("\0", "utf8");
   }
   return hash.digest("hex");
 }
@@ -5143,6 +5167,7 @@ function temporalAnalysisSummary(temporal) {
 async function buildPredictionArtifact(options = {}) {
   const buildStartedAt = Date.now();
   const resolvedOptions = mergeOptions(options);
+  resolvedOptions.implementationSha256 = predictionImplementationSha256();
   if (!resolvedOptions.sourcePath || !resolvedOptions.snapshotPath || !resolvedOptions.outputPath) {
     throw new PredictionBuildError("INVALID_OPTIONS", "必须提供 sourcePath、snapshotPath 和 outputPath。" );
   }
@@ -5176,7 +5201,10 @@ async function buildPredictionArtifact(options = {}) {
         "加载冻结空间参数时必须同时提供冻结 spatial split manifest。"
       );
     }
-    if (resolvedOptions.verifiedSpatialSplit.panelName === "development") {
+    if (
+      resolvedOptions.verifiedSpatialSplit.panelName === "development" &&
+      !resolvedOptions.sealedEvaluationReceiptPath
+    ) {
       throw new PredictionBuildError(
         "DEVELOPMENT_PARAMETER_LEAKAGE",
         "development 面板禁止加载已拟合空间参数；必须继续使用交叉拟合。"
@@ -5199,6 +5227,32 @@ async function buildPredictionArtifact(options = {}) {
     throw new PredictionBuildError(
       "SPATIAL_PARAMETERS_REQUIRED",
       "sealed release 五折必须加载已经通过 development 门槛并冻结的空间参数制品。"
+    );
+  }
+  if (resolvedOptions.sealedEvaluationReceiptPath) {
+    if (
+      resolvedOptions.verifiedSpatialSplit?.panelName !== "development" ||
+      !resolvedOptions.verifiedSpatialParameters
+    ) {
+      throw new PredictionBuildError(
+        "FORMAL_BUILD_INPUTS_INVALID",
+        "正式 full 构建复用密封收据时，必须以 development 方式校验同一 split manifest，并加载冻结空间参数。"
+      );
+    }
+    if ((resolvedOptions.materializationProfile || "full") !== "full" || resolvedOptions.testOnly) {
+      throw new PredictionBuildError(
+        "FORMAL_BUILD_REQUIRES_FULL_MATERIALIZATION",
+        "密封评估收据只能用于非 testOnly 的完整线上索引物化。"
+      );
+    }
+    resolvedOptions.verifiedSealedEvaluationReceipt = loadSealedEvaluationReceipt(
+      resolvedOptions.sealedEvaluationReceiptPath,
+      {
+        sourceSnapshotSha256: snapshot.sha256,
+        spatialSplitManifestHash: resolvedOptions.verifiedSpatialSplit.manifestHash,
+        spatialParameterFileSha256: resolvedOptions.verifiedSpatialParameters.fileSha256,
+        implementationSha256: resolvedOptions.implementationSha256
+      }
     );
   }
   const source = new DatabaseSync(snapshot.snapshotPath, { readOnly: true });
@@ -5232,9 +5286,16 @@ async function buildPredictionArtifact(options = {}) {
     aggregateTrainingStatistics(artifact);
     emitProgress(resolvedOptions, "temporal_validation_started");
     const temporal = tuneTemporalModel(artifact, resolvedOptions);
-    emitProgress(resolvedOptions, "spatial_holdout_started");
+    const sealedReceipt = resolvedOptions.verifiedSealedEvaluationReceipt || null;
+    emitProgress(
+      resolvedOptions,
+      sealedReceipt ? "sealed_spatial_receipt_loaded" : "spatial_holdout_started",
+      sealedReceipt ? { receiptFileSha256: sealedReceipt.fileSha256 } : undefined
+    );
     const spatial = resolvedOptions.qualityGate.requireSpatialHoldout
-      ? await evaluateSpatialHoldout(artifact, temporal, resolvedOptions)
+      ? sealedReceipt
+        ? structuredClone(sealedReceipt.receipt.spatialEvaluation)
+        : await evaluateSpatialHoldout(artifact, temporal, resolvedOptions)
       : null;
     emitProgress(resolvedOptions, "observer_holdout_started");
     const observer = resolvedOptions.qualityGate.requireObserverHoldout
@@ -5266,6 +5327,7 @@ async function buildPredictionArtifact(options = {}) {
     };
     manifestSet(artifact, "schema_version", SCHEMA_VERSION);
     manifestSet(artifact, "model_version", modelVersion);
+    manifestSet(artifact, "implementation_sha256", resolvedOptions.implementationSha256);
     manifestSet(artifact, "built_at", new Date().toISOString());
     manifestSet(artifact, "data_cutoff_date", quality.report.dataCutoffDate);
     manifestSet(artifact, "probability_definition", PROBABILITY_DEFINITION);
@@ -5335,6 +5397,20 @@ async function buildPredictionArtifact(options = {}) {
               resolvedOptions.verifiedSpatialParameters.artifact.developmentReportSha256,
             spatialSplitManifestHash:
               resolvedOptions.verifiedSpatialParameters.artifact.spatialSplitManifestHash
+          }
+        : null
+    );
+    manifestSet(
+      artifact,
+      "sealed_evaluation_receipt",
+      resolvedOptions.verifiedSealedEvaluationReceipt
+        ? {
+            path: resolvedOptions.verifiedSealedEvaluationReceipt.path,
+            fileSha256: resolvedOptions.verifiedSealedEvaluationReceipt.fileSha256,
+            sealedReportSha256:
+              resolvedOptions.verifiedSealedEvaluationReceipt.receipt.sealedReportSha256,
+            implementationSha256:
+              resolvedOptions.verifiedSealedEvaluationReceipt.receipt.implementationSha256
           }
         : null
     );
@@ -5423,6 +5499,9 @@ async function buildPredictionArtifact(options = {}) {
         modelVersion,
         outputPath,
         artifactSha256,
+        implementationSha256: resolvedOptions.implementationSha256,
+        sealedEvaluationReceiptSha256:
+          resolvedOptions.verifiedSealedEvaluationReceipt?.fileSha256 || null,
         schemaVersion: SCHEMA_VERSION,
         releaseEligible: releaseQuality.passed,
         probabilityDefinition: PROBABILITY_DEFINITION,
@@ -5561,6 +5640,7 @@ function parseCliArguments(argv) {
     else if (argument === "--spatial-split-manifest") options.spatialSplitManifestPath = value();
     else if (argument === "--spatial-panel") options.spatialEvaluationPanel = value();
     else if (argument === "--spatial-parameters") options.spatialParametersPath = value();
+    else if (argument === "--sealed-evaluation-receipt") options.sealedEvaluationReceiptPath = value();
     else if (argument === "--confirm-open-sealed-spatial-panel") options.sealedSpatialPanelConfirmation = value();
     else if (argument === "--forward-top-k") options.forwardTopK = Number(value());
     else if (argument === "--workers") options.workers = Number(value());
@@ -5693,6 +5773,7 @@ module.exports = {
   guardCalibrationCandidates,
   inspectSnapshotQuality,
   parseCliArguments,
+  predictionImplementationSha256,
   publishModelPointer,
   selectTemporalFoldReports,
   usage,

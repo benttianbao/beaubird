@@ -28,6 +28,7 @@ const {
   guardCalibrationCandidates,
   inspectSnapshotQuality,
   publishModelPointer,
+  predictionImplementationSha256,
   selectTemporalFoldReports
 } = require("./build-zhejiang-prediction-model");
 
@@ -237,6 +238,13 @@ test("beta posterior interval and beta calibration remain finite and monotone", 
   ]);
   assert.equal(fitted.fitted, true);
   assert.ok(fitted.a > 0 && fitted.b > 0);
+});
+
+test("prediction implementation hash is deterministic and covers the executable model files", () => {
+  const first = predictionImplementationSha256();
+  const second = predictionImplementationSha256();
+  assert.match(first, /^[a-f0-9]{64}$/);
+  assert.equal(first, second);
 });
 
 test("nested calibration guard rejects harmful scopes and retains non-degrading scopes", () => {

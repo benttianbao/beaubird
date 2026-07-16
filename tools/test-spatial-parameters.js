@@ -12,6 +12,11 @@ const {
   SpatialParameterError
 } = require("../server/prediction/spatial-parameters");
 const {
+  freezeSealedEvaluationReceipt,
+  loadSealedEvaluationReceipt,
+  SealedEvaluationReceiptError
+} = require("../server/prediction/sealed-evaluation-receipt");
+const {
   FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1,
   verifySpatialSplitManifest
 } = require("../server/prediction/spatial-transfer");
@@ -112,6 +117,78 @@ test("development 空间质量门槛失败时拒绝冻结", () => {
       unlinkSync(reportPath);
     } catch {
       // Ignore cleanup failure for an already absent individual file.
+    }
+  }
+});
+
+test("sealed 收据绑定参数、实现哈希和唯一密封五折结果", () => {
+  const directory = resolve(__dirname, "..", ".tmp", "spatial-parameters");
+  mkdirSync(directory, { recursive: true });
+  const id = randomUUID();
+  const developmentReportPath = resolve(directory, `${id}.development.json`);
+  const parameterPath = resolve(directory, `${id}.parameters.json`);
+  const sealedReportPath = resolve(directory, `${id}.sealed.json`);
+  const receiptPath = resolve(directory, `${id}.receipt.json`);
+  writeFileSync(developmentReportPath, `${JSON.stringify(developmentReport(), null, 2)}\n`, "utf8");
+  try {
+    const parameters = freezeSpatialParametersFromDevelopmentReport({
+      reportPath: developmentReportPath,
+      splitManifestPath: SPLIT_PATH,
+      outputPath: parameterPath
+    });
+    const split = verifySpatialSplitManifest({
+      manifestPath: SPLIT_PATH,
+      sourceSnapshotSha256: SNAPSHOT_SHA,
+      panelName: "sealed-release",
+      sealedPanelConfirmation: parameters.artifact.spatialSplitManifestHash
+    });
+    const spatial = {
+      foldCount: 5,
+      metrics: { brierSkill: 0.03, ece: 0.02 },
+      splitManifest: {
+        panel: "sealed-release",
+        sealedPanelViewed: true,
+        manifestHash: split.manifestHash
+      },
+      spatialCalibration: { parameterFileSha256: parameters.fileSha256 }
+    };
+    writeFileSync(sealedReportPath, `${JSON.stringify({
+      model: { artifactSha256: "b".repeat(64), implementationSha256: "c".repeat(64) },
+      source: { snapshotSha256: SNAPSHOT_SHA },
+      releaseQuality: { passed: true, failures: [], spatial },
+      spatial
+    }, null, 2)}\n`, "utf8");
+    const frozen = freezeSealedEvaluationReceipt({
+      reportPath: sealedReportPath,
+      parameterPath,
+      splitManifestPath: SPLIT_PATH,
+      outputPath: receiptPath
+    });
+    const loaded = loadSealedEvaluationReceipt(receiptPath, {
+      sourceSnapshotSha256: SNAPSHOT_SHA,
+      spatialParameterFileSha256: parameters.fileSha256,
+      implementationSha256: "c".repeat(64)
+    });
+    assert.equal(loaded.fileSha256, frozen.fileSha256);
+    assert.equal(loaded.receipt.spatialEvaluation.splitManifest.panel, "sealed-release");
+    assert.throws(
+      () => loadSealedEvaluationReceipt(receiptPath, { implementationSha256: "d".repeat(64) }),
+      (error) => error instanceof SealedEvaluationReceiptError && error.code === "SEALED_RECEIPT_MISMATCH"
+    );
+  } finally {
+    for (const path of [
+      developmentReportPath,
+      parameterPath,
+      `${parameterPath}.sha256`,
+      sealedReportPath,
+      receiptPath,
+      `${receiptPath}.sha256`
+    ]) {
+      try {
+        unlinkSync(path);
+      } catch {
+        // Individual test files may not exist after an expected failure.
+      }
     }
   }
 });
