@@ -128,6 +128,62 @@ node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js `
   --confirm-coordinate-system bd09
 ```
 
+development 五折全部通过后才允许冻结参数；冻结工具会校验快照 SHA、split manifest hash、五折数、`sealedPanelViewed=false`、行政层上限矩阵和所有 `spatial.*` 门槛：
+
+```powershell
+node tools\freeze-zhejiang-spatial-parameters.js `
+  --report data\prediction-models\zhejiang-v1-20260715-development-spatial-calibration-w4.sqlite.report.json `
+  --spatial-split-manifest docs\zhejiang-v1-20260715-spatial-splits.json `
+  --output data\prediction-models\zhejiang-v1-20260715-spatial-parameters.json
+```
+
+sealed release 只能执行一次。它必须显式确认冻结 manifest hash，并加载上一步的参数；缺参数、快照不匹配、development 报告未过空间门槛都会 fail closed：
+
+```powershell
+node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js `
+  --source data\prediction-snapshots\zhejiang-v1-20260715.sqlite `
+  --source-is-snapshot `
+  --snapshot data\prediction-snapshots\zhejiang-v1-20260715.sqlite `
+  --output data\prediction-models\zhejiang-v1-20260715-sealed-release.sqlite `
+  --model-version zhejiang-v1-20260715-sealed-release `
+  --spatial-split-manifest docs\zhejiang-v1-20260715-spatial-splits.json `
+  --spatial-panel sealed-release `
+  --spatial-parameters data\prediction-models\zhejiang-v1-20260715-spatial-parameters.json `
+  --confirm-open-sealed-spatial-panel 400bcc27bde3bd30f03ef022b9f76175cd6093ea5afc98fcbfccb79bde234e4d `
+  --workers 4 `
+  --evaluation-only `
+  --no-publish `
+  --confirm-coordinate-system bd09
+```
+
+只有 sealed 构建的全部发布门槛均通过时，才把结果冻结成不可调参的评估收据。收据绑定快照、空间参数文件、split、sealed 报告及全部可执行建模文件的实现 SHA-256：
+
+```powershell
+node tools\freeze-zhejiang-sealed-evaluation.js `
+  --report data\prediction-models\zhejiang-v1-20260715-sealed-release.sqlite.report.json `
+  --spatial-parameters data\prediction-models\zhejiang-v1-20260715-spatial-parameters.json `
+  --spatial-split-manifest docs\zhejiang-v1-20260715-spatial-splits.json `
+  --output data\prediction-models\zhejiang-v1-20260715-sealed-evaluation-receipt.json
+```
+
+最终正式构建不再打开 sealed 面板，而是以 development 模式仅校验同一 split manifest，再复用密封收据中的空间评估；时间折和观察者折仍完整重跑。带收据的构建强制为非 testOnly 的 `full` 物化，且实现代码哈希必须与 sealed 构建完全一致：
+
+```powershell
+node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js `
+  --source data\prediction-snapshots\zhejiang-v1-20260715.sqlite `
+  --source-is-snapshot `
+  --snapshot data\prediction-snapshots\zhejiang-v1-20260715.sqlite `
+  --output data\prediction-models\zhejiang-v1-20260715.sqlite `
+  --model-version zhejiang-v1-20260715 `
+  --spatial-split-manifest docs\zhejiang-v1-20260715-spatial-splits.json `
+  --spatial-panel development `
+  --spatial-parameters data\prediction-models\zhejiang-v1-20260715-spatial-parameters.json `
+  --sealed-evaluation-receipt data\prediction-models\zhejiang-v1-20260715-sealed-evaluation-receipt.json `
+  --workers 4 `
+  --no-publish `
+  --confirm-coordinate-system bd09
+```
+
 测试：
 
 ```powershell
