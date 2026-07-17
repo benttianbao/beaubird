@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const { createHash } = require("node:crypto");
 const test = require("node:test");
 
 const {
@@ -9,6 +10,7 @@ const {
 } = require("../server/prediction/spatial-oof-cache");
 const {
   DEFAULT_CALIBRATOR_FAMILIES,
+  SPATIAL_CALIBRATION_GUARD,
   evaluateCandidateRows,
   probabilityFromAdminEvidence,
   baselineProbabilityFromAdminEvidence,
@@ -18,8 +20,15 @@ const {
 const {
   FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1
 } = require("../server/prediction/spatial-transfer");
+const { canonicalJson } = require("../server/prediction/spatial-splits");
 const { prevalenceGroup } = require("../server/prediction/model");
 const { parseArguments } = require("./score-zhejiang-spatial-oof-cache");
+
+const EXPECTED_CAP_POLICY = Object.freeze({
+  strategy: "near_optimal_0.1pct_minimax_regret_v1",
+  maximumRelativePooledBrierRegret: 0.001
+});
+const EXPECTED_SELECTION_STRATEGY = "nested_scope_adaptive_fixed_v1";
 
 function makeRow({
   contextIndex,
@@ -125,6 +134,151 @@ function deterministicProjection(report) {
   return clone;
 }
 
+function recomputeReferenceRawMetrics(fold) {
+  fold.referenceRawMetrics = evaluateCandidateRows(fold.scoreRows.map((row) => ({
+    foldId: String(fold.foldId),
+    row,
+    probability: row.rawProbability
+  })));
+}
+
+function canonicalSha256(value) {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function assertCandidateManifest(report) {
+  const manifest = report.scoring.fixedCandidateManifest;
+  assert.ok(manifest);
+  const { sha256, ...payload } = manifest;
+  assert.match(sha256, /^[0-9a-f]{64}$/);
+  assert.equal(sha256, canonicalSha256(payload));
+  assert.deepEqual(payload, {
+    selectionStrategy: EXPECTED_SELECTION_STRATEGY,
+    capCandidateSetSha256: candidateSetSha256(),
+    capCandidateCount: 25,
+    capPolicy: EXPECTED_CAP_POLICY,
+    calibratorFamilies: DEFAULT_CALIBRATOR_FAMILIES,
+    calibrationGuard: SPATIAL_CALIBRATION_GUARD
+  });
+  assert.equal(report.scoring.candidateSetSha256, payload.capCandidateSetSha256);
+  assert.equal(report.scoring.candidateCount, payload.capCandidateCount);
+  assert.equal(report.scoring.calibratorCandidateCount, payload.calibratorFamilies.length);
+  assert.equal(report.scoring.fixedCandidateSetSha256, sha256);
+  assert.equal(report.crossFittedSelection.fixedCandidateSetSha256, sha256);
+}
+
+function assertInnerFoldProvenance(container, selectionFoldIds, allFoldIds) {
+  const selected = [...selectionFoldIds].map(String).sort();
+  const all = [...allFoldIds].map(String).sort();
+  assert.equal(container.cachedEvidenceRebuiltForInnerFolds, false);
+  assert.ok(Array.isArray(container.innerFolds));
+  assert.deepEqual(container.innerFolds.map((fold) => fold.heldoutFoldId), selected);
+  for (const innerFold of container.innerFolds) {
+    assert.deepEqual(
+      innerFold.trainingFoldIds,
+      selected.filter((foldId) => foldId !== innerFold.heldoutFoldId)
+    );
+    assert.deepEqual(
+      innerFold.cachedEvidenceTrainingFoldIds,
+      all.filter((foldId) => foldId !== innerFold.heldoutFoldId)
+    );
+    assert.equal(innerFold.trainingFoldIds.includes(innerFold.heldoutFoldId), false);
+  }
+}
+
+function assertFoldSelectionHashes(fold) {
+  assert.match(fold.selectionSha256, /^[0-9a-f]{64}$/);
+  assert.match(fold.validationSha256, /^[0-9a-f]{64}$/);
+  const selectionRecord = structuredClone(fold);
+  delete selectionRecord.selectionSha256;
+  delete selectionRecord.metrics;
+  delete selectionRecord.validationSha256;
+  assert.equal(fold.selectionSha256, canonicalSha256(selectionRecord));
+  assert.equal(fold.validationSha256, canonicalSha256(fold.metrics));
+}
+
+function assertFamilyStrengthProvenance(report, fold) {
+  const familiesById = new Map(report.calibratorFamilies.map(({ family }) => [family.id, family]));
+  assert.equal(familiesById.size, DEFAULT_CALIBRATOR_FAMILIES.length);
+  for (const family of DEFAULT_CALIBRATOR_FAMILIES) {
+    assert.deepEqual(familiesById.get(family.id), family);
+    assert.ok(Number.isFinite(family.ridge));
+    assert.ok(Number.isFinite(family.shrinkage));
+    assert.ok(family.shrinkage >= 0 && family.shrinkage <= 1);
+  }
+  for (const scope of fold.scopeSelections) {
+    const family = familiesById.get(scope.familyId);
+    assert.ok(family, `unknown calibrator family ${scope.familyId}`);
+    assert.deepEqual(scope.family, family);
+    if (scope.accepted) {
+      assert.equal(scope.fit?.fitted, true, scope.scope);
+      assert.equal(scope.fit.shrinkage, family.shrinkage, scope.scope);
+    } else {
+      assert.equal(scope.fit, null, scope.scope);
+    }
+  }
+}
+
+function crossFittedFold(report, heldoutFoldId) {
+  const selection = report.crossFittedSelection;
+  assert.ok(selection, "report must expose cross-fitted selection provenance");
+  assert.equal(selection.fitFoldCount, 4);
+  assert.equal(selection.heldoutFoldCount, 5);
+  assert.equal(selection.strategy, EXPECTED_SELECTION_STRATEGY);
+  assertCandidateManifest(report);
+  assert.ok(Array.isArray(selection.folds));
+  assert.equal(selection.folds.length, 5);
+  assert.ok(selection.production);
+  const fold = selection.folds.find((entry) => entry.heldoutFoldId === String(heldoutFoldId));
+  assert.ok(fold, `missing cross-fitted selection for fold ${heldoutFoldId}`);
+  assertInnerFoldProvenance(
+    fold,
+    fold.trainingFoldIds,
+    selection.folds.map((entry) => entry.heldoutFoldId)
+  );
+  assertFoldSelectionHashes(fold);
+  assert.ok(fold.capPolicy);
+  assert.equal(fold.capPolicy.strategy, EXPECTED_CAP_POLICY.strategy);
+  assert.equal(
+    fold.capPolicy.maximumRelativePooledBrierRegret,
+    EXPECTED_CAP_POLICY.maximumRelativePooledBrierRegret
+  );
+  assert.ok(Array.isArray(fold.capPolicy.speciesCaps));
+  assert.deepEqual(fold.capPolicy.trainingFoldIds, fold.trainingFoldIds);
+  assert.ok(fold.capPolicy.speciesCaps.length > 0);
+  assert.ok(fold.capPolicy.speciesCaps.every((species) =>
+    typeof species.taxonId === "string" &&
+    typeof species.selectedCandidateId === "string" &&
+    species.caps && typeof species.caps === "object"
+  ));
+  assert.ok(Array.isArray(fold.scopeSelections));
+  assert.ok(fold.scopeSelections.length > 0);
+  assert.ok(fold.scopeSelections.every((scope) =>
+    typeof scope.scope === "string" &&
+    typeof scope.familyId === "string" &&
+    typeof scope.accepted === "boolean"
+  ));
+  assert.ok(fold.overallGuard);
+  assert.ok(fold.metrics);
+  assertFamilyStrengthProvenance(report, fold);
+  return fold;
+}
+
+function assertProductionSelection(report) {
+  const production = report.crossFittedSelection.production;
+  const allFoldIds = ["1", "2", "3", "4", "5"];
+  assert.deepEqual(production.trainingFoldIds, allFoldIds);
+  assertInnerFoldProvenance(production, allFoldIds, allFoldIds);
+  assert.equal(production.capPolicy.strategy, EXPECTED_CAP_POLICY.strategy);
+  assert.deepEqual(production.capPolicy.trainingFoldIds, allFoldIds);
+  assert.ok(production.capPolicy.speciesCaps.length > 0);
+  assertFamilyStrengthProvenance(report, production);
+  assert.match(production.selectionSha256, /^[0-9a-f]{64}$/);
+  const selectionRecord = structuredClone(production);
+  delete selectionRecord.selectionSha256;
+  assert.equal(production.selectionSha256, canonicalSha256(selectionRecord));
+}
+
 test("逐鸟 25 组 cap 使用四折选择一折验证并能区分相反空间迁移", async () => {
   const cache = makeCache();
   const before = structuredClone(cache);
@@ -168,6 +322,80 @@ test("workers=1/2/4 不改变候选、校准和完整指标结果", async () => 
   const quad = await scoreSpatialOofCandidates(cache, { workers: 4, generatedAt: "four" });
   assert.deepEqual(deterministicProjection(dual), deterministicProjection(single));
   assert.deepEqual(deterministicProjection(quad), deterministicProjection(single));
+});
+
+test("改变 heldout 折标签不影响该折使用的 cap、family、校准强度或 scope guard 决策", async () => {
+  const heldoutFoldId = "3";
+  const originalCache = makeCache();
+  const changedCache = structuredClone(originalCache);
+  const changedFold = changedCache.folds.find((fold) => String(fold.foldId) === heldoutFoldId);
+  assert.ok(changedFold);
+  for (const row of changedFold.scoreRows) {
+    row.actualPositive = row.total - row.actualPositive;
+  }
+  recomputeReferenceRawMetrics(changedFold);
+  assert.notDeepEqual(
+    changedFold.referenceRawMetrics,
+    originalCache.folds.find((fold) => String(fold.foldId) === heldoutFoldId).referenceRawMetrics
+  );
+
+  const original = await scoreSpatialOofCandidates(originalCache, { workers: 1, generatedAt: "fixed" });
+  const changed = await scoreSpatialOofCandidates(changedCache, { workers: 1, generatedAt: "fixed" });
+  for (const report of [original, changed]) {
+    assert.equal(report.diagnosticOnly, true);
+    assert.equal(report.freezeEligible, false);
+    assert.equal(report.recommendation.familyId, EXPECTED_SELECTION_STRATEGY);
+  }
+
+  const allFoldIds = ["1", "2", "3", "4", "5"];
+  for (const foldId of allFoldIds) {
+    const fold = crossFittedFold(original, foldId);
+    assert.deepEqual(fold.trainingFoldIds, allFoldIds.filter((candidate) => candidate !== foldId));
+  }
+  assertProductionSelection(original);
+
+  const originalFold = crossFittedFold(original, heldoutFoldId);
+  const changedReportFold = crossFittedFold(changed, heldoutFoldId);
+  assert.deepEqual(originalFold.trainingFoldIds, ["1", "2", "4", "5"]);
+  assert.deepEqual(changedReportFold.trainingFoldIds, ["1", "2", "4", "5"]);
+  assert.deepEqual(
+    originalFold.scopeSelections.map((scope) => scope.scope),
+    originalFold.scopeSelections.map((scope) => scope.scope).toSorted()
+  );
+  assert.deepEqual(changedReportFold.capPolicy, originalFold.capPolicy);
+  assert.deepEqual(changedReportFold.scopeSelections, originalFold.scopeSelections);
+  assert.deepEqual(changedReportFold.overallGuard, originalFold.overallGuard);
+  assert.equal(changedReportFold.selectionSha256, originalFold.selectionSha256);
+  assert.notEqual(changedReportFold.validationSha256, originalFold.validationSha256);
+  assert.notDeepEqual(changedReportFold.metrics, originalFold.metrics);
+  assert.equal(
+    changed.crossFittedSelection.fixedCandidateSetSha256,
+    original.crossFittedSelection.fixedCandidateSetSha256
+  );
+
+  const originalDecision = structuredClone(originalFold);
+  const changedDecision = structuredClone(changedReportFold);
+  delete originalDecision.metrics;
+  delete originalDecision.validationSha256;
+  delete changedDecision.metrics;
+  delete changedDecision.validationSha256;
+  assert.deepEqual(changedDecision, originalDecision);
+});
+
+test("校准器候选 manifest 拒绝未预登记的 ridge 或 shrinkage batch", async () => {
+  const changedFamilies = DEFAULT_CALIBRATOR_FAMILIES.map((family, index) =>
+    index === 1 ? { ...family, shrinkage: family.shrinkage + 0.01 } : family
+  );
+  await assert.rejects(
+    () => scoreSpatialOofCandidates(makeCache(), {
+      workers: 1,
+      calibratorFamilies: changedFamilies,
+      generatedAt: "fixed"
+    }),
+    (error) => error.code === "SPATIAL_CALIBRATOR_BATCH_NOT_FIXED" &&
+      Array.isArray(error.details?.expectedFamilies) &&
+      Array.isArray(error.details?.actualFamilies)
+  );
 });
 
 test("缓存 reference raw metrics 必须能由逐行充分统计完整重算", async () => {

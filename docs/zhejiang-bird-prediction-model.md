@@ -115,9 +115,14 @@
 
 缓存同时绑定快照 SHA、split 文件 SHA、split manifest hash、五折及上游证据生成契约。证据生成器哈希与下游评分器哈希分开；仅修改独立候选评分器或诊断报告代码不要求重新执行 SQLite 聚合。当前为保守绑定，证据生成器哈希仍覆盖整个模型构建器及相关证据模块，因此构建器中即使是不影响充分统计的改动也可能使缓存失效；后续只有把 OOF 生成核心抽成独立模块后才能进一步缩小失效范围。缓存和评分报告都属于 development diagnostic，不能直接供参数冻结、sealed 解封或正式发布使用。
 
-当前已完成的 development 制品在报告生成前删除了内存 OOF 行，并在删除训练私表后执行了 `VACUUM`，因此不能从现有 `.report.json` 或 evaluation-only SQLite 安全回填缓存。首次生成仍需在缓存实现通过短测试后执行一次完整 development；之后可反复离线评分，不再为每组候选重跑聚合。
+首次缓存已于 2026-07-17 随完整 development 五折生成：
 
-下一次完整 development 生成缓存时，在原命令中增加：
+- 缓存：`data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof.sqlite`
+- SHA-256：`6009b8664635154778557f0996f1cd2cba262d0e1f23a253db497f21b7b6665a`
+- 文件大小：16,814,080 bytes
+- `quick_check=ok`、`freelist_count=0`；schema 只含 `metadata`、`folds`、`contexts`、`taxa`、`scores`
+
+后续只要缓存绑定的快照、split 和证据生成器哈希未变，就可反复离线评分，不再为每组候选重跑约 151 分钟的 SQLite 聚合。若需重新生成，在完整 development 命令中增加：
 
 ```powershell
   --write-spatial-oof-cache data\prediction-models\development-cache\zhejiang-v1-20260715-spatial-oof.sqlite
@@ -130,13 +135,29 @@ node tools\score-zhejiang-spatial-oof-cache.js `
   --cache data\prediction-models\development-cache\zhejiang-v1-20260715-spatial-oof.sqlite `
   --snapshot data\prediction-snapshots\zhejiang-v1-20260715.sqlite `
   --spatial-split-manifest docs\zhejiang-v1-20260715-spatial-splits.json `
-  --output data\prediction-models\development-cache\zhejiang-v1-20260715-spatial-candidates.json `
+  --output data\prediction-models\development-cache\zhejiang-v1-20260715-spatial-candidates-next.json `
   --workers 4
 ```
 
-评分器固定使用已经定义的 25 组上限和 4,096 行分块。正例至少 200 的鸟种在每个 held-out 折上只用其余四折选择逐鸟上限，再对该折完整重算 Brier、十箱 ECE、逐鸟/共享组最大 ECE 和 Recall@20；生产候选仅用全部五个 development 折重选。截距校准、温度缩放及不同 ridge 的 beta 校准器也分别执行四折拟合、一折验证，并同时执行逐作用域及整体 Brier 相对恶化不超过 1%、ECE 恶化不超过 0.01 的保护门。十箱汇总只由逐行新概率重新生成，不能把旧报告中的箱级近似变换当正式评分。
+评分器固定使用已经定义的 25 组上限和 4,096 行分块。逐鸟 cap 先保留 pooled Brier 距最佳不超过 0.1% 的候选，再按训练折最坏相对 Brier regret、平均 regret、pooled Brier 和候选 ID 确定性选择。校准器候选固定为 15 组：恒等映射；ridge 0.1 的截距/温度校准及 0.25、0.5、0.75、1.0 shrinkage；完整 ridge 0.001/0.1 beta；ridge 1 beta 及 0.25、0.5、0.75、1.0 shrinkage。评分 API 拒绝未预登记的 ridge、shrinkage 或候选顺序，完整候选 manifest 及保护门共同绑定 SHA-256。
 
-逐作用域保护门和校准器族推荐仍使用同一批 development OOF 标签做开发选择，所以离线报告中的质量门结果不是无偏发布指标；选定方案、扩展 runtime/参数 schema 并冻结代码后，必须重新运行完整 development 才能形成正式 go/no-go 依据。逐鸟上限的生产诊断名单使用缓存绑定的 development-pool 正例数，因此覆盖该开发池内全部 `positive_count >= 200` 公共鸟种，同时不接触 sealed 保留单元；若某个边界鸟种在五个外折中从未达到 200，它仍可获得全五折逐鸟上限诊断，但由于没有逐鸟作用域的 4/1 校准保护门，不生成该鸟的生产逐鸟校准器。
+每个 outer held-out 折只用其余四折的标签执行内层 3 折拟合、1 折选择，再用四折重拟合所选 scope family 并验证 outer 折。报告逐折保存 inner/outer 折来源、cap 策略、family/ridge/shrinkage、保护门、拟合参数以及 selection/validation SHA。篡改 outer held-out 标签只会改变 validation SHA，不会改变该折 selection SHA；`workers=1/2/4` 的自动测试结果完全一致。逐作用域和整体保护门仍要求 Brier 相对恶化不超过 1%、ECE 恶化不超过 0.01；最终完整 Brier/ECE/Recall 门槛不变。
+
+现有 cache v1 没有为每个 outer×inner 三折组合重新生成行政层空间证据，内层缓存证据可能包含 outer 折训练统计；inner scope 资格也使用缓存折的训练正例数，而不是三折 distinct observer-group 重新计数。因此这里的嵌套选择只保证“缓存标签层面”的 outer 隔离，仍是 development diagnostic，不是端到端无偏 release 指标。严格正式化必须重建 outer×inner 证据，并在扩展 runtime/参数 schema 后重新运行完整 development。十箱汇总只由逐行新概率重新生成，但仍不得被当作正式发布结果。
+
+#### 2026-07-17 固定批次离线结果
+
+- 固定候选 manifest SHA-256：`452653b08530fa30568f530e2bb55cdaf5fc188cca9ebf98563239dc1cf046ec`
+- 4-worker 报告：`data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-candidates-nested-fixed-v1-w4.json`，SHA-256 `40c2e451cbaecb1a09622df8903af298c34a115f2351776f2d1de512b3afec4d`
+- 1-worker 复跑：`data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-candidates-nested-fixed-v1-w1.json`，SHA-256 `4da7bddf7151c9d141b68711d1487140dd09bfb3aa986a5d7f588079f3d24668`
+- 删除仅允许变化的 `generatedAt`、`scoring.workers` 后，两份完整 JSON 完全一致；投影 SHA-256 均为 `9f2eea6105adcdd346b58128cc7e6cee6f045b21edae0800c3959907fd89af27`
+- Brier Skill `+3.0535863609%`、ECE `0.0048678038973248875`、Recall@20 delta `+2.4361948956pp`
+- 共享校准组最大 ECE `0.00017673993094259626`
+- 逐鸟最大 ECE `0.11765780718704699`，最差为 `taxon_id=5013` 暗绿绣眼鸟；白头鹎 `taxon_id=4866` 为 `0.10302528100804287`
+- 报告截取的最差 30 种中有 25 种超过 `maximumSpeciesEce=0.05`
+- 唯一失败仍为 `spatial.species_calibration.maximumEce`
+
+固定批次结论为 **no-go**。失败来自明显的逐折异质性，不是 worker 调度或确定性归并噪声；按预登记约束不追加候选、不降低门槛、不冻结参数、不打开 sealed，也不启动下一次完整 development 回测。
 
 当前 runtime 和空间参数制品仍只支持按流行度组查询行政层上限，因此逐鸟候选即使改善 development，也只能先作为诊断。只有在另行扩展运行时和参数 schema、重新完成全部 development 折并通过所有门槛后，才可能进入冻结流程。
 

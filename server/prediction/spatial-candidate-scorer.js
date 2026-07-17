@@ -17,7 +17,7 @@ const {
   candidateSetSha256
 } = require("./spatial-oof-cache");
 
-const SPATIAL_CANDIDATE_SCORER_SCHEMA_VERSION = 1;
+const SPATIAL_CANDIDATE_SCORER_SCHEMA_VERSION = 2;
 const SPATIAL_CANDIDATE_SCORER_FILES = Object.freeze([
   "server/prediction/math.js",
   "server/prediction/model.js",
@@ -38,13 +38,27 @@ const SPATIAL_CALIBRATION_GUARD = Object.freeze({
   maximumRelativeBrierDegradation: 0.01,
   maximumEceDegradation: 0.01
 });
+const STABLE_CAP_SELECTION_POLICY = Object.freeze({
+  strategy: "near_optimal_0.1pct_minimax_regret_v1",
+  maximumRelativePooledBrierRegret: 0.001
+});
+const NESTED_SCOPE_ADAPTIVE_STRATEGY_ID = "nested_scope_adaptive_fixed_v1";
 const DEFAULT_CALIBRATOR_FAMILIES = Object.freeze([
-  Object.freeze({ id: "identity", type: "identity", ridge: 0 }),
-  Object.freeze({ id: "intercept_ridge_0.1", type: "intercept", ridge: 0.1 }),
-  Object.freeze({ id: "temperature_ridge_0.1", type: "temperature", ridge: 0.1 }),
-  Object.freeze({ id: "beta_ridge_0.001_current", type: "beta", ridge: 1e-3 }),
-  Object.freeze({ id: "beta_ridge_0.1", type: "beta", ridge: 0.1 }),
-  Object.freeze({ id: "beta_ridge_1", type: "beta", ridge: 1 })
+  Object.freeze({ id: "identity", type: "identity", ridge: 0, shrinkage: 0 }),
+  Object.freeze({ id: "intercept_ridge_0.1_shrink_0.25", type: "intercept", ridge: 0.1, shrinkage: 0.25 }),
+  Object.freeze({ id: "intercept_ridge_0.1_shrink_0.5", type: "intercept", ridge: 0.1, shrinkage: 0.5 }),
+  Object.freeze({ id: "intercept_ridge_0.1_shrink_0.75", type: "intercept", ridge: 0.1, shrinkage: 0.75 }),
+  Object.freeze({ id: "intercept_ridge_0.1", type: "intercept", ridge: 0.1, shrinkage: 1 }),
+  Object.freeze({ id: "temperature_ridge_0.1_shrink_0.25", type: "temperature", ridge: 0.1, shrinkage: 0.25 }),
+  Object.freeze({ id: "temperature_ridge_0.1_shrink_0.5", type: "temperature", ridge: 0.1, shrinkage: 0.5 }),
+  Object.freeze({ id: "temperature_ridge_0.1_shrink_0.75", type: "temperature", ridge: 0.1, shrinkage: 0.75 }),
+  Object.freeze({ id: "temperature_ridge_0.1", type: "temperature", ridge: 0.1, shrinkage: 1 }),
+  Object.freeze({ id: "beta_ridge_0.001_current", type: "beta", ridge: 1e-3, shrinkage: 1 }),
+  Object.freeze({ id: "beta_ridge_0.1", type: "beta", ridge: 0.1, shrinkage: 1 }),
+  Object.freeze({ id: "beta_ridge_1_shrink_0.25", type: "beta", ridge: 1, shrinkage: 0.25 }),
+  Object.freeze({ id: "beta_ridge_1_shrink_0.5", type: "beta", ridge: 1, shrinkage: 0.5 }),
+  Object.freeze({ id: "beta_ridge_1_shrink_0.75", type: "beta", ridge: 1, shrinkage: 0.75 }),
+  Object.freeze({ id: "beta_ridge_1", type: "beta", ridge: 1, shrinkage: 1 })
 ]);
 
 class SpatialCandidateScorerError extends Error {
@@ -139,14 +153,33 @@ function fitTemperatureCalibration(points, ridge = 0.1) {
   return { a: scale, b: scale, c: 0, fitted: true, iterations };
 }
 
+function shrinkCalibrationFit(fit, shrinkage = 1) {
+  const amount = clamp(Number(shrinkage), 0, 1);
+  if (!fit?.fitted || amount <= 0) {
+    return { a: 1, b: 1, c: 0, fitted: false, iterations: Number(fit?.iterations) || 0, shrinkage: amount };
+  }
+  return {
+    a: 1 + amount * (Number(fit.a) - 1),
+    b: 1 + amount * (Number(fit.b) - 1),
+    c: amount * Number(fit.c),
+    fitted: true,
+    iterations: Number(fit.iterations) || 0,
+    shrinkage: amount
+  };
+}
+
 function fitCalibrationFamily(points, family) {
-  if (family.type === "identity") return { a: 1, b: 1, c: 0, fitted: false, iterations: 0 };
-  if (family.type === "intercept") return fitInterceptCalibration(points, family.ridge);
-  if (family.type === "temperature") return fitTemperatureCalibration(points, family.ridge);
-  if (family.type === "beta") return fitBetaCalibration(points, { ridge: family.ridge });
-  throw new SpatialCandidateScorerError("SPATIAL_CALIBRATOR_FAMILY_INVALID", "未知空间校准器族。", {
-    family
-  });
+  if (family.type === "identity") return { a: 1, b: 1, c: 0, fitted: false, iterations: 0, shrinkage: 0 };
+  let fit;
+  if (family.type === "intercept") fit = fitInterceptCalibration(points, family.ridge);
+  else if (family.type === "temperature") fit = fitTemperatureCalibration(points, family.ridge);
+  else if (family.type === "beta") fit = fitBetaCalibration(points, { ridge: family.ridge });
+  else {
+    throw new SpatialCandidateScorerError("SPATIAL_CALIBRATOR_FAMILY_INVALID", "未知空间校准器族。", {
+      family
+    });
+  }
+  return shrinkCalibrationFit(fit, family.shrinkage ?? 1);
 }
 
 function calibrationGroup(positiveCount) {
@@ -158,9 +191,9 @@ function calibrationGroup(positiveCount) {
   return null;
 }
 
-function calibrationScope(row) {
-  if (Number(row.positiveCount) >= 200) return `species:${row.taxonId}`;
-  const group = calibrationGroup(row.positiveCount);
+function calibrationScope(row, positiveCount = row.positiveCount) {
+  if (Number(positiveCount) >= 200) return `species:${row.taxonId}`;
+  const group = calibrationGroup(positiveCount);
   return group ? `group:${group}` : null;
 }
 
@@ -253,7 +286,40 @@ function taskValuesForRow(row) {
   ];
 }
 
-async function selectSpeciesCaps({ trainingRows, targetTaxa, candidates, workers, baseCaps }) {
+function capFoldKey(foldIds) {
+  return [...foldIds].map(String).sort().join(",");
+}
+
+function combinations(values, size, start = 0, prefix = [], output = []) {
+  if (prefix.length === size) {
+    output.push(prefix);
+    return output;
+  }
+  for (let index = start; index <= values.length - (size - prefix.length); index += 1) {
+    combinations(values, size, index + 1, [...prefix, values[index]], output);
+  }
+  return output;
+}
+
+function targetPositiveCountsForRows(rows, countKey = "positiveCount") {
+  const counts = new Map();
+  for (const row of rows) {
+    counts.set(String(row.taxonId), Math.max(
+      counts.get(String(row.taxonId)) || 0,
+      Number(row[countKey]) || 0
+    ));
+  }
+  return counts;
+}
+
+function targetTaxaAtLeast200(rows, countKey = "positiveCount") {
+  return [...targetPositiveCountsForRows(rows, countKey)]
+    .filter(([, count]) => count >= 200)
+    .map(([taxonId]) => taxonId)
+    .sort();
+}
+
+async function scoreSpeciesCapRows({ trainingRows, targetTaxa, candidates, workers }) {
   const targetTaxonSet = new Set(targetTaxa);
   const tasks = new Map([...targetTaxonSet].sort().map((taxonId) => [taxonId, []]));
   for (const row of trainingRows) {
@@ -264,7 +330,7 @@ async function selectSpeciesCaps({ trainingRows, targetTaxa, candidates, workers
   for (const [taxonId, values] of [...tasks]) {
     if (!values.length) tasks.delete(taxonId);
   }
-  const result = tasks.size
+  return tasks.size
     ? await scoreAdminCapTasks({
         tasksByPrevalence: tasks,
         candidates,
@@ -272,12 +338,87 @@ async function selectSpeciesCaps({ trainingRows, targetTaxa, candidates, workers
         chunkRecords: DEFAULT_ADMIN_CAP_CHUNK_RECORDS
       })
     : null;
+}
+
+async function buildCapScoreIndex(cache, candidates, workers, productionTaxa) {
+  const foldIds = cache.folds.map((fold) => String(fold.foldId)).sort();
+  const foldsById = new Map(cache.folds.map((fold) => [String(fold.foldId), fold]));
+  const requestedSubsets = [
+    ...combinations(foldIds, 1),
+    ...combinations(foldIds, 3),
+    ...combinations(foldIds, 4),
+    foldIds
+  ];
+  const scores = new Map();
+  for (const subset of requestedSubsets) {
+    const key = capFoldKey(subset);
+    if (scores.has(key)) continue;
+    const trainingRows = subset.flatMap((foldId) => foldsById.get(foldId)?.scoreRows || []);
+    scores.set(key, await scoreSpeciesCapRows({
+      trainingRows,
+      targetTaxa: productionTaxa,
+      candidates,
+      workers
+    }));
+  }
+  return { foldIds, foldsById, scores };
+}
+
+function relativeBrierRegret(candidateBrier, bestBrier) {
+  if (!Number.isFinite(candidateBrier) || !Number.isFinite(bestBrier)) return Number.POSITIVE_INFINITY;
+  if (bestBrier > 1e-12) return Math.max(0, (candidateBrier - bestBrier) / bestBrier);
+  return candidateBrier <= bestBrier + 1e-12 ? 0 : Number.POSITIVE_INFINITY;
+}
+
+function stableCapWinner(ranking, perFoldRankings) {
+  if (!ranking?.length) return null;
+  const best = ranking[0];
+  const eligible = ranking.filter((candidate) =>
+    relativeBrierRegret(candidate.brier, best.brier) <=
+      STABLE_CAP_SELECTION_POLICY.maximumRelativePooledBrierRegret + 1e-12
+  );
+  const foldMaps = perFoldRankings.map((foldRanking) => new Map(
+    (foldRanking || []).map((candidate) => [candidate.id, candidate])
+  ));
+  const scored = eligible.map((candidate) => {
+    const regrets = foldMaps.map((foldMap) => {
+      const foldCandidate = foldMap.get(candidate.id);
+      const foldBest = [...foldMap.values()].sort(
+        (left, right) => left.brier - right.brier || left.id.localeCompare(right.id)
+      )[0];
+      return relativeBrierRegret(foldCandidate?.brier, foldBest?.brier);
+    });
+    return {
+      ...candidate,
+      pooledRelativeBrierRegret: relativeBrierRegret(candidate.brier, best.brier),
+      maximumFoldRelativeBrierRegret: Math.max(...regrets),
+      meanFoldRelativeBrierRegret: regrets.reduce((sum, value) => sum + value, 0) / Math.max(1, regrets.length),
+      equivalentCandidateCount: eligible.length
+    };
+  }).sort((left, right) =>
+    left.maximumFoldRelativeBrierRegret - right.maximumFoldRelativeBrierRegret ||
+    left.meanFoldRelativeBrierRegret - right.meanFoldRelativeBrierRegret ||
+    left.brier - right.brier ||
+    left.id.localeCompare(right.id)
+  );
+  return scored[0] || best;
+}
+
+function selectSpeciesCapsFromIndex({ capScoreIndex, trainingFoldIds, targetTaxa, baseCaps }) {
+  const targetTaxonSet = new Set(targetTaxa);
+  const pooledResult = capScoreIndex.scores.get(capFoldKey(trainingFoldIds));
+  const perFoldResults = trainingFoldIds.map((foldId) =>
+    capScoreIndex.scores.get(capFoldKey([foldId]))
+  );
   const selected = new Map();
   const details = [];
   const fallbackCaps = baseCaps.species_200_plus;
   for (const taxonId of [...targetTaxonSet].sort()) {
-    const ranking = result?.byPrevalence?.[taxonId] || [];
-    const winner = ranking[0] || {
+    const ranking = pooledResult?.byPrevalence?.[taxonId] || [];
+    const winner = stableCapWinner(
+      ranking,
+      perFoldResults.map((result) => result?.byPrevalence?.[taxonId] || [])
+    ) || {
       id: candidateIdForCaps(fallbackCaps),
       caps: fallbackCaps,
       brier: null,
@@ -292,6 +433,10 @@ async function selectSpeciesCaps({ trainingRows, targetTaxa, candidates, workers
       brier: winner.brier,
       baselineBrier: winner.baselineBrier,
       evaluatedWeight: winner.evaluatedWeight,
+      pooledRelativeBrierRegret: winner.pooledRelativeBrierRegret ?? null,
+      maximumFoldRelativeBrierRegret: winner.maximumFoldRelativeBrierRegret ?? null,
+      meanFoldRelativeBrierRegret: winner.meanFoldRelativeBrierRegret ?? null,
+      equivalentCandidateCount: winner.equivalentCandidateCount ?? 1,
       topCandidates: ranking.slice(0, 3).map((candidate) => ({
         id: candidate.id,
         caps: candidate.caps,
@@ -303,8 +448,10 @@ async function selectSpeciesCaps({ trainingRows, targetTaxa, candidates, workers
   return {
     selected,
     details,
-    workerCount: result?.workerCount || 0,
-    taskCount: result?.taskCount || 0
+    workerCount: pooledResult?.workerCount || 0,
+    taskCount: pooledResult?.taskCount || 0,
+    trainingFoldIds: [...trainingFoldIds].map(String).sort(),
+    strategy: STABLE_CAP_SELECTION_POLICY.strategy
   };
 }
 
@@ -779,11 +926,11 @@ async function buildCapSelectionPlans(cache, candidates, workers, baseCaps) {
     .filter(([, count]) => count >= 200)
     .map(([taxonId]) => taxonId)
     .sort();
-  const production = await selectSpeciesCaps({
-    trainingRows: allRows,
+  const capScoreIndex = await buildCapScoreIndex(cache, candidates, workers, productionTaxa);
+  const production = selectSpeciesCapsFromIndex({
+    capScoreIndex,
+    trainingFoldIds: capScoreIndex.foldIds,
     targetTaxa: productionTaxa,
-    candidates,
-    workers,
     baseCaps
   });
   const heldout = [];
@@ -800,20 +947,20 @@ async function buildCapSelectionPlans(cache, candidates, workers, baseCaps) {
       .map(([taxonId]) => taxonId)
       .sort();
     const trainingFolds = cache.folds.filter((fold) => fold !== targetFold);
-    const selection = await selectSpeciesCaps({
-      trainingRows: trainingFolds.flatMap((fold) => fold.scoreRows),
+    const trainingFoldIds = trainingFolds.map((fold) => String(fold.foldId)).sort();
+    const selection = selectSpeciesCapsFromIndex({
+      capScoreIndex,
+      trainingFoldIds,
       targetTaxa,
-      candidates,
-      workers,
       baseCaps
     });
     heldout.push({
       foldId: String(targetFold.foldId),
-      trainingFoldIds: trainingFolds.map((fold) => String(fold.foldId)).sort(),
+      trainingFoldIds,
       ...selection
     });
   }
-  return { production, heldout, productionPositiveCounts };
+  return { production, heldout, productionPositiveCounts, capScoreIndex };
 }
 
 function speciesCapReport(plans) {
@@ -956,6 +1103,431 @@ function scoreCalibrationFamily({ cache, capPlans, baseCaps, family }) {
   };
 }
 
+function capPolicyReport(plan) {
+  return {
+    strategy: STABLE_CAP_SELECTION_POLICY.strategy,
+    maximumRelativePooledBrierRegret: STABLE_CAP_SELECTION_POLICY.maximumRelativePooledBrierRegret,
+    trainingFoldIds: [...(plan.trainingFoldIds || [])].map(String).sort(),
+    speciesCaps: plan.details.map((detail) => ({
+      taxonId: detail.taxonId,
+      selectedCandidateId: detail.selectedCandidateId,
+      caps: detail.caps,
+      brier: detail.brier,
+      pooledRelativeBrierRegret: detail.pooledRelativeBrierRegret,
+      maximumFoldRelativeBrierRegret: detail.maximumFoldRelativeBrierRegret,
+      meanFoldRelativeBrierRegret: detail.meanFoldRelativeBrierRegret,
+      equivalentCandidateCount: detail.equivalentCandidateCount,
+      usedBaseFallback: detail.usedBaseFallback
+    }))
+  };
+}
+
+function foldRows(capPlans, foldIds) {
+  return foldIds.flatMap((foldId) => capPlans.capScoreIndex.foldsById.get(String(foldId))?.scoreRows || []);
+}
+
+function targetTaxaForFold(targetFold, targetPositiveCounts = null) {
+  if (!(targetPositiveCounts instanceof Map)) return targetTaxaAtLeast200(targetFold.scoreRows);
+  return [...new Set(targetFold.scoreRows.map((row) => String(row.taxonId)))]
+    .filter((taxonId) => Number(targetPositiveCounts.get(taxonId)) >= 200)
+    .sort();
+}
+
+function capPlanForTargetFold(capPlans, trainingFoldIds, targetFold, baseCaps, targetPositiveCounts = null) {
+  return selectSpeciesCapsFromIndex({
+    capScoreIndex: capPlans.capScoreIndex,
+    trainingFoldIds,
+    targetTaxa: targetTaxaForFold(targetFold, targetPositiveCounts),
+    baseCaps
+  });
+}
+
+function calibrationEntriesForFold({
+  trainingRows,
+  targetFold,
+  targetCapPlan,
+  targetPositiveCounts = null,
+  baseCaps,
+  family
+}) {
+  const calibrators = fitCalibratorMap({
+    trainingRows,
+    targetRows: targetFold.scoreRows,
+    targetPositiveCounts,
+    speciesCaps: targetCapPlan.selected,
+    baseCaps,
+    family
+  });
+  return targetFold.scoreRows.map((row) => {
+    const rawProbability = probabilityFromAdminEvidence(
+      row,
+      candidateCapsForRow(row, targetCapPlan.selected, baseCaps)
+    );
+    const scope = calibrationScope(
+      row,
+      targetPositiveCounts instanceof Map
+        ? targetPositiveCounts.get(String(row.taxonId))
+        : row.positiveCount
+    );
+    const fit = scope ? calibrators.get(scope) || null : null;
+    return {
+      foldId: String(targetFold.foldId),
+      row,
+      scope,
+      fit,
+      rawProbability,
+      candidateProbability: fit?.fitted ? calibrateProbability(rawProbability, fit) : rawProbability
+    };
+  });
+}
+
+function crossFittedFamilyEntries({
+  cache,
+  selectionFoldIds,
+  capPlans,
+  baseCaps,
+  family,
+  targetPositiveCounts = null
+}) {
+  const entries = [];
+  for (const heldoutFoldId of [...selectionFoldIds].map(String).sort()) {
+    const trainingFoldIds = selectionFoldIds
+      .map(String)
+      .filter((foldId) => foldId !== heldoutFoldId)
+      .sort();
+    const targetFold = capPlans.capScoreIndex.foldsById.get(heldoutFoldId);
+    const targetCapPlan = capPlanForTargetFold(
+      capPlans,
+      trainingFoldIds,
+      targetFold,
+      baseCaps,
+      targetPositiveCounts
+    );
+    entries.push(...calibrationEntriesForFold({
+      trainingRows: foldRows(capPlans, trainingFoldIds),
+      targetFold,
+      targetCapPlan,
+      targetPositiveCounts,
+      baseCaps,
+      family
+    }));
+  }
+  return entries;
+}
+
+function identityFamily(families) {
+  return families.find((family) => family.type === "identity");
+}
+
+function validateFixedCalibratorFamilies(families) {
+  if (!Array.isArray(families) || canonicalJson(families) !== canonicalJson(DEFAULT_CALIBRATOR_FAMILIES)) {
+    throw new SpatialCandidateScorerError(
+      "SPATIAL_CALIBRATOR_BATCH_NOT_FIXED",
+      "development 离线评分只允许预登记的固定校准器候选批次。",
+      {
+        expectedFamilies: DEFAULT_CALIBRATOR_FAMILIES,
+        actualFamilies: families
+      }
+    );
+  }
+  return DEFAULT_CALIBRATOR_FAMILIES;
+}
+
+function innerFoldProvenance(selectionFoldIds, allFoldIds) {
+  return [...selectionFoldIds].map(String).sort().map((heldoutFoldId) => ({
+    heldoutFoldId,
+    trainingFoldIds: selectionFoldIds
+      .map(String)
+      .filter((foldId) => foldId !== heldoutFoldId)
+      .sort(),
+    cachedEvidenceTrainingFoldIds: allFoldIds
+      .map(String)
+      .filter((foldId) => foldId !== heldoutFoldId)
+      .sort()
+  }));
+}
+
+function selectScopeFamilies({ rawEntries, entriesByFamily, families }) {
+  const identity = identityFamily(families);
+  const rawGuard = guardFamilyEntries(
+    rawEntries.map((entry) => ({ ...entry, fit: null, candidateProbability: entry.rawProbability })),
+    identity
+  );
+  const rawScopes = new Map(rawGuard.scopes.map((scope) => [scope.scope, scope]));
+  const guardedFamilies = families
+    .filter((family) => family.type !== "identity")
+    .map((family) => ({
+      family,
+      guard: guardFamilyEntries(entriesByFamily.get(family.id) || [], family)
+    }));
+  const scopeNames = [...new Set([
+    ...rawScopes.keys(),
+    ...guardedFamilies.flatMap(({ guard }) => guard.scopes.map((scope) => scope.scope))
+  ])].sort();
+  let scopeSelections = scopeNames.map((scope) => {
+    const raw = rawScopes.get(scope) || null;
+    const candidates = guardedFamilies
+      .map(({ family, guard }) => ({ family, stats: guard.scopes.find((entry) => entry.scope === scope) }))
+      .filter(({ stats }) => stats?.accepted)
+      .sort((left, right) =>
+        left.stats.candidateEce - right.stats.candidateEce ||
+        left.stats.candidateBrier - right.stats.candidateBrier ||
+        (left.family.shrinkage ?? 1) - (right.family.shrinkage ?? 1) ||
+        left.family.id.localeCompare(right.family.id)
+      );
+    const winner = candidates[0] || null;
+    return {
+      scope,
+      familyId: winner?.family.id || identity.id,
+      family: winner?.family || identity,
+      accepted: Boolean(winner),
+      innerGuard: winner?.stats || {
+        rawBrier: raw?.rawBrier ?? null,
+        candidateBrier: raw?.rawBrier ?? null,
+        relativeBrierDegradation: 0,
+        rawEce: raw?.rawEce ?? null,
+        candidateEce: raw?.rawEce ?? null,
+        eceDegradation: 0,
+        fittedApplications: 0
+      }
+    };
+  });
+  const selectionsByScope = new Map(scopeSelections.map((selection) => [selection.scope, selection]));
+  const selectedEntries = rawEntries.map((entry, index) => {
+    const selection = entry.scope ? selectionsByScope.get(entry.scope) : null;
+    const selected = selection?.accepted
+      ? entriesByFamily.get(selection.familyId)?.[index] || entry
+      : entry;
+    return { foldId: entry.foldId, row: entry.row, probability: selected.candidateProbability ?? entry.rawProbability };
+  });
+  const rawMetrics = evaluateCandidateRows(rawEntries.map((entry) => ({
+    foldId: entry.foldId,
+    row: entry.row,
+    probability: entry.rawProbability
+  })));
+  const candidateMetrics = evaluateCandidateRows(selectedEntries);
+  const relativeBrier = relativeBrierDegradation(rawMetrics.brier, candidateMetrics.brier);
+  const eceDegradation = candidateMetrics.ece - rawMetrics.ece;
+  const overallAccepted =
+    relativeBrier <= SPATIAL_CALIBRATION_GUARD.maximumRelativeBrierDegradation &&
+    eceDegradation <= SPATIAL_CALIBRATION_GUARD.maximumEceDegradation;
+  if (!overallAccepted) {
+    scopeSelections = scopeSelections.map((selection) => ({
+      ...selection,
+      familyId: identity.id,
+      family: identity,
+      accepted: false,
+      rejectedByOverallGuard: selection.accepted
+    }));
+  }
+  return {
+    scopeSelections,
+    overallGuard: {
+      accepted: overallAccepted,
+      ...SPATIAL_CALIBRATION_GUARD,
+      rawBrier: rawMetrics.brier,
+      candidateBrier: candidateMetrics.brier,
+      relativeBrierDegradation: relativeBrier,
+      rawEce: rawMetrics.ece,
+      candidateEce: candidateMetrics.ece,
+      eceDegradation
+    },
+    rawMetrics,
+    metrics: overallAccepted ? candidateMetrics : rawMetrics
+  };
+}
+
+function buildSelectionForFoldSet({
+  cache,
+  selectionFoldIds,
+  capPlans,
+  baseCaps,
+  families,
+  targetPositiveCounts = null
+}) {
+  const entriesByFamily = new Map();
+  for (const family of families.filter((entry) => entry.type !== "identity")) {
+    entriesByFamily.set(family.id, crossFittedFamilyEntries({
+      cache,
+      selectionFoldIds,
+      capPlans,
+      baseCaps,
+      family,
+      targetPositiveCounts
+    }));
+  }
+  const firstEntries = entriesByFamily.values().next().value || [];
+  const rawEntries = firstEntries.map((entry) => ({ ...entry, candidateProbability: entry.rawProbability }));
+  return {
+    ...selectScopeFamilies({ rawEntries, entriesByFamily, families }),
+    innerFolds: innerFoldProvenance(selectionFoldIds, capPlans.capScoreIndex.foldIds),
+    entriesByFamily,
+    rawEntries
+  };
+}
+
+function fitSelectedFamilies({
+  trainingRows,
+  targetRows,
+  targetPositiveCounts = null,
+  speciesCaps,
+  baseCaps,
+  scopeSelections,
+  families
+}) {
+  const familyById = new Map(families.map((family) => [family.id, family]));
+  const selectedFamilyIds = [...new Set(
+    scopeSelections.filter((selection) => selection.accepted).map((selection) => selection.familyId)
+  )].sort();
+  return new Map(selectedFamilyIds.map((familyId) => [
+    familyId,
+    fitCalibratorMap({
+      trainingRows,
+      targetRows,
+      targetPositiveCounts,
+      speciesCaps,
+      baseCaps,
+      family: familyById.get(familyId)
+    })
+  ]));
+}
+
+function applySelectedFamilies({ targetFold, capPlan, baseCaps, selection, fittedByFamily }) {
+  const selectionsByScope = new Map(selection.scopeSelections.map((scope) => [scope.scope, scope]));
+  const entries = targetFold.scoreRows.map((row) => {
+    const rawProbability = probabilityFromAdminEvidence(
+      row,
+      candidateCapsForRow(row, capPlan.selected, baseCaps)
+    );
+    const scope = calibrationScope(row);
+    const selected = scope ? selectionsByScope.get(scope) || null : null;
+    const fit = selected?.accepted
+      ? fittedByFamily.get(selected.familyId)?.get(scope) || null
+      : null;
+    return {
+      foldId: String(targetFold.foldId),
+      row,
+      probability: fit?.fitted ? calibrateProbability(rawProbability, fit) : rawProbability
+    };
+  });
+  const reportedSelections = selection.scopeSelections.map((scope) => ({
+    ...scope,
+    fit: scope.accepted ? fittedByFamily.get(scope.familyId)?.get(scope.scope) || null : null
+  }));
+  return { entries, scopeSelections: reportedSelections };
+}
+
+function canonicalSha256(value) {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function fixedCandidateManifest(families, candidates) {
+  const manifest = {
+    selectionStrategy: NESTED_SCOPE_ADAPTIVE_STRATEGY_ID,
+    capCandidateSetSha256: candidateSetSha256(),
+    capCandidateCount: candidates.length,
+    capPolicy: STABLE_CAP_SELECTION_POLICY,
+    calibratorFamilies: families,
+    calibrationGuard: SPATIAL_CALIBRATION_GUARD
+  };
+  return { ...manifest, sha256: canonicalSha256(manifest) };
+}
+
+function buildNestedScopeAdaptiveSelection({ cache, capPlans, baseCaps, families, candidateManifest }) {
+  const foldIds = capPlans.capScoreIndex.foldIds;
+  const foldReports = [];
+  const heldoutEntries = [];
+  for (const heldoutFoldId of foldIds) {
+    const trainingFoldIds = foldIds.filter((foldId) => foldId !== heldoutFoldId);
+    const targetFold = capPlans.capScoreIndex.foldsById.get(heldoutFoldId);
+    const selection = buildSelectionForFoldSet({
+      cache,
+      selectionFoldIds: trainingFoldIds,
+      capPlans,
+      baseCaps,
+      families
+    });
+    const capPlan = capPlans.heldout.find((plan) => plan.foldId === heldoutFoldId);
+    const fittedByFamily = fitSelectedFamilies({
+      trainingRows: foldRows(capPlans, trainingFoldIds),
+      targetRows: targetFold.scoreRows,
+      speciesCaps: capPlan.selected,
+      baseCaps,
+      scopeSelections: selection.scopeSelections,
+      families
+    });
+    const applied = applySelectedFamilies({ targetFold, capPlan, baseCaps, selection, fittedByFamily });
+    const metrics = evaluateCandidateRows(applied.entries);
+    heldoutEntries.push(...applied.entries);
+    const selectionRecord = {
+      heldoutFoldId,
+      trainingFoldIds,
+      innerFolds: selection.innerFolds,
+      cachedEvidenceRebuiltForInnerFolds: false,
+      capPolicy: capPolicyReport(capPlan),
+      scopeSelections: applied.scopeSelections,
+      overallGuard: selection.overallGuard
+    };
+    foldReports.push({
+      ...selectionRecord,
+      selectionSha256: canonicalSha256(selectionRecord),
+      metrics: compactMetrics(metrics),
+      validationSha256: canonicalSha256(compactMetrics(metrics))
+    });
+  }
+
+  const productionSelection = buildSelectionForFoldSet({
+    cache,
+    selectionFoldIds: foldIds,
+    capPlans,
+    baseCaps,
+    families,
+    targetPositiveCounts: capPlans.productionPositiveCounts
+  });
+  const allRows = cache.folds.flatMap((fold) => fold.scoreRows);
+  const productionFitted = fitSelectedFamilies({
+    trainingRows: allRows,
+    targetRows: allRows,
+    targetPositiveCounts: capPlans.productionPositiveCounts,
+    speciesCaps: capPlans.production.selected,
+    baseCaps,
+    scopeSelections: productionSelection.scopeSelections,
+    families
+  });
+  const productionScopeSelections = productionSelection.scopeSelections.map((scope) => ({
+    ...scope,
+    fit: scope.accepted ? productionFitted.get(scope.familyId)?.get(scope.scope) || null : null
+  }));
+  const productionCalibrators = productionScopeSelections
+    .filter((scope) => scope.accepted && scope.fit?.fitted)
+    .map((scope) => ({ scope: scope.scope, family: scope.familyId, fit: scope.fit }));
+  const metrics = evaluateCandidateRows(heldoutEntries);
+  const productionRecord = {
+    trainingFoldIds: foldIds,
+    innerFolds: productionSelection.innerFolds,
+    cachedEvidenceRebuiltForInnerFolds: false,
+    capPolicy: capPolicyReport(capPlans.production),
+    scopeSelections: productionScopeSelections,
+    overallGuard: productionSelection.overallGuard,
+    productionCalibrators
+  };
+  return {
+    strategy: NESTED_SCOPE_ADAPTIVE_STRATEGY_ID,
+    fitFoldCount: 4,
+    heldoutFoldCount: 5,
+    fixedCandidateSetSha256: candidateManifest.sha256,
+    folds: foldReports,
+    production: {
+      ...productionRecord,
+      selectionSha256: canonicalSha256(productionRecord)
+    },
+    metrics,
+    compactMetrics: compactMetrics(metrics),
+    failures: spatialQualityFailures(metrics),
+    productionCalibrators
+  };
+}
+
 function recommendedFamily(families) {
   return [...families].sort((left, right) =>
     left.failures.length - right.failures.length ||
@@ -977,16 +1549,25 @@ async function scoreSpatialOofCandidates(cache, {
   if (!Number.isInteger(Number(workers)) || Number(workers) < 1 || Number(workers) > 32) {
     throw new SpatialCandidateScorerError("SPATIAL_SCORER_WORKERS_INVALID", "workers 必须是 1..32 的整数。" );
   }
+  calibratorFamilies = validateFixedCalibratorFamilies(calibratorFamilies);
   const candidates = buildAdminExposureCapCandidates();
   validateScoringCache(cache, candidates);
   const baseCaps = cache.metadata.baseAdminExposureCapsByPrevalence;
   validateBaseCaps(baseCaps, candidates);
   const checkedReference = assertReferenceEvidence(cache, baseCaps);
+  const candidateManifest = fixedCandidateManifest(calibratorFamilies, candidates);
   const capPlans = await buildCapSelectionPlans(cache, candidates, Number(workers), baseCaps);
   const familyResults = calibratorFamilies.map((family) =>
     scoreCalibrationFamily({ cache, capPlans, baseCaps, family })
   );
-  const recommended = recommendedFamily(familyResults);
+  const exploratoryRecommended = recommendedFamily(familyResults);
+  const crossFittedSelection = buildNestedScopeAdaptiveSelection({
+    cache,
+    capPlans,
+    baseCaps,
+    families: calibratorFamilies,
+    candidateManifest
+  });
   return {
     schemaVersion: SPATIAL_CANDIDATE_SCORER_SCHEMA_VERSION,
     reportType: "zhejiang_development_spatial_oof_candidate_diagnostic",
@@ -1012,7 +1593,12 @@ async function scoreSpatialOofCandidates(cache, {
       candidateSetSha256: candidateSetSha256(),
       candidateCount: candidates.length,
       candidateSource: "buildAdminExposureCapCandidates",
-      capSelection: "four_development_folds_fit_one_fold_validate_then_all_five_fit_production_candidate",
+      calibratorCandidateCount: calibratorFamilies.length,
+      fixedCandidateSetSha256: crossFittedSelection.fixedCandidateSetSha256,
+      fixedCandidateManifest: candidateManifest,
+      capSelection: STABLE_CAP_SELECTION_POLICY,
+      calibrationSelection: "three_inner_folds_fit_one_inner_fold_select_then_four_outer_folds_fit_one_outer_fold_validate",
+      scopeEligibilitySource: "cached_target_fold_training_positive_count_not_distinct_inner_fold_recount",
       fitFoldCount: 4,
       heldoutFoldCount: 5,
       workers: Number(workers),
@@ -1022,7 +1608,7 @@ async function scoreSpatialOofCandidates(cache, {
       calibrationGuard: SPATIAL_CALIBRATION_GUARD
     },
     speciesCapTuning: {
-      strategy: "cross_fitted_species_specific_admin_cap_brier_selection",
+      strategy: STABLE_CAP_SELECTION_POLICY.strategy,
       appliesTo: "development_pool_positive_count_200_plus",
       runtimeCompatible: false,
       freezeEligible: false,
@@ -1033,6 +1619,14 @@ async function scoreSpatialOofCandidates(cache, {
       },
       species: speciesCapReport(capPlans)
     },
+    crossFittedSelection: {
+      strategy: crossFittedSelection.strategy,
+      fitFoldCount: crossFittedSelection.fitFoldCount,
+      heldoutFoldCount: crossFittedSelection.heldoutFoldCount,
+      fixedCandidateSetSha256: crossFittedSelection.fixedCandidateSetSha256,
+      folds: crossFittedSelection.folds,
+      production: crossFittedSelection.production
+    },
     calibratorFamilies: familyResults.map((result) => ({
       family: result.family,
       guard: result.guard,
@@ -1042,19 +1636,24 @@ async function scoreSpatialOofCandidates(cache, {
       failures: result.failures,
       productionCalibrators: result.productionCalibrators
     })),
-    recommendation: recommended
-      ? {
-          familyId: recommended.family.id,
-          failures: recommended.failures,
-          metrics: recommended.compactMetrics,
-          developmentDiagnosticOnly: true,
-          productionCalibrators: recommended.productionCalibrators
-        }
+    exploratoryFamilyRecommendation: exploratoryRecommended
+      ? { familyId: exploratoryRecommended.family.id, failures: exploratoryRecommended.failures }
       : null,
+    recommendation: {
+      familyId: NESTED_SCOPE_ADAPTIVE_STRATEGY_ID,
+      failures: crossFittedSelection.failures,
+      metrics: crossFittedSelection.compactMetrics,
+      developmentDiagnosticOnly: true,
+      productionCalibrators: crossFittedSelection.productionCalibrators
+    },
     limitations: [
       "cache_does_not_evaluate_reverse_ndcg",
       "species_specific_caps_are_not_supported_by_current_runtime_or_frozen_parameter_schema",
-      "scope_guard_and_family_recommendation_are_selected_on_the_same_development_oof_and_are_not_unbiased_release_metrics",
+      "standalone_family_tables_are_exploratory_same_oof_and_not_used_for_the_cross_fitted_recommendation",
+      "cross_fitted_selection_is_still_repeated_development_research_and_not_a_release_metric",
+      "cached_fold_evidence_was_not_regenerated_for_each_inner_three_fold_partition",
+      "outer_selection_excludes_heldout_labels_but_cached_inner_evidence_can_embed_outer_fold_training_statistics",
+      "inner_scope_eligibility_uses_cached_fold_training_positive_count_not_a_distinct_three_fold_recount",
       "sealed_excluded_development_pool_positive_count_defines_the_complete_production_cap_roster",
       "development_pool_species_that_never_reach_200_in_an_outer_fold_have_no_species_scope_calibration_guard",
       "result_must_not_freeze_parameters_or_open_sealed",
