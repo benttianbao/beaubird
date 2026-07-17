@@ -189,7 +189,9 @@ function createBirdreportClient(options = {}) {
     cookieJar.store(response.headers);
     const text = await response.text();
     if (!response.ok) {
-      throw new Error(`BirdReport HTTP ${response.status}: ${text || "请求失败"}`);
+      const error = new Error(`BirdReport HTTP ${response.status}: ${text || "请求失败"}`);
+      error.status = response.status;
+      throw error;
     }
     const payload = text ? JSON.parse(text) : {};
     if (payload?.success === false || (payload?.success !== true && payload?.errorCode) || (payload?.code && Number(payload.code) !== 200)) {

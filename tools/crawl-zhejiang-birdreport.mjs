@@ -1,7 +1,7 @@
 import { appendFile, copyFile, mkdir, mkdtemp, rmdir, unlink, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { dirname, extname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { pathToFileURL } from "node:url";
@@ -24,12 +24,15 @@ const DEFAULT_CAPTCHA_PYTHON = process.platform === "win32"
 const DEFAULT_PROVINCE = "浙江省";
 const DEFAULT_VERSION = "CH4";
 const DEFAULT_REPORT_PAGE_LIMIT = 50;
-const DEFAULT_DETAIL_CONCURRENCY = 3;
+const DEFAULT_WORKER_COUNT = 3;
+const MAX_WORKER_COUNT = 5;
 const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_TRANSIENT_RETRY_MAX_ATTEMPTS = 0;
+const MAX_TRANSIENT_RETRY_DELAY_MS = 60000;
 const DEFAULT_RETRY_BASE_MS = 1000;
 const DEFAULT_REQUEST_DELAY_MS = 0;
 const DEFAULT_FAST_RESUME_OVERLAP_PAGES = 5;
-const DEFAULT_AUTO_CAPTCHA_MAX_ATTEMPTS = 10;
+const DEFAULT_AUTO_CAPTCHA_MAX_ATTEMPTS = 0;
 const REPORT_TAXA_LIMIT = 1500;
 
 const SUMMARY_URL = "https://api.birdreport.cn/front/record/chart/summary";
@@ -222,7 +225,8 @@ export function initializeDatabase(db) {
       saved_report_count INTEGER DEFAULT 0,
       saved_observation_count INTEGER DEFAULT 0,
       filtered_red_species_count INTEGER DEFAULT 0,
-      failed_report_count INTEGER DEFAULT 0
+      failed_report_count INTEGER DEFAULT 0,
+      worker_stats_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS reports (
@@ -288,6 +292,10 @@ export function initializeDatabase(db) {
     CREATE INDEX IF NOT EXISTS idx_observations_taxon_id ON observations(taxon_id);
   `);
   ensureReportsLocationColumns(db);
+  const crawlMetaColumns = new Set(db.prepare("PRAGMA table_info(crawl_meta)").all().map((column) => column.name));
+  if (!crawlMetaColumns.has("worker_stats_json")) {
+    db.exec("ALTER TABLE crawl_meta ADD COLUMN worker_stats_json TEXT");
+  }
   db.exec("CREATE INDEX IF NOT EXISTS idx_reports_point_id ON reports(point_id)");
 }
 
@@ -590,21 +598,24 @@ Options:
   --limit-normal-reports <n>        Limit normal report details
   --limit-flagged-reports <n>       Limit flagged report details
   --report-page-limit <n>           Report list page size (default: 50)
-  --detail-concurrency <n>          Detail request concurrency (default: 3)
+  --workers <n>                     Independent crawler workers, 1-5 (default: 3)
+  --detail-concurrency <n>          Deprecated alias for --workers
   --max-retries <n>                 Retry count per request (default: 3)
+  --transient-retry-max-attempts <n> Retry 429/502/503/504 errors; 0 means keep trying (default: 0)
   --retry-base-ms <n>               Base retry delay in milliseconds (default: 1000)
   --request-delay-ms <n>            Minimum delay between API requests in milliseconds (default: 0)
   --fast-resume-overlap-pages <n>   Re-check this many pages before the saved progress (default: 5)
   --bootstrap-progress-from-db      Initialize fast-resume progress from existing SQLite rows
   --no-fast-resume                  Disable progress fast-forward and check from page 1
   --manual-captcha                  Save captcha image and prompt for code when blocked
-  --auto-captcha                    Predict captcha with the configured .pkl model before prompting
+  --auto-captcha                    Enable automatic captcha prediction (enabled by default)
+  --no-auto-captcha                 Disable automatic captcha prediction
   --open-captcha                    Open captcha image with the default image viewer
   --no-manual-captcha               Pause instead of prompting for captcha
   --captcha-path <path>             Captcha image path (default: data/birdreport-captcha.png)
   --captcha-model-path <path>       Captcha model path (default: ml/captcha-recognition/model-finetune1.pkl)
   --captcha-python <path>           Python executable for captcha prediction (default: ml/captcha-recognition/.venv/Scripts/python.exe on Windows)
-  --auto-captcha-max-attempts <n>   Automatic captcha attempts before manual fallback; 0 means keep trying (default: 10)
+  --auto-captcha-max-attempts <n>   Automatic captcha attempts before manual fallback; 0 means keep trying (default: 0)
   --no-resume                       Re-fetch reports already present in SQLite
   --help                            Show this help
 `);
@@ -617,15 +628,17 @@ export function parseArgs(argv = process.argv.slice(2)) {
     province: DEFAULT_PROVINCE,
     version: DEFAULT_VERSION,
     reportPageLimit: DEFAULT_REPORT_PAGE_LIMIT,
-    detailConcurrency: DEFAULT_DETAIL_CONCURRENCY,
+    workers: DEFAULT_WORKER_COUNT,
+    detailConcurrency: DEFAULT_WORKER_COUNT,
     maxRetries: DEFAULT_MAX_RETRIES,
+    transientRetryMaxAttempts: DEFAULT_TRANSIENT_RETRY_MAX_ATTEMPTS,
     retryBaseMs: DEFAULT_RETRY_BASE_MS,
     requestDelayMs: DEFAULT_REQUEST_DELAY_MS,
     fastResume: true,
     fastResumeOverlapPages: DEFAULT_FAST_RESUME_OVERLAP_PAGES,
     bootstrapProgressFromDb: false,
-    manualCaptcha: Boolean(stdin.isTTY),
-    autoCaptcha: false,
+    manualCaptcha: false,
+    autoCaptcha: true,
     openCaptcha: false,
     captchaPath: DEFAULT_CAPTCHA_PATH,
     captchaModelPath: DEFAULT_CAPTCHA_MODEL_PATH,
@@ -637,6 +650,9 @@ export function parseArgs(argv = process.argv.slice(2)) {
     limitFlaggedReports: null,
     help: false
   };
+
+  let workersSpecified = false;
+  let detailConcurrencySpecified = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -688,11 +704,19 @@ export function parseArgs(argv = process.argv.slice(2)) {
       case "--report-page-limit":
         options.reportPageLimit = readPositiveInteger();
         break;
+      case "--workers":
+        options.workers = readPositiveInteger();
+        workersSpecified = true;
+        break;
       case "--detail-concurrency":
         options.detailConcurrency = readPositiveInteger();
+        detailConcurrencySpecified = true;
         break;
       case "--max-retries":
         options.maxRetries = readPositiveInteger();
+        break;
+      case "--transient-retry-max-attempts":
+        options.transientRetryMaxAttempts = readNonNegativeInteger();
         break;
       case "--retry-base-ms":
         options.retryBaseMs = readPositiveInteger();
@@ -714,6 +738,9 @@ export function parseArgs(argv = process.argv.slice(2)) {
         break;
       case "--auto-captcha":
         options.autoCaptcha = true;
+        break;
+      case "--no-auto-captcha":
+        options.autoCaptcha = false;
         break;
       case "--open-captcha":
         options.openCaptcha = true;
@@ -745,7 +772,17 @@ export function parseArgs(argv = process.argv.slice(2)) {
     }
   }
 
-  options.detailConcurrency = Math.max(1, Math.min(10, options.detailConcurrency));
+  if (workersSpecified && detailConcurrencySpecified && options.workers !== options.detailConcurrency) {
+    throw new Error("--workers 与 --detail-concurrency 不能设置为不同的值。");
+  }
+  if (detailConcurrencySpecified) {
+    options.workers = options.detailConcurrency;
+  } else {
+    options.detailConcurrency = options.workers;
+  }
+  if (options.workers < 1 || options.workers > MAX_WORKER_COUNT) {
+    throw new Error(`--workers 必须在 1 到 ${MAX_WORKER_COUNT} 之间。`);
+  }
   options.reportPageLimit = Math.max(1, Math.min(50, options.reportPageLimit));
   return options;
 }
@@ -874,10 +911,22 @@ function createCaptchaStats() {
   return {
     triggerCount: 0,
     promptCount: 0,
-    sharedWaitCount: 0,
     firstPromptAt: null,
     lastPromptAt: null
   };
+}
+
+export class CrawlerPauseError extends Error {
+  constructor(message = "爬虫已收到暂停请求。") {
+    super(message);
+    this.name = "CrawlerPauseError";
+  }
+}
+
+function throwIfPauseRequested(options) {
+  if (typeof options.shouldStop === "function" && options.shouldStop()) {
+    throw new CrawlerPauseError();
+  }
 }
 
 function getCaptchaStats(options) {
@@ -989,6 +1038,7 @@ async function tryAutomaticCaptcha(client, options, label, captchaPath) {
   let lastError = null;
 
   while (maxAttempts === 0 || attempt < maxAttempts) {
+    throwIfPauseRequested(options);
     attempt += 1;
     const captcha = await fetchCaptchaToPath(client, captchaPath);
     try {
@@ -1010,21 +1060,10 @@ async function tryAutomaticCaptcha(client, options, label, captchaPath) {
   return null;
 }
 
-let activeCaptchaChallenge = null;
-
 export async function runCaptchaChallengeOnce(client, options = {}, label = "BirdReport 请求") {
   const captchaStats = getCaptchaStats(options);
   captchaStats.triggerCount += 1;
-
-  if (!activeCaptchaChallenge) {
-    activeCaptchaChallenge = handleCaptchaChallenge(client, options, label).finally(() => {
-      activeCaptchaChallenge = null;
-    });
-  } else {
-    captchaStats.sharedWaitCount += 1;
-    console.warn(`已有验证码正在处理，${label} 等待当前验证码通过后继续。`);
-  }
-  return activeCaptchaChallenge;
+  return handleCaptchaChallenge(client, options, label);
 }
 
 export async function handleCaptchaChallenge(client, options = {}, label = "BirdReport 请求") {
@@ -1053,8 +1092,8 @@ export async function handleCaptchaChallenge(client, options = {}, label = "Bird
   const captcha = await fetchCaptchaToPath(client, captchaPath);
   console.warn(
     previousPromptAt
-      ? `验证码频率：第 ${captchaStats.promptCount} 次输入提示，距上次 ${formatDuration(now - previousPromptAt)}；累计触发 ${captchaStats.triggerCount} 次，合并等待 ${captchaStats.sharedWaitCount} 次。`
-      : `验证码频率：本次运行第 1 次输入提示；累计触发 ${captchaStats.triggerCount} 次，合并等待 ${captchaStats.sharedWaitCount} 次。`
+      ? `验证码频率：第 ${captchaStats.promptCount} 次输入提示，距上次 ${formatDuration(now - previousPromptAt)}；累计触发 ${captchaStats.triggerCount} 次。`
+      : `验证码频率：本次运行第 1 次输入提示；累计触发 ${captchaStats.triggerCount} 次。`
   );
   if (options.openCaptcha) {
     try {
@@ -1079,8 +1118,10 @@ export async function fetchSignedJson(client, url, referer, payload, options, la
     },
     {
       maxRetries: options.maxRetries,
+      transientRetryMaxAttempts: options.transientRetryMaxAttempts,
       retryBaseMs: options.retryBaseMs,
       label,
+      shouldStop: options.shouldStop,
       handleCaptcha: options.manualCaptcha || options.autoCaptcha ? () => runCaptchaChallengeOnce(client, options, label) : null
     }
   );
@@ -1090,18 +1131,69 @@ function isCaptchaError(error) {
   return error?.name === "BirdreportCaptchaError" || error?.code === 405 || error?.code === 505;
 }
 
+function getHttpStatus(error) {
+  const explicitStatus = integer(error?.status, 0);
+  if (explicitStatus) {
+    return explicitStatus;
+  }
+  const match = String(error?.message || "").match(/BirdReport HTTP (\d{3})/);
+  return match ? integer(match[1], 0) : 0;
+}
+
+export function isTransientBirdreportError(error) {
+  return new Set([408, 425, 429, 500, 502, 503, 504]).has(getHttpStatus(error));
+}
+
+async function sleepWithStop(ms, options) {
+  let remaining = Math.max(0, integer(ms));
+  while (remaining > 0) {
+    throwIfPauseRequested(options);
+    const slice = Math.min(1000, remaining);
+    await sleep(slice);
+    remaining -= slice;
+  }
+  throwIfPauseRequested(options);
+}
+
 async function retryAsync(operation, options) {
   let lastError;
+  let transientAttempt = 0;
   for (let attempt = 1; attempt <= options.maxRetries; attempt += 1) {
+    throwIfPauseRequested(options);
     try {
       return await operation();
     } catch (error) {
       lastError = error;
-      if (isCaptchaError(error) || attempt >= options.maxRetries) {
-        if (isCaptchaError(error) && typeof options.handleCaptcha === "function" && attempt < options.maxRetries) {
+      if (error instanceof CrawlerPauseError) {
+        throw error;
+      }
+      if (isCaptchaError(error)) {
+        if (typeof options.handleCaptcha === "function") {
           await options.handleCaptcha(error);
+          attempt -= 1;
           continue;
         }
+        throw error;
+      }
+      if (isTransientBirdreportError(error)) {
+        transientAttempt += 1;
+        const maxTransientAttempts = Math.max(0, integer(options.transientRetryMaxAttempts));
+        if (maxTransientAttempts > 0 && transientAttempt >= maxTransientAttempts) {
+          throw error;
+        }
+        const delayMs = Math.min(
+          MAX_TRANSIENT_RETRY_DELAY_MS,
+          options.retryBaseMs * 2 ** Math.min(transientAttempt - 1, 16)
+        );
+        const maxLabel = maxTransientAttempts === 0 ? "无限" : String(maxTransientAttempts);
+        console.warn(
+          `${options.label} 遇到临时 HTTP ${getHttpStatus(error)}，${delayMs}ms 后持续重试 ${transientAttempt}/${maxLabel}。`
+        );
+        await sleepWithStop(delayMs, options);
+        attempt -= 1;
+        continue;
+      }
+      if (attempt >= options.maxRetries) {
         throw error;
       }
       const delayMs = options.retryBaseMs * 2 ** (attempt - 1);
@@ -1187,30 +1279,150 @@ function getReportLimit(options, reportKind) {
   return reportKind === "normal" ? options.limitNormalReports : options.limitFlaggedReports;
 }
 
-async function processReportDetails({ client, options, db, jsonlPath, runId, stats, reports }) {
+export function getWorkerCaptchaPath(captchaPath, workerIndex) {
+  const resolvedPath = resolve(captchaPath || DEFAULT_CAPTCHA_PATH);
+  const extension = extname(resolvedPath) || ".png";
+  const stem = basename(resolvedPath, extname(resolvedPath));
+  return join(dirname(resolvedPath), `${stem}.worker-${String(workerIndex + 1).padStart(2, "0")}${extension}`);
+}
+
+export function createReportClaimer(db, { resume = true } = {}) {
+  const claimedReportIds = new Set();
+  return (reportId) => {
+    const normalizedId = text(reportId);
+    if (!normalizedId) {
+      return { claimed: false, reason: "missing" };
+    }
+    if (claimedReportIds.has(normalizedId)) {
+      return { claimed: false, reason: "duplicate" };
+    }
+    claimedReportIds.add(normalizedId);
+    if (resume && reportAlreadyCrawled(db, normalizedId)) {
+      return { claimed: false, reason: "existing" };
+    }
+    return { claimed: true, reason: "claimed" };
+  };
+}
+
+export function createSerialQueue() {
+  let tail = Promise.resolve();
+  return {
+    enqueue(callback) {
+      const result = tail.then(callback, callback);
+      tail = result.catch(() => {});
+      return result;
+    },
+    async drain() {
+      await tail;
+    }
+  };
+}
+
+export function createContinuousWatermark(initialPage = 0, onAdvance = () => {}) {
+  let currentPage = Math.max(0, integer(initialPage));
+  const completedPages = new Set();
+  return {
+    get currentPage() {
+      return currentPage;
+    },
+    markComplete(page) {
+      const normalizedPage = Math.max(0, integer(page));
+      if (normalizedPage <= currentPage) {
+        return currentPage;
+      }
+      completedPages.add(normalizedPage);
+      let advanced = false;
+      while (completedPages.delete(currentPage + 1)) {
+        currentPage += 1;
+        advanced = true;
+      }
+      if (advanced) {
+        onAdvance(currentPage);
+      }
+      return currentPage;
+    }
+  };
+}
+
+export async function runPageWorkerPool(workers, pages, processPage, shouldStop = () => false) {
+  let nextIndex = 0;
+  let firstError = null;
+  await Promise.all(
+    workers.map(async (worker) => {
+      while (!shouldStop() && !firstError) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        if (currentIndex >= pages.length) {
+          return;
+        }
+        try {
+          await processPage(worker, pages[currentIndex]);
+        } catch (error) {
+          firstError ||= error;
+        }
+      }
+    })
+  );
+  if (firstError) {
+    throw firstError;
+  }
+}
+
+function createCrawlerWorkers(options, stopController) {
+  const count = Math.max(1, Math.min(MAX_WORKER_COUNT, integer(options.workers, DEFAULT_WORKER_COUNT)));
+  const clientFactory = options.clientFactory || createBirdreportClient;
+  return Array.from({ length: count }, (_, index) => {
+    const workerOptions = {
+      ...options,
+      captchaPath: getWorkerCaptchaPath(options.captchaPath, index),
+      captchaStats: createCaptchaStats(),
+      requestDelayQueue: null,
+      nextRequestAt: 0,
+      shouldStop: () => stopController.requested
+    };
+    return {
+      id: index + 1,
+      label: `worker-${String(index + 1).padStart(2, "0")}`,
+      client: options.workerClients?.[index] || (index === 0 && options.client ? options.client : clientFactory()),
+      options: workerOptions
+    };
+  });
+}
+
+async function processReportDetails({ worker, db, writeQueue, runId, stats, reports, claimReport, stopController }) {
   const pageStats = {
     savedReports: 0,
     skippedReports: 0,
-    failedReports: 0
+    failedReports: 0,
+    paused: false
   };
   stats.discoveredReports += reports.length;
-  await mapWithConcurrency(reports, options.detailConcurrency, async (report) => {
-    if (options.resume && reportAlreadyCrawled(db, report.report_id)) {
+
+  for (const report of reports) {
+    if (stopController.requested) {
+      pageStats.paused = true;
+      break;
+    }
+
+    const claim = claimReport(report.report_id);
+    if (!claim.claimed) {
       stats.skippedReports += 1;
       pageStats.skippedReports += 1;
-      return;
+      continue;
     }
 
     try {
-      const rawDetail = await fetchReportDetail(client, options, report);
-      const rawTaxa = await fetchReportTaxa(client, options, report);
-      const result = await writeReportWithObservations({
-        db,
-        jsonlPath,
-        report: mergeReportDetail(report, rawDetail),
-        rawTaxa,
-        runId
-      });
+      const rawDetail = await fetchReportDetail(worker.client, worker.options, report);
+      const rawTaxa = await fetchReportTaxa(worker.client, worker.options, report);
+      const result = await writeQueue.enqueue(() =>
+        writeReportWithObservations({
+          db,
+          jsonlPath: worker.options.jsonlPath,
+          report: mergeReportDetail(report, rawDetail),
+          rawTaxa,
+          runId
+        })
+      );
       stats.savedReports += 1;
       stats.savedObservations += result.savedTaxaCount;
       stats.filteredRedSpecies += result.filteredRedSpeciesCount;
@@ -1223,6 +1435,10 @@ async function processReportDetails({ client, options, db, jsonlPath, runId, sta
         );
       }
     } catch (error) {
+      if (error instanceof CrawlerPauseError) {
+        pageStats.paused = true;
+        break;
+      }
       if (isCaptchaError(error)) {
         throw error;
       }
@@ -1233,38 +1449,45 @@ async function processReportDetails({ client, options, db, jsonlPath, runId, sta
         serialId: report.serial_id,
         message: error.message
       });
-      await appendJsonlRecord(options.jsonlPath, {
+      await writeQueue.enqueue(() => appendJsonlRecord(worker.options.jsonlPath, {
         event: "report-error",
         runId,
         reportId: report.report_id,
         serialId: report.serial_id,
         message: error.message
-      });
+      }));
     }
-  });
+  }
   return pageStats;
 }
 
-async function crawlReportKind({ client, options, db, runId, stats, reportKind }) {
+async function crawlReportKind({ workers, options, db, writeQueue, runId, stats, reportKind, claimReport, stopController }) {
   const limitOption = getReportLimit(options, reportKind);
   const maxRows = limitOption ?? options.limitReports ?? Infinity;
-  let totalRows = null;
-  let selectedRows = null;
-  let progressBlockedByFailure = false;
+  const firstPage = await fetchReportListPage(workers[0].client, workers[0].options, reportKind, 1);
+  const totalRows = firstPage.count || firstPage.rows.length;
+  const selectedRows = Math.min(totalRows, maxRows);
+  const totalPages = Math.max(1, Math.ceil(selectedRows / options.reportPageLimit));
+  const pageCache = new Map([[1, firstPage]]);
+  let savedProgress = getCrawlProgress(db, options, reportKind);
+  if (shouldUseFastResume(options, reportKind) && (options.bootstrapProgressFromDb || !savedProgress)) {
+    savedProgress = bootstrapProgressFromDb(db, options, reportKind);
+  }
+  const initialWatermark = savedProgress?.completedPage || 0;
+  const watermark = createContinuousWatermark(initialWatermark, (completedPage) => {
+    const completedRows = Math.min(selectedRows, completedPage * options.reportPageLimit);
+    markProgressPageComplete(db, options, reportKind, completedPage, completedRows, totalRows);
+  });
 
-  const processListPage = async (page, result, { stopWhenAlreadyCrawled = false, updateProgress = true } = {}) => {
-    if (selectedRows == null) {
-      totalRows = result.count || result.rows.length;
-      selectedRows = Math.min(totalRows, maxRows);
-    }
-
+  const processListPage = async (worker, page, result, { stopWhenAlreadyCrawled = false, updateProgress = true } = {}) => {
     const pageStartRow = (page - 1) * options.reportPageLimit;
     if (pageStartRow >= selectedRows) {
       return { rows: [], stopCatchup: true };
     }
 
     const remaining = selectedRows - pageStartRow;
-    const rows = result.rows.slice(0, remaining).map((row) => normalizeReportRow(row, reportKind));
+    const sourceRows = Number.isFinite(maxRows) ? result.rows.slice(0, remaining) : result.rows;
+    const rows = sourceRows.map((row) => normalizeReportRow(row, reportKind));
     const reports = rows.filter((report) => report.report_id);
     const processedRows = Math.min(selectedRows, pageStartRow + rows.length);
     console.log(`${reportKind} 报告列表：${processedRows}/${selectedRows}`);
@@ -1275,75 +1498,61 @@ async function crawlReportKind({ client, options, db, runId, stats, reportKind }
     }
 
     const pageStats = await processReportDetails({
-      client,
-      options,
+      worker,
       db,
-      jsonlPath: options.jsonlPath,
+      writeQueue,
       runId,
       stats,
-      reports
+      reports,
+      claimReport,
+      stopController
     });
 
-    if (pageStats.failedReports > 0) {
-      progressBlockedByFailure = true;
+    if (updateProgress && !pageStats.paused && pageStats.failedReports === 0 && rows.length > 0) {
+      watermark.markComplete(page);
     }
 
-    if (updateProgress && !progressBlockedByFailure && pageStats.failedReports === 0 && rows.length > 0) {
-      markProgressPageComplete(db, options, reportKind, page, processedRows, totalRows || 0);
-    }
-
-    return { rows, stopCatchup: rows.length === 0 };
+    return { rows, stopCatchup: rows.length === 0, paused: pageStats.paused };
   };
 
   let startPage = 1;
   if (shouldUseFastResume(options, reportKind)) {
-    let progress = getCrawlProgress(db, options, reportKind);
-    if (options.bootstrapProgressFromDb || !progress) {
-      progress = bootstrapProgressFromDb(db, options, reportKind);
-    }
-    startPage = getFastResumeStartPage(progress, options);
+    startPage = getFastResumeStartPage(savedProgress, options);
 
     if (startPage > 1) {
       console.log(
-        `${reportKind} 快进续跑：水位线第 ${progress.completedPage} 页，从第 ${startPage} 页重叠续跑；先扫描首页补新。`
+        `${reportKind} 快进续跑：连续水位线第 ${savedProgress.completedPage} 页，从第 ${startPage} 页重叠续跑；先扫描首页补新。`
       );
-      for (let page = 1; page < startPage; page += 1) {
-        const result = await fetchReportListPage(client, options, reportKind, page);
-        const outcome = await processListPage(page, result, {
+      for (let page = 1; page < startPage && !stopController.requested; page += 1) {
+        const result = pageCache.get(page) || await fetchReportListPage(workers[0].client, workers[0].options, reportKind, page);
+        const outcome = await processListPage(workers[0], page, result, {
           stopWhenAlreadyCrawled: true,
           updateProgress: false
         });
-        if (outcome.stopCatchup) {
+        if (outcome.stopCatchup || outcome.paused) {
           break;
         }
       }
     }
   }
 
-  for (let page = startPage; selectedRows == null || (page - 1) * options.reportPageLimit < selectedRows; page += 1) {
-    const result = await fetchReportListPage(client, options, reportKind, page);
-    const outcome = await processListPage(page, result);
-    if (outcome.rows.length === 0) {
-      break;
-    }
-  }
+  const pages = Array.from({ length: Math.max(0, totalPages - startPage + 1) }, (_, index) => startPage + index);
+  await runPageWorkerPool(
+    workers,
+    pages,
+    async (worker, page) => {
+      const result = pageCache.get(page) || await fetchReportListPage(worker.client, worker.options, reportKind, page);
+      await processListPage(worker, page, result);
+    },
+    () => stopController.requested
+  );
 
   return {
-    total: totalRows || 0,
-    selected: selectedRows || 0
+    total: totalRows,
+    selected: selectedRows,
+    interrupted: stopController.requested,
+    completedPage: watermark.currentPage
   };
-}
-
-async function mapWithConcurrency(items, concurrency, worker) {
-  let index = 0;
-  const workers = Array.from({ length: Math.max(1, Math.min(concurrency, items.length || 1)) }, async () => {
-    while (index < items.length) {
-      const currentIndex = index;
-      index += 1;
-      await worker(items[currentIndex], currentIndex);
-    }
-  });
-  await Promise.all(workers);
 }
 
 function startCrawlMeta(db, runId, options, summary, normalTotal, flaggedTotal) {
@@ -1368,8 +1577,9 @@ function startCrawlMeta(db, runId, options, summary, normalTotal, flaggedTotal) 
     "running",
     stringifyJson(summary),
     stringifyJson({
+      workers: options.workers,
       reportPageLimit: options.reportPageLimit,
-      detailConcurrency: options.detailConcurrency,
+      transientRetryMaxAttempts: options.transientRetryMaxAttempts,
       requestDelayMs: options.requestDelayMs,
       fastResume: options.fastResume,
       fastResumeOverlapPages: options.fastResumeOverlapPages,
@@ -1398,7 +1608,8 @@ function finishCrawlMeta(db, runId, status, stats) {
         saved_report_count = ?,
         saved_observation_count = ?,
         filtered_red_species_count = ?,
-        failed_report_count = ?
+        failed_report_count = ?,
+        worker_stats_json = ?
     WHERE run_id = ?
   `).run(
     new Date().toISOString(),
@@ -1407,17 +1618,62 @@ function finishCrawlMeta(db, runId, status, stats) {
     stats.savedObservations,
     stats.filteredRedSpecies,
     stats.failedReports,
+    stringifyJson(stats.captcha?.workers || []),
     runId
   );
 }
 
+function snapshotWorkerCaptchaStats(workers) {
+  const workerStats = workers.map((worker) => ({
+    workerId: worker.id,
+    label: worker.label,
+    captchaPath: worker.options.captchaPath,
+    ...snapshotCaptchaStats(worker.options)
+  }));
+  return {
+    triggerCount: workerStats.reduce((sum, item) => sum + item.triggerCount, 0),
+    promptCount: workerStats.reduce((sum, item) => sum + item.promptCount, 0),
+    workers: workerStats
+  };
+}
+
+export function createStopController() {
+  return {
+    requested: false,
+    reason: null,
+    request(reason = "signal") {
+      this.requested = true;
+      this.reason ||= reason;
+    }
+  };
+}
+
 export async function crawlZhejiangBirdreport(options = {}) {
-  const resolvedOptions = { ...parseArgs([]), ...options };
+  const defaults = parseArgs([]);
+  if (options.workers != null && options.detailConcurrency != null && options.workers !== options.detailConcurrency) {
+    throw new Error("workers 与 detailConcurrency 不能设置为不同的值。");
+  }
+  const requestedWorkers = integer(options.workers ?? options.detailConcurrency ?? defaults.workers, NaN);
+  if (!Number.isFinite(requestedWorkers) || requestedWorkers < 1 || requestedWorkers > MAX_WORKER_COUNT) {
+    throw new Error(`workers 必须在 1 到 ${MAX_WORKER_COUNT} 之间。`);
+  }
+  const resolvedOptions = { ...defaults, ...options, workers: requestedWorkers };
+  resolvedOptions.detailConcurrency = resolvedOptions.workers;
   await ensureOutputDirectories(resolvedOptions);
 
   const runId = resolvedOptions.runId || createRunId();
   const db = resolvedOptions.db || openCrawlerDatabase(resolvedOptions.dbPath);
-  const client = resolvedOptions.client || createBirdreportClient();
+  const stopController = resolvedOptions.stopController || createStopController();
+  const writeQueue = createSerialQueue();
+  const workers = createCrawlerWorkers(resolvedOptions, stopController);
+  const signalHandler = () => {
+    stopController.request("SIGINT");
+    process.exitCode = 130;
+    console.warn("收到 Ctrl+C：停止分配新页面，正在完成当前写入并保存连续水位线。再次按 Ctrl+C 可强制退出。");
+  };
+  if (resolvedOptions.installSignalHandlers !== false) {
+    process.once("SIGINT", signalHandler);
+  }
   const stats = {
     discoveredReports: 0,
     skippedReports: 0,
@@ -1426,82 +1682,107 @@ export async function crawlZhejiangBirdreport(options = {}) {
     filteredRedSpecies: 0,
     failedReports: 0,
     failures: [],
-    captcha: snapshotCaptchaStats(resolvedOptions)
+    captcha: snapshotWorkerCaptchaStats(workers)
   };
+  let metaStarted = false;
 
   try {
-  console.log(`开始抓取 BirdReport 浙江数据，runId=${runId}`);
-  const summary = await fetchSummary(client, resolvedOptions);
-  const normalSummaryTotal = integer(summary?.data?.report_num_1);
-  const flaggedSummaryTotal = integer(summary?.data?.report_num_2);
+    console.log(`开始抓取 BirdReport 浙江数据，runId=${runId}，独立 worker=${workers.length}`);
+    const summary = await fetchSummary(workers[0].client, workers[0].options);
+    const normalSummaryTotal = integer(summary?.data?.report_num_1);
+    const flaggedSummaryTotal = integer(summary?.data?.report_num_2);
 
-  startCrawlMeta(db, runId, resolvedOptions, summary, normalSummaryTotal, flaggedSummaryTotal);
-  await appendJsonlRecord(resolvedOptions.jsonlPath, {
-    event: "crawl-start",
-    runId,
-    province: resolvedOptions.province,
-    version: resolvedOptions.version,
-    summary,
-    normalReportTotal: normalSummaryTotal,
-    flaggedReportTotal: flaggedSummaryTotal,
-    selectedReportCount: null
-  });
+    startCrawlMeta(db, runId, resolvedOptions, summary, normalSummaryTotal, flaggedSummaryTotal);
+    metaStarted = true;
+    await writeQueue.enqueue(() => appendJsonlRecord(resolvedOptions.jsonlPath, {
+      event: "crawl-start",
+      runId,
+      province: resolvedOptions.province,
+      version: resolvedOptions.version,
+      workers: workers.length,
+      summary,
+      normalReportTotal: normalSummaryTotal,
+      flaggedReportTotal: flaggedSummaryTotal,
+      selectedReportCount: null
+    }));
 
-  try {
+    const claimReport = createReportClaimer(db, { resume: resolvedOptions.resume });
     const normalResult = await crawlReportKind({
-      client,
+      workers,
       options: resolvedOptions,
       db,
+      writeQueue,
       runId,
       stats,
-      reportKind: "normal"
+      reportKind: "normal",
+      claimReport,
+      stopController
     });
-    const flaggedResult = await crawlReportKind({
-      client,
-      options: resolvedOptions,
-      db,
-      runId,
-      stats,
-      reportKind: "flagged"
-    });
+    const flaggedResult = normalResult.interrupted
+      ? { selected: 0, interrupted: true }
+      : await crawlReportKind({
+          workers,
+          options: resolvedOptions,
+          db,
+          writeQueue,
+          runId,
+          stats,
+          reportKind: "flagged",
+          claimReport,
+          stopController
+        });
 
-    stats.captcha = snapshotCaptchaStats(resolvedOptions);
-    finishCrawlMeta(db, runId, "completed", stats);
-    await appendJsonlRecord(resolvedOptions.jsonlPath, {
-      event: "crawl-complete",
-      runId,
-      selectedReportCount: normalResult.selected + flaggedResult.selected,
-      captcha: snapshotCaptchaStats(resolvedOptions),
-      stats
-    });
-  } catch (error) {
-    const status = isCaptchaError(error) ? "paused_captcha" : "failed";
-    stats.captcha = snapshotCaptchaStats(resolvedOptions);
+    stats.captcha = snapshotWorkerCaptchaStats(workers);
+    const interrupted = normalResult.interrupted || flaggedResult.interrupted;
+    const status = interrupted ? "paused_signal" : "completed";
     finishCrawlMeta(db, runId, status, stats);
-    await appendJsonlRecord(resolvedOptions.jsonlPath, {
-      event: "crawl-paused",
+    await writeQueue.enqueue(() => appendJsonlRecord(resolvedOptions.jsonlPath, {
+      event: interrupted ? "crawl-paused" : "crawl-complete",
       runId,
       status,
-      message: error.message,
-      captcha: snapshotCaptchaStats(resolvedOptions),
+      message: interrupted ? "收到暂停请求，已保存连续水位线。" : undefined,
+      selectedReportCount: normalResult.selected + flaggedResult.selected,
+      captcha: stats.captcha,
       stats
-    });
+    }));
 
-    if (isCaptchaError(error)) {
-      throw new Error(`BirdReport 触发验证码或访问限制，已暂停并保留断点。请稍后重跑脚本继续。原始错误：${error.message}`);
+    console.log(
+      interrupted
+        ? `爬虫已安全暂停：保存报告 ${stats.savedReports}，连续水位线已落库。`
+        : `抓取完成：保存报告 ${stats.savedReports}，跳过 ${stats.skippedReports}，鸟种记录 ${stats.savedObservations}`
+    );
+    console.log(`标红报告中过滤红色鸟种 ${stats.filteredRedSpecies} 条，失败报告 ${stats.failedReports} 条。`);
+    console.log(`验证码统计：输入提示 ${stats.captcha.promptCount} 次，累计触发 ${stats.captcha.triggerCount} 次。`);
+    return {
+      runId,
+      status,
+      stats
+    };
+  } catch (error) {
+    const interrupted = error instanceof CrawlerPauseError || stopController.requested;
+    const status = interrupted ? "paused_signal" : isCaptchaError(error) ? "paused_captcha" : "failed";
+    stats.captcha = snapshotWorkerCaptchaStats(workers);
+    await writeQueue.drain();
+    if (metaStarted) {
+      finishCrawlMeta(db, runId, status, stats);
+      await writeQueue.enqueue(() => appendJsonlRecord(resolvedOptions.jsonlPath, {
+        event: "crawl-paused",
+        runId,
+        status,
+        message: error.message,
+        captcha: stats.captcha,
+        stats
+      }));
+    }
+    if (interrupted) {
+      return { runId, status, stats };
     }
     throw error;
-  }
-
-  stats.captcha = snapshotCaptchaStats(resolvedOptions);
-  console.log(`抓取完成：保存报告 ${stats.savedReports}，跳过 ${stats.skippedReports}，鸟种记录 ${stats.savedObservations}`);
-  console.log(`标红报告中过滤红色鸟种 ${stats.filteredRedSpecies} 条，失败报告 ${stats.failedReports} 条。`);
-  console.log(`验证码统计：输入提示 ${stats.captcha.promptCount} 次，累计触发 ${stats.captcha.triggerCount} 次，合并等待 ${stats.captcha.sharedWaitCount} 次。`);
-  return {
-    runId,
-    stats
-  };
   } finally {
+    if (resolvedOptions.installSignalHandlers !== false) {
+      process.removeListener("SIGINT", signalHandler);
+    }
+    await writeQueue.drain();
     if (!resolvedOptions.db) {
       db.close();
     }
