@@ -26,6 +26,10 @@ $endpointMap = @{
     RemotePath = "https://api.birdreport.cn/front/record/search/page"
     Referer = "https://www.birdreport.cn/home/search/record.html"
   }
+  "/api/birdreport/report" = @{
+    RemotePath = "https://api.birdreport.cn/front/record/activity/search"
+    Referer = "https://www.birdreport.cn/home/search/report.html"
+  }
   "/api/birdreport/summary" = @{
     RemotePath = "https://api.birdreport.cn/front/record/chart/summary"
     Referer = "https://www.birdreport.cn/home/search/page.html"

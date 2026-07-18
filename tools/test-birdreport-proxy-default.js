@@ -32,6 +32,13 @@ test("birdreport requests always use the default backend instead of proxy addres
   assert.doesNotMatch(script, /elements\.birdPrepProxyUrl\.value/);
 });
 
+test("local proxy exposes the BirdReport activity report endpoint", () => {
+  const proxy = readFileSync("birdreport-proxy.ps1", "utf8");
+  assert.match(proxy, /"\/api\/birdreport\/report"\s*=\s*@\{/);
+  assert.match(proxy, /RemotePath\s*=\s*"https:\/\/api\.birdreport\.cn\/front\/record\/activity\/search"/);
+  assert.match(proxy, /Referer\s*=\s*"https:\/\/www\.birdreport\.cn\/home\/search\/report\.html"/);
+});
+
 test("local proxy exposes read-only Macaulay Library media endpoints", () => {
   const proxy = readFileSync("birdreport-proxy.ps1", "utf8");
   assert.match(proxy, /\/api\/media\/macaulay\/search/);
