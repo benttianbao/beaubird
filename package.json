@@ -4,7 +4,14 @@
   "version": "0.0.0",
   "description": "BeauBird site and offline bird prediction tooling",
   "license": "UNLICENSED",
+  "scripts": {
+    "build:script": "node tools/build-script.mjs",
+    "check:script": "node tools/check-script-build.mjs"
+  },
   "dependencies": {
     "h3-js": "4.5.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1"
   }
 }

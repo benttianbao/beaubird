@@ -1,10 +1,12 @@
 const assert = require("node:assert/strict");
 const { existsSync, readFileSync } = require("node:fs");
 const { test } = require("node:test");
+const { readScriptSourceCorpus } = require("./script-source-test-utils.js");
 
 const html = readFileSync("index.html", "utf8");
 const css = readFileSync("style.css", "utf8");
-const script = readFileSync("script.js", "utf8");
+const script = readScriptSourceCorpus();
+const scriptBundle = readFileSync("script.js", "utf8");
 const birdreportCore = readFileSync("beaubird-birdreport-core.js", "utf8");
 const siteApp = readFileSync("server/site/app.js", "utf8");
 const sitePages = readFileSync("server/site/pages.js", "utf8");
@@ -509,6 +511,10 @@ test("main script consumes shared modules and removes the unused unlocked export
   assert.doesNotMatch(script, /const COMMON_BIRD_TAXONOMY = \{/);
   assert.doesNotMatch(script, /function normalizeBirdreportRecordItem/);
   assert.doesNotMatch(script, /function renderUnlockedSpeciesExportOverlay/);
+  assert.match(scriptBundle, /^\/\* @generated from src\/script\/main\.js; do not edit directly\. \*\//);
+  assert.match(scriptBundle, /window\.BeauBirdUtils/);
+  assert.match(scriptBundle, /window\.BeauBirdData/);
+  assert.match(scriptBundle, /window\.BeauBirdBirdreportCore/);
 });
 
 test("Android assets include current shared modules and all birds profile data", () => {

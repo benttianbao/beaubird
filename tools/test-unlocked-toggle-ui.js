@@ -1,8 +1,9 @@
 const fs = require("fs");
 const path = require("path");
+const { readScriptSourceCorpus } = require("./script-source-test-utils.js");
 
 const root = path.resolve(__dirname, "..");
-const script = fs.readFileSync(path.join(root, "script.js"), "utf8");
+const script = readScriptSourceCorpus();
 const style = fs.readFileSync(path.join(root, "style.css"), "utf8");
 
 function assert(condition, message) {

@@ -1,8 +1,9 @@
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { test } = require("node:test");
+const { readScriptSourceCorpus } = require("./script-source-test-utils.js");
 
-const script = readFileSync("script.js", "utf8");
+const script = readScriptSourceCorpus();
 
 test("direct file usage keeps the local BirdReport backend default", () => {
   assert.match(

@@ -1,6 +1,7 @@
 const assert = require("assert");
 const fs = require("fs");
 const path = require("path");
+const { readScriptSourceCorpus } = require("./script-source-test-utils.js");
 
 const {
   aggregateEbirdSeasonalPrediction,
@@ -9,7 +10,7 @@ const {
 } = require("../ebird-seasonal-core.js");
 
 const repoRoot = path.resolve(__dirname, "..");
-const scriptSource = fs.readFileSync(path.join(repoRoot, "script.js"), "utf8");
+const scriptSource = readScriptSourceCorpus();
 const indexSource = fs.readFileSync(path.join(repoRoot, "index.html"), "utf8");
 const readmeSource = fs.readFileSync(path.join(repoRoot, "README.md"), "utf8");
 
