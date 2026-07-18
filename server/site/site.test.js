@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = require("node:fs");
+const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
@@ -61,6 +61,46 @@ test("requires login before serving the BeauBird frontend", async () => {
       const health = await request("/site/health");
       assert.equal(health.status, 200);
       assert.deepEqual(await json(health), { ok: true, service: "beaubird-site" });
+    });
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("serves the generated root script bundle byte-for-byte after login", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+
+    await withServer({ database: db, projectRoot: process.cwd() }, async ({ request }) => {
+      const blocked = await request("/script.js");
+      assert.equal(blocked.status, 302);
+      assert.equal(blocked.headers.get("location"), "/login");
+
+      const login = await request("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+      });
+      assert.equal(login.status, 200);
+
+      const bundle = await request("/script.js", {
+        headers: { cookie: cookieFrom(login) }
+      });
+      assert.equal(bundle.status, 200);
+      assert.match(bundle.headers.get("content-type") || "", /^text\/javascript\b/);
+      assert.equal(bundle.headers.get("x-content-type-options"), "nosniff");
+
+      const servedBytes = Buffer.from(await bundle.arrayBuffer());
+      const rootBytes = readFileSync(join(process.cwd(), "script.js"));
+      assert.deepEqual(servedBytes, rootBytes);
+      assert.match(servedBytes.subarray(0, 256).toString("utf8"), /@generated/);
     });
   } finally {
     temp.cleanup();
