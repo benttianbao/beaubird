@@ -175,7 +175,8 @@ android/app/build/outputs/apk/debug/app-debug.apk
 ```text
 .
 ├── index.html                      # 主页面
-├── script.js                       # 页面逻辑、BirdReport/eBird 查询、缓存和监测逻辑
+├── script.js                       # 由 src/script/ 生成并提交的经典脚本兼容产物
+├── src/script/                     # 页面逻辑源码，按 app/shared/features 拆分
 ├── beaubird-utils.js               # 浏览器和 Node 共用的小工具函数
 ├── beaubird-data.js                # 页面共用静态数据
 ├── beaubird-birdreport-core.js     # 浏览器和 Node 共用的 BirdReport 纯逻辑
@@ -218,12 +219,28 @@ node .\tools\fetch-zhejiang-birdreport-species.mjs
 node .\tools\build-bird-profile-shards.mjs
 ```
 
+## 前端脚本开发
+
+根目录 `script.js` 由 `src/script/main.js` 及其模块生成，供直接打开 `index.html`、Node 站点和 Android WebView 继续以经典脚本方式加载。不要直接编辑生成产物。
+
+安装依赖、重建产物并检查源码与产物同步：
+
+```powershell
+npm install
+npm run build:script
+npm run check:script
+```
+
+`script.js` 需要和源码一起提交；构建固定生成单个非压缩 IIFE 文件，不产生额外 chunk。
+
 ## 测试
 
 常用本地检查：
 
 ```powershell
+npm run check:script
 node --check script.js
+node --test tools\test-script-module-build.mjs
 node tools\test-bird-profile-shards.js
 node tools\test-birdreport-core.js
 node tools\test-bird-prep-ppt-core.js
@@ -315,7 +332,7 @@ node tools\test-site-birdreport-lingod.js
 - `android/app/build.gradle` 中的 `versionName` 和 `versionCode`
 - README 的“当前版本”和“版本记录”
 - `server/site/.env.example` 是否仍与服务端默认值一致
-- 运行 `node --check script.js`
+- 运行 `npm run check:script` 和 `node --test tools\test-script-module-build.mjs`
 - 运行 README “测试”章节中的本地测试命令
 - 如发布 Android APK，运行 `.\gradlew.bat :app:assembleDebug`
 - 提交代码并按需要打版本标签，例如 `v1.5`

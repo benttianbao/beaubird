@@ -5,7 +5,9 @@
 BeauBird 是一个观鸟助手项目，包含可直接打开的网页、Node 登录站点、企业微信稀有鸟机器人、BirdReport 本地代理和 Android WebView 应用。核心功能围绕 BirdReport 查询、浙江稀有鸟监测、未解锁鸟种统计、eBird 当季分析和鸟类预习 PPT。
 
 主要入口：
-- `index.html`、`script.js`、`style.css`：网页主界面、交互逻辑和样式。
+- `index.html`、`style.css`：网页主界面和样式。
+- `src/script/`：前端交互源码，按应用启动、共享能力和业务功能拆分。
+- `script.js`：由 `src/script/` 生成并提交的经典脚本兼容产物，供直接网页、Node 站点和 Android WebView 使用。
 - `ebird-seasonal-core.js`：eBird 浙江当季分析核心逻辑。
 - `bird-prep-ppt-core.js`：鸟类预习 PPT 匹配和 `.pptx` 生成核心逻辑。
 - `birdreport-proxy.ps1`：本地 BirdReport 代理，默认 `http://127.0.0.1:8787`。
@@ -62,7 +64,9 @@ $env:GRADLE_USER_HOME='F:\beaubird\.gradle-home'
 优先运行与改动相关的最小检查：
 
 ```powershell
+npm run check:script
 node --check script.js
+node --test tools\test-script-module-build.mjs
 node tools\test-bird-prep-ppt-core.js
 node tools\test-bird-prep-ui.js
 node tools\test-birdreport-proxy-default.js
@@ -77,10 +81,11 @@ node server\site\site.test.js
 
 ## 开发约定
 
-- 这个仓库没有统一 `package.json`，多数检查是直接执行独立 Node 脚本。
+- 根目录 `package.json` 负责前端脚本构建；其余多数检查仍直接执行独立 Node 脚本。
 - Node 代码主要使用 CommonJS 和内置模块，优先沿用现有风格。
 - 浏览器和 Node 共用的核心模块采用 UMD 风格，例如 `ebird-seasonal-core.js` 和 `bird-prep-ppt-core.js`。
-- `script.js` 很大，改动时尽量局部、可回归；能放到核心模块并测试的逻辑，优先放到核心模块。
+- 只修改 `src/script/` 中的前端源码，不要直接编辑根目录 `script.js`。修改后运行 `npm run build:script` 和 `npm run check:script`，并提交更新后的产物。
+- 构建必须继续输出单个非压缩 IIFE 文件，保留经典脚本全局兼容，不能增加运行时 chunk 或远程前端依赖。
 - UI 改动要同时考虑桌面网页和 Android WebView，避免依赖远程前端资源。
 - BirdReport 相关请求分为本地代理 `127.0.0.1:8787` 和 Node 站点同源 `/api/birdreport/*` 两种路径，改动时都要留意。
 - 修改鸟类数据或浙江名录时，确认 `.json`、浏览器可读 `.js` 数据和相关测试是否需要同步更新。
