@@ -704,8 +704,13 @@ test("proxies Macaulay Library search results as normalized media metadata", asy
             }
           ]
         });
-        assert.equal(upstreamCalls[0].url, "https://media.ebird.org/api/v1/search?taxonCode=egret1&mediaType=photo&sort=rating_rank_desc&birdOnly=true&count=5");
-        assert.equal(upstreamCalls[0].init.headers.accept, "application/json");
+        assert.equal(
+          upstreamCalls[0].url,
+          "https://media.ebird.org/catalog?taxonCode=egret1&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
+        );
+        assert.equal(upstreamCalls[0].init.headers.accept, "text/html");
+        assert.equal(upstreamCalls[1].url, "https://media.ebird.org/api/v1/search?taxonCode=egret1&mediaType=photo&sort=rating_rank_desc&birdOnly=true&count=5");
+        assert.equal(upstreamCalls[1].init.headers.accept, "application/json");
       }
     );
   } finally {
@@ -713,7 +718,7 @@ test("proxies Macaulay Library search results as normalized media metadata", asy
   }
 });
 
-test("falls back to Macaulay catalog HTML when the JSON search endpoint is unavailable", async () => {
+test("uses Macaulay catalog HTML before the retired JSON search endpoint", async () => {
   const temp = createTempDatabase();
   try {
     const db = initializeSiteDatabase(temp.databasePath);
@@ -777,16 +782,17 @@ test("falls back to Macaulay catalog HTML when the JSON search endpoint is unava
               attribution: "Jane Birder",
               rating: 4.890476190476191,
               checklistId: "S82506368",
-              previewUrl: "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/312541331/1200",
+              previewUrl: "https://cdn.download.ams.birds.cornell.edu/api/v2/asset/312541331/1200",
               sourceUrl: "https://macaulaylibrary.org/asset/312541331"
             }
           ]
         });
         assert.equal(
-          upstreamCalls[1].url,
+          upstreamCalls[0].url,
           "https://media.ebird.org/catalog?taxonCode=litegr&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
         );
-        assert.equal(upstreamCalls[1].init.headers.accept, "text/html");
+        assert.equal(upstreamCalls[0].init.headers.accept, "text/html");
+        assert.equal(upstreamCalls.length, 1);
       }
     );
   } finally {
@@ -874,19 +880,20 @@ test("resolves scientific-name Macaulay queries through eBird taxonomy before ca
               attribution: "Woodpecker Birder",
               rating: 4.75,
               checklistId: "S123456",
-              previewUrl: "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/204246161/1200",
+              previewUrl: "https://cdn.download.ams.birds.cornell.edu/api/v2/asset/204246161/1200",
               sourceUrl: "https://macaulaylibrary.org/asset/204246161"
             }
           ]
         });
         assert.equal(
-          upstreamCalls[1].url,
+          upstreamCalls[0].url,
           "https://api.ebird.org/v2/ref/taxonomy/ebird?fmt=json&species=Dendrocopos+major&cat=species"
         );
         assert.equal(
-          upstreamCalls[2].url,
+          upstreamCalls[1].url,
           "https://media.ebird.org/catalog?taxonCode=grswoo&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
         );
+        assert.equal(upstreamCalls.length, 2);
       }
     );
   } finally {
@@ -938,7 +945,7 @@ test("proxies Macaulay Library assets and rejects invalid asset ids", async () =
         assert.equal(proxied.status, 200);
         assert.equal(proxied.headers.get("content-type"), "image/jpeg");
         assert.equal(await proxied.text(), "jpg-bytes");
-        assert.equal(upstreamCalls[0].url, "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/123456789/1200");
+        assert.equal(upstreamCalls[0].url, "https://cdn.download.ams.birds.cornell.edu/api/v2/asset/123456789/1200");
         assert.equal(upstreamCalls[0].init.headers.accept, "image/jpeg,image/png");
         assert.doesNotMatch(upstreamCalls[0].init.headers.accept, /image\/webp|image\/avif/);
       }

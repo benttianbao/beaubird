@@ -563,7 +563,7 @@ function Get-MacaulaySearchResults {
     } elseif ($entry.mediaUrl) {
       [string]$entry.mediaUrl
     } else {
-      "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/$assetId/1200"
+      "https://cdn.download.ams.birds.cornell.edu/api/v2/asset/$assetId/1200"
     }
 
     $sourceUrl = if ($entry.specimenUrl) {
@@ -627,7 +627,7 @@ function Get-MacaulayCatalogSearchResults {
       attribution = if ($userMatch.Success) { $userMatch.Groups[1].Value } else { "" }
       rating = $rating
       checklistId = if ($checklistMatch.Success) { $checklistMatch.Groups[1].Value } else { "" }
-      previewUrl = "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/$assetId/1200"
+      previewUrl = "https://cdn.download.ams.birds.cornell.edu/api/v2/asset/$assetId/1200"
       sourceUrl = "https://macaulaylibrary.org/asset/$assetId"
     })
 
@@ -736,47 +736,41 @@ try {
           continue
         }
 
-        if ($taxonCode) {
-          $remoteUrl = "https://media.ebird.org/api/v1/search?taxonCode=$([uri]::EscapeDataString($taxonCode))&mediaType=photo&sort=rating_rank_desc&birdOnly=true&count=5"
-        } else {
-          $remoteUrl = "https://media.ebird.org/api/v1/search?q=$([uri]::EscapeDataString($query))&searchField=species&mediaType=photo&sort=rating_rank_desc&birdOnly=true&count=5"
-        }
-        $searchResponse = Invoke-MacaulayCurlRequest -RemotePath $remoteUrl -Accept "application/json"
-        $searchBytes = @($searchResponse.BodyBytes)
-        $results = @()
-        if ($searchBytes.Count -gt 0 -and ([string]$searchResponse.ContentType).ToLowerInvariant().Contains("application/json")) {
-          try {
-            $searchJson = [System.Text.Encoding]::UTF8.GetString([byte[]]$searchBytes) | ConvertFrom-Json
-            $results = @(Get-MacaulaySearchResults -Payload $searchJson -TaxonCode $taxonCode -Query $query)
-          } catch {
-            $results = @()
-          }
-        }
-
-        if ($results.Count -eq 0 -and -not $taxonCode -and $query) {
+        $resolvedTaxonCode = $taxonCode
+        if (-not $resolvedTaxonCode -and $query) {
           $resolvedTaxonCode = Resolve-MacaulayQueryTaxonCode -Query $query
-          if ($resolvedTaxonCode) {
-            $catalogUrl = "https://media.ebird.org/catalog?taxonCode=$([uri]::EscapeDataString($resolvedTaxonCode))&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
-            $catalogResponse = Invoke-MacaulayCurlRequest -RemotePath $catalogUrl -Accept "text/html"
-            $catalogBytes = @($catalogResponse.BodyBytes)
-            if ($catalogBytes.Count -gt 0) {
-              $catalogHtml = [System.Text.Encoding]::UTF8.GetString([byte[]]$catalogBytes)
-              $results = @(Get-MacaulayCatalogSearchResults -Html $catalogHtml)
-            }
-          }
         }
 
+        $results = @()
+        if ($resolvedTaxonCode) {
+          $catalogUrl = "https://media.ebird.org/catalog?taxonCode=$([uri]::EscapeDataString($resolvedTaxonCode))&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
+        } else {
+          $catalogUrl = "https://media.ebird.org/catalog?q=$([uri]::EscapeDataString($query))&searchField=species&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
+        }
+        $catalogResponse = Invoke-MacaulayCurlRequest -RemotePath $catalogUrl -Accept "text/html"
+        $catalogBytes = @($catalogResponse.BodyBytes)
+        if ($catalogBytes.Count -gt 0) {
+          $catalogHtml = [System.Text.Encoding]::UTF8.GetString([byte[]]$catalogBytes)
+          $results = @(Get-MacaulayCatalogSearchResults -Html $catalogHtml)
+        }
+
+        # The former JSON endpoint now redirects to an HTML 404. Keep it only
+        # as a compatibility fallback in case a machine endpoint returns.
         if ($results.Count -eq 0) {
           if ($taxonCode) {
-            $catalogUrl = "https://media.ebird.org/catalog?taxonCode=$([uri]::EscapeDataString($taxonCode))&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
+            $remoteUrl = "https://media.ebird.org/api/v1/search?taxonCode=$([uri]::EscapeDataString($taxonCode))&mediaType=photo&sort=rating_rank_desc&birdOnly=true&count=5"
           } else {
-            $catalogUrl = "https://media.ebird.org/catalog?q=$([uri]::EscapeDataString($query))&searchField=species&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
+            $remoteUrl = "https://media.ebird.org/api/v1/search?q=$([uri]::EscapeDataString($query))&searchField=species&mediaType=photo&sort=rating_rank_desc&birdOnly=true&count=5"
           }
-          $catalogResponse = Invoke-MacaulayCurlRequest -RemotePath $catalogUrl -Accept "text/html"
-          $catalogBytes = @($catalogResponse.BodyBytes)
-          if ($catalogBytes.Count -gt 0) {
-            $catalogHtml = [System.Text.Encoding]::UTF8.GetString([byte[]]$catalogBytes)
-            $results = @(Get-MacaulayCatalogSearchResults -Html $catalogHtml)
+          $searchResponse = Invoke-MacaulayCurlRequest -RemotePath $remoteUrl -Accept "application/json"
+          $searchBytes = @($searchResponse.BodyBytes)
+          if ($searchBytes.Count -gt 0 -and ([string]$searchResponse.ContentType).ToLowerInvariant().Contains("application/json")) {
+            try {
+              $searchJson = [System.Text.Encoding]::UTF8.GetString([byte[]]$searchBytes) | ConvertFrom-Json
+              $results = @(Get-MacaulaySearchResults -Payload $searchJson -TaxonCode $taxonCode -Query $query)
+            } catch {
+              $results = @()
+            }
           }
         }
 
@@ -801,7 +795,7 @@ try {
           continue
         }
 
-        $assetUrl = "https://cdn.download.ams.birds.cornell.edu/api/v1/asset/$assetId/1200"
+        $assetUrl = "https://cdn.download.ams.birds.cornell.edu/api/v2/asset/$assetId/1200"
         $assetResponse = Invoke-MacaulayCurlRequest -RemotePath $assetUrl -Accept "image/jpeg,image/png"
         $assetContentType = ([string]$assetResponse.ContentType).Split(";")[0].ToLowerInvariant()
         if ($assetContentType -notin @("image/jpeg", "image/png")) {

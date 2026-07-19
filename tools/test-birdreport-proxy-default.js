@@ -44,7 +44,7 @@ test("local proxy exposes read-only Macaulay Library media endpoints", () => {
   assert.match(proxy, /\/api\/media\/macaulay\/search/);
   assert.match(proxy, /\/api\/media\/macaulay\/asset/);
   assert.match(proxy, /media\.ebird\.org\/api\/v1\/search/);
-  assert.match(proxy, /cdn\.download\.ams\.birds\.cornell\.edu\/api\/v1\/asset/);
+  assert.match(proxy, /cdn\.download\.ams\.birds\.cornell\.edu\/api\/v2\/asset/);
   assert.match(proxy, /\/1200/);
   assert.match(proxy, /Invalid Macaulay Library asset id/);
 });
@@ -55,7 +55,7 @@ test("local Macaulay asset proxy only requests PPT-supported image formats", () 
   assert.doesNotMatch(proxy, /\$assetResponse = Invoke-MacaulayCurlRequest -RemotePath \$assetUrl -Accept "image\/.*(?:webp|avif)/);
 });
 
-test("local Macaulay proxy uses JSON search and filters empty search bodies", () => {
+test("local Macaulay proxy keeps legacy JSON search as a compatibility fallback", () => {
   const proxy = readFileSync("birdreport-proxy.ps1", "utf8");
   assert.match(proxy, /Accept "application\/json"/);
   assert.match(proxy, /ConvertFrom-Json/);
@@ -63,12 +63,13 @@ test("local Macaulay proxy uses JSON search and filters empty search bodies", ()
   assert.match(proxy, /\$searchBytes = @\(\$searchResponse\.BodyBytes\)/);
 });
 
-test("local Macaulay proxy can fall back to catalog HTML search results", () => {
+test("local Macaulay proxy prefers catalog HTML search results", () => {
   const proxy = readFileSync("birdreport-proxy.ps1", "utf8");
   assert.match(proxy, /Get-MacaulayCatalogSearchResults/);
   assert.match(proxy, /media\.ebird\.org\/catalog/);
   assert.match(proxy, /assetId:\(\\d\+\)/);
   assert.match(proxy, /Accept "text\/html"/);
+  assert.ok(proxy.indexOf("media.ebird.org/catalog") < proxy.indexOf("media.ebird.org/api/v1/search"));
 });
 
 test("local Macaulay proxy resolves scientific-name queries to eBird taxon codes", () => {

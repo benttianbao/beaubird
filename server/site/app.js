@@ -498,6 +498,26 @@ async function proxyMacaulaySearch(context, url) {
     return json(context.response, 400, { error: "Missing Macaulay Library taxonCode or query" });
   }
 
+  let resolvedTaxonCode = taxonCode;
+  if (!resolvedTaxonCode && query) {
+    resolvedTaxonCode = await resolveMacaulayQueryTaxonCode(context, query);
+  }
+
+  let catalogError = "";
+  try {
+    const catalogResults = await fetchMacaulayCatalogSearchResults(context, {
+      taxonCode: resolvedTaxonCode,
+      query: resolvedTaxonCode ? "" : query
+    });
+    if (catalogResults.length) {
+      return json(context.response, 200, { results: catalogResults });
+    }
+  } catch (error) {
+    catalogError = `Macaulay Library catalog search failed: ${error.message}`;
+  }
+
+  // The former JSON endpoint now redirects to an HTML 404, but keep it as a
+  // compatibility fallback in case the provider restores a machine endpoint.
   const upstreamUrl = createMacaulayApiSearchUrl({ taxonCode, query });
 
   const upstream = await fetchUpstream(context, upstreamUrl.toString(), {
@@ -521,27 +541,8 @@ async function proxyMacaulaySearch(context, url) {
     upstreamError = "Macaulay Library search did not return JSON";
   }
 
-  if (!results.length && query && !taxonCode) {
-    const resolvedTaxonCode = await resolveMacaulayQueryTaxonCode(context, query);
-    if (resolvedTaxonCode) {
-      const fallbackResults = await fetchMacaulayCatalogSearchResults(context, {
-        taxonCode: resolvedTaxonCode
-      });
-      if (fallbackResults.length) {
-        results = fallbackResults;
-      }
-    }
-  }
-
-  if (!results.length) {
-    const fallbackResults = await fetchMacaulayCatalogSearchResults(context, { taxonCode, query });
-    if (fallbackResults.length) {
-      results = fallbackResults;
-    }
-  }
-
-  if (!results.length && upstreamError) {
-    return json(context.response, upstream.ok ? 502 : upstream.status, { error: upstreamError });
+  if (!results.length && (catalogError || upstreamError)) {
+    return json(context.response, upstream.ok ? 502 : upstream.status, { error: catalogError || upstreamError });
   }
 
   return json(context.response, 200, { results });
@@ -638,7 +639,7 @@ async function proxyMacaulayAsset(context, rawAssetId) {
     return json(context.response, 400, { error: "Invalid Macaulay Library asset id" });
   }
 
-  const upstreamUrl = `https://cdn.download.ams.birds.cornell.edu/api/v1/asset/${assetId}/1200`;
+  const upstreamUrl = `https://cdn.download.ams.birds.cornell.edu/api/v2/asset/${assetId}/1200`;
   const upstream = await fetchUpstream(context, upstreamUrl, {
     headers: {
       accept: MACAULAY_PPT_IMAGE_ACCEPT,
@@ -681,7 +682,7 @@ function normalizeMacaulaySearchResults(payload, criteria = {}) {
       continue;
     }
     seen.add(assetId);
-    const previewUrl = item?.largeUrl || item?.mediaUrl || `https://cdn.download.ams.birds.cornell.edu/api/v1/asset/${assetId}/1200`;
+    const previewUrl = item?.largeUrl || item?.mediaUrl || `https://cdn.download.ams.birds.cornell.edu/api/v2/asset/${assetId}/1200`;
     results.push({
       mlId: `ML${assetId}`,
       assetId,
@@ -722,7 +723,7 @@ function normalizeMacaulayCatalogSearchResults(html) {
       attribution: parseMacaulayCatalogString(itemSource, "userDisplayName"),
       rating,
       checklistId: parseMacaulayCatalogString(itemSource, "eBirdChecklistId"),
-      previewUrl: `https://cdn.download.ams.birds.cornell.edu/api/v1/asset/${assetId}/1200`,
+      previewUrl: `https://cdn.download.ams.birds.cornell.edu/api/v2/asset/${assetId}/1200`,
       sourceUrl: `https://macaulaylibrary.org/asset/${assetId}`
     });
   }
