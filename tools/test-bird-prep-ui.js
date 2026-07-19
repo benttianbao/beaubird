@@ -75,20 +75,20 @@ test("zhejiang rare bird monitor automatically runs one daily query on startup",
 });
 
 test("desktop workspace uses a sticky sidebar navigation", () => {
-  assert.match(css, /\.workspace-shell\s*\{[\s\S]*grid-template-columns: 248px minmax\(0, 1fr\);/);
+  assert.match(css, /\.workspace-shell\s*\{[\s\S]*grid-template-columns: 260px minmax\(0, 1fr\);/);
   assert.match(css, /\.workspace-sidebar\s*\{[\s\S]*position: sticky;[\s\S]*top: 0;/);
   assert.match(css, /\.app-quicknav\s*\{[\s\S]*display: grid;[\s\S]*position: static;/);
   assert.doesNotMatch(css, /\.app-quicknav\s*\{\s*display: none;\s*\}/);
 });
 
 test("main page uses a layered product visual system", () => {
-  assert.match(css, /--bg: oklch\(96\.8% 0\.006 190\);/);
-  assert.match(css, /--surface: oklch\(99% 0\.004 190\);/);
-  assert.match(css, /--sidebar: oklch\(94\.8% 0\.008 190\);/);
-  assert.match(css, /--sidebar-shell: oklch\(40% 0\.052 168\);/);
-  assert.match(css, /--radius-panel: 12px;/);
-  assert.match(css, /--shadow-panel: 0 1px 3px rgba\(24, 36, 38, 0\.04\), 0 4px 12px rgba\(24, 36, 38, 0\.03\);/);
-  assert.match(css, /\.workspace-sidebar\s*\{[\s\S]*background: linear-gradient\(180deg, var\(--sidebar-shell\) 0%, var\(--sidebar-shell-strong\) 100%\);/);
+  assert.match(css, /--bg: oklch\(97\.2% 0\.008 185\);/);
+  assert.match(css, /--surface: oklch\(99\.2% 0\.004 190\);/);
+  assert.match(css, /--sidebar: oklch\(94\.5% 0\.01 185\);/);
+  assert.match(css, /--sidebar-shell: oklch\(36% 0\.055 170\);/);
+  assert.match(css, /--radius-panel: 16px;/);
+  assert.match(css, /--shadow-panel: 0 1px 2px rgba\(18, 40, 36, 0\.04\), 0 8px 24px rgba\(18, 40, 36, 0\.06\);/);
+  assert.match(css, /\.workspace-sidebar\s*\{[\s\S]*linear-gradient\(180deg, var\(--sidebar-shell\) 0%, var\(--sidebar-shell-strong\) 100%\);/);
   assert.match(css, /\.panel\s*\{[\s\S]*border-radius: var\(--radius-panel\);[\s\S]*box-shadow: var\(--shadow-panel\);/);
   assert.match(css, /\.panel::before\s*\{/);
   assert.match(css, /\.panel h2::before\s*\{/);
@@ -98,7 +98,7 @@ test("main page uses a layered product visual system", () => {
 
 test("main page has sRGB fallbacks for browsers without OKLCH support", () => {
   assert.match(css, /@supports not \(color: oklch\(50% 0 0\)\)/);
-  assert.match(css, /--bg: #f4f7f7;/);
+  assert.match(css, /--bg: #f2f7f6;/);
   assert.match(css, /--section-surface: #f8fbfa;/);
   assert.match(css, /--focus-ring: 0 0 0 3px rgba\(36, 117, 107, 0\.18\);/);
 });
@@ -140,7 +140,7 @@ test("result modules add clearer empty states and summary tones", () => {
   assert.match(html, /id="birdreportSpeciesContainer" class="records cards"[\s\S]*data-empty-state="birdreport"/);
   assert.match(css, /\.result-empty\s*\{/);
   assert.match(css, /\.empty-state-title\s*\{/);
-  assert.match(css, /\.empty-state::before\s*\{[\s\S]*content: "";[\s\S]*border: 2px solid color-mix\(in oklch, var\(--section-accent\) 46%, transparent\);/);
+  assert.match(css, /\.empty-state::before\s*\{[\s\S]*content: "";[\s\S]*border: 2px solid color-mix\(in oklch, var\(--section-accent\) 42%, transparent\);/);
   assert.match(css, /\.unlocked-summary-card::before\s*\{/);
   assert.match(css, /\.unlocked-summary-card\.is-success\s*\{/);
   assert.match(css, /\.unlocked-summary-card\.is-warning\s*\{/);
@@ -159,8 +159,8 @@ test("visual system replaces legacy green literals with section-aware tokens", (
   assert.match(css, /--section-link: color-mix\(in oklch, var\(--section-accent\) 70%, var\(--text\)\);/);
   assert.match(css, /--state-success-bg: oklch\(94% 0\.026 148\);/);
   assert.match(css, /--state-warning-bg: oklch\(94\.5% 0\.038 82\);/);
-  assert.match(css, /\.panel\s*\{[\s\S]*background: var\(--section-surface\);/);
-  assert.match(css, /\.workspace-content\s*\{[\s\S]*gap: 20px;/);
+  assert.match(css, /\.panel\s*\{[\s\S]*background: color-mix\(in oklch, var\(--section-accent\) 2\.5%, var\(--panel\)\);/);
+  assert.match(css, /\.workspace-content\s*\{[\s\S]*gap: 22px;/);
   [
     "#edf7f7",
     "#fbfdfa",
@@ -183,7 +183,7 @@ test("form controls, stats, and loading states are polished", () => {
     css,
     /input\[type="text"\],[\s\S]*input\[type="file"\]\s*\{[\s\S]*padding: var\(--control-padding-y\) var\(--control-padding-x\);[\s\S]*transition:[\s\S]*border-color 150ms var\(--ease-out-quart\),[\s\S]*box-shadow 150ms var\(--ease-out-quart\),[\s\S]*background-color 150ms var\(--ease-out-quart\);/
   );
-  assert.match(css, /input\[type="text"\]:focus,[\s\S]*select:focus\s*\{[\s\S]*border-color: var\(--section-accent\);/);
+  assert.match(css, /input\[type="text"\]:focus,[\s\S]*select:focus\s*\{[\s\S]*border-color: color-mix\(in oklch, var\(--section-accent\) 70%, var\(--border\)\);/);
   assert.match(css, /\.checkbox-control\s*\{[\s\S]*background: var\(--section-surface-strong\);/);
   assert.match(css, /\.stats\s*\{[\s\S]*background: var\(--stats-surface\);[\s\S]*border: 1px solid var\(--section-divider\);/);
   assert.match(css, /\.message\.is-loading::before\s*\{/);
@@ -497,7 +497,7 @@ test("shared data, utility, and BirdReport core modules load before the app scri
 });
 
 test("frontend shared assets use the current deployment cache version", () => {
-  assert.match(html, /style\.css\?v=20260613-0001/);
+  assert.match(html, /style\.css\?v=20260719-wetland-mist/);
   assert.match(html, /beaubird-birdreport-core\.js\?v=20260622-0001/);
   assert.match(html, /bird-prep-ppt-core\.js\?v=20260719-0001/);
   assert.match(html, /script\.js\?v=20260622-0001/);
