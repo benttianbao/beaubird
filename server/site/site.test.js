@@ -869,7 +869,10 @@ test("resolves scientific-name Macaulay queries through eBird taxonomy before ca
         const adminCookie = cookieFrom(login);
 
         const proxied = await request("/api/media/macaulay/search?q=Dendrocopos%20major", {
-          headers: { cookie: adminCookie }
+          headers: {
+            cookie: adminCookie,
+            "user-agent": "Mozilla/5.0 Chrome/150.0.0.0 Safari/537.36"
+          }
         });
         assert.equal(proxied.status, 200);
         assert.deepEqual(await json(proxied), {
@@ -894,6 +897,10 @@ test("resolves scientific-name Macaulay queries through eBird taxonomy before ca
           "https://media.ebird.org/catalog?taxonCode=grswoo&mediaType=photo&sort=rating_rank_desc&birdOnly=true"
         );
         assert.equal(upstreamCalls.length, 2);
+        assert.deepEqual(
+          upstreamCalls.map((call) => call.init.headers["user-agent"]),
+          ["BeauBird Site", "BeauBird Site"]
+        );
       }
     );
   } finally {
@@ -940,7 +947,10 @@ test("proxies Macaulay Library assets and rejects invalid asset ids", async () =
         assert.equal((await json(rejected)).error, "Invalid Macaulay Library asset id");
 
         const proxied = await request("/api/media/macaulay/asset/ML123456789", {
-          headers: { cookie: adminCookie }
+          headers: {
+            cookie: adminCookie,
+            "user-agent": "Mozilla/5.0 Chrome/150.0.0.0 Safari/537.36"
+          }
         });
         assert.equal(proxied.status, 200);
         assert.equal(proxied.headers.get("content-type"), "image/jpeg");
@@ -948,6 +958,7 @@ test("proxies Macaulay Library assets and rejects invalid asset ids", async () =
         assert.equal(upstreamCalls[0].url, "https://cdn.download.ams.birds.cornell.edu/api/v2/asset/123456789/1200");
         assert.equal(upstreamCalls[0].init.headers.accept, "image/jpeg,image/png");
         assert.doesNotMatch(upstreamCalls[0].init.headers.accept, /image\/webp|image\/avif/);
+        assert.equal(upstreamCalls[0].init.headers["user-agent"], "BeauBird Site");
       }
     );
   } finally {

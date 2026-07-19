@@ -41,6 +41,7 @@ const DEFAULT_BIRDREPORT_RATE_LIMIT = {
   maxRequests: 120
 };
 const MACAULAY_PPT_IMAGE_ACCEPT = "image/jpeg,image/png";
+const MACAULAY_UPSTREAM_USER_AGENT = "BeauBird Site";
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -523,7 +524,7 @@ async function proxyMacaulaySearch(context, url) {
   const upstream = await fetchUpstream(context, upstreamUrl.toString(), {
     headers: {
       accept: "application/json",
-      "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
+      "user-agent": MACAULAY_UPSTREAM_USER_AGENT
     }
   });
 
@@ -568,7 +569,7 @@ async function fetchMacaulayCatalogSearchResults(context, { taxonCode = "", quer
   const response = await fetchUpstream(context, catalogUrl.toString(), {
     headers: {
       accept: "text/html",
-      "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
+      "user-agent": MACAULAY_UPSTREAM_USER_AGENT
     }
   });
   if (!response.ok) {
@@ -604,7 +605,7 @@ async function resolveMacaulayQueryTaxonCode(context, query) {
   const response = await fetchUpstream(context, taxonomyUrl.toString(), {
     headers: {
       accept: "application/json",
-      "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
+      "user-agent": MACAULAY_UPSTREAM_USER_AGENT
     }
   });
   if (!response.ok) {
@@ -643,7 +644,7 @@ async function proxyMacaulayAsset(context, rawAssetId) {
   const upstream = await fetchUpstream(context, upstreamUrl, {
     headers: {
       accept: MACAULAY_PPT_IMAGE_ACCEPT,
-      "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
+      "user-agent": MACAULAY_UPSTREAM_USER_AGENT
     }
   });
   const contentType = String(upstream.headers.get("content-type") || "").split(";")[0].toLowerCase();
