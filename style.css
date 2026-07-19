@@ -404,10 +404,10 @@ body {
 .panel {
   min-width: 0;
   max-width: 100%;
-  background: var(--section-surface);
-  border: 1px solid color-mix(in oklch, var(--section-accent) 12%, var(--border));
+  background: color-mix(in oklch, var(--section-accent) 2.5%, var(--panel));
+  border: 1px solid color-mix(in oklch, var(--section-accent) 14%, var(--border));
   border-radius: var(--radius-panel);
-  padding: 24px;
+  padding: 24px 24px 22px;
   box-shadow: var(--shadow-panel);
   position: relative;
   overflow: hidden;
@@ -423,10 +423,10 @@ body {
 
 .workspace-panel--priority {
   background:
-    linear-gradient(180deg, color-mix(in oklch, var(--section-accent) 8%, var(--panel)) 0%, var(--section-surface) 56%),
+    linear-gradient(180deg, color-mix(in oklch, var(--section-accent) 10%, var(--panel)) 0%, var(--section-surface) 58%),
     var(--section-surface);
-  border-color: color-mix(in oklch, var(--section-accent) 30%, var(--border));
-  box-shadow: 0 2px 5px rgba(24, 36, 38, 0.06), 0 12px 26px rgba(24, 36, 38, 0.05);
+  border-color: color-mix(in oklch, var(--section-accent) 32%, var(--border));
+  box-shadow: 0 2px 6px rgba(18, 40, 36, 0.06), 0 16px 36px rgba(18, 40, 36, 0.07);
 }
 
 .workspace-panel--priority .workspace-panel-header {
@@ -451,8 +451,13 @@ body {
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--section-accent), color-mix(in oklch, var(--section-accent) 55%, var(--accent)));
-  opacity: 0.7;
+  background: linear-gradient(
+    90deg,
+    var(--section-accent),
+    color-mix(in oklch, var(--section-accent) 45%, var(--accent-monitor)),
+    color-mix(in oklch, var(--section-accent) 55%, var(--accent))
+  );
+  opacity: 0.85;
 }
 
 .panel.is-jump-target {
@@ -472,12 +477,12 @@ body {
 
 .panel h2::before {
   content: "";
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   flex: 0 0 auto;
-  border-radius: 3px;
+  border-radius: 4px;
   background: var(--section-accent);
-  box-shadow: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--section-accent) 18%, transparent);
 }
 
 .workspace-panel-header {
