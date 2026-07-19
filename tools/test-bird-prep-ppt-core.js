@@ -24,6 +24,8 @@ function listStoredZipEntries(bytes) {
     }
 
     const compressionMethod = bytes[offset + 8] | (bytes[offset + 9] << 8);
+    const modifiedTime = bytes[offset + 10] | (bytes[offset + 11] << 8);
+    const modifiedDate = bytes[offset + 12] | (bytes[offset + 13] << 8);
     const compressedSize =
       bytes[offset + 18] |
       (bytes[offset + 19] << 8) |
@@ -34,8 +36,34 @@ function listStoredZipEntries(bytes) {
     const nameStart = offset + 30;
     const nameEnd = nameStart + nameLength;
     const name = Buffer.from(bytes.slice(nameStart, nameEnd)).toString("utf8");
-    entries.push({ name, compressionMethod, compressedSize });
+    entries.push({ name, compressionMethod, compressedSize, modifiedTime, modifiedDate });
     offset = nameEnd + extraLength + compressedSize;
+  }
+  return entries;
+}
+
+function listCentralZipEntries(bytes) {
+  const entries = [];
+  for (let offset = 0; offset < bytes.length - 46; offset += 1) {
+    const signature =
+      bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24);
+    if (signature !== 0x02014b50) {
+      continue;
+    }
+
+    const modifiedTime = bytes[offset + 12] | (bytes[offset + 13] << 8);
+    const modifiedDate = bytes[offset + 14] | (bytes[offset + 15] << 8);
+    const nameLength = bytes[offset + 28] | (bytes[offset + 29] << 8);
+    const extraLength = bytes[offset + 30] | (bytes[offset + 31] << 8);
+    const commentLength = bytes[offset + 32] | (bytes[offset + 33] << 8);
+    const nameStart = offset + 46;
+    const nameEnd = nameStart + nameLength;
+    const name = Buffer.from(bytes.slice(nameStart, nameEnd)).toString("utf8");
+    entries.push({ name, modifiedTime, modifiedDate });
+    offset = nameEnd + extraLength + commentLength - 1;
   }
   return entries;
 }
@@ -160,6 +188,47 @@ test("createBirdPrepPptx generates a pptx package with one slide per bird", () =
   assert.ok(entries.some((entry) => entry.name === "ppt/slides/slide2.xml"));
   assert.ok(entries.some((entry) => entry.name === "ppt/presentation.xml"));
   assert.ok(!entries.some((entry) => entry.name === "ppt/slides/slide3.xml"));
+});
+
+test("createBirdPrepPptx writes valid DOS timestamps in every ZIP header", () => {
+  const bytes = createBirdPrepPptx([
+    {
+      speciesName: "白鹭",
+      latinName: "Egretta garzetta",
+      overview: "常见的小型白色鹭鸟。",
+      sections: []
+    }
+  ]);
+  const localEntries = listStoredZipEntries(bytes);
+  const centralEntries = listCentralZipEntries(bytes);
+
+  assert.ok(localEntries.length > 0);
+  assert.equal(centralEntries.length, localEntries.length);
+  for (const entry of [...localEntries, ...centralEntries]) {
+    assert.equal(entry.modifiedTime, 0);
+    assert.equal(entry.modifiedDate, 0x0021, `${entry.name} must use the valid 1980-01-01 DOS date`);
+  }
+});
+
+test("createBirdPrepPptx writes schema-valid widescreen and theme metadata", () => {
+  const bytes = createBirdPrepPptx([
+    {
+      speciesName: "白鹭",
+      latinName: "Egretta garzetta",
+      overview: "常见的小型白色鹭鸟。",
+      sections: []
+    }
+  ]);
+  const presentation = readStoredZipEntry(bytes, "ppt/presentation.xml").toString("utf8");
+  const theme = readStoredZipEntry(bytes, "ppt/theme/theme1.xml").toString("utf8");
+
+  assert.match(presentation, /<p:sldSz[^>]+type="screen16x9"/);
+  assert.doesNotMatch(presentation, /type="wide"/);
+  assert.equal((theme.match(/<a:cs typeface=""\/>/g) || []).length, 2);
+  assert.equal((theme.match(/<a:effectStyle>/g) || []).length, 3);
+  assert.match(theme, /<a:fillStyleLst>[\s\S]*<a:solidFill>[\s\S]*<a:solidFill>[\s\S]*<a:solidFill>[\s\S]*<\/a:fillStyleLst>/);
+  assert.match(theme, /<a:lnStyleLst>[\s\S]*<a:ln [^>]*>[\s\S]*<a:ln [^>]*>[\s\S]*<a:ln [^>]*>[\s\S]*<\/a:lnStyleLst>/);
+  assert.match(theme, /<a:bgFillStyleLst>[\s\S]*<a:solidFill>[\s\S]*<a:solidFill>[\s\S]*<a:solidFill>[\s\S]*<\/a:bgFillStyleLst>/);
 });
 
 test("createBirdPrepPptx renders overview above the existing right-column sections", () => {

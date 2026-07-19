@@ -499,6 +499,7 @@ test("shared data, utility, and BirdReport core modules load before the app scri
 test("frontend shared assets use the current deployment cache version", () => {
   assert.match(html, /style\.css\?v=20260613-0001/);
   assert.match(html, /beaubird-birdreport-core\.js\?v=20260622-0001/);
+  assert.match(html, /bird-prep-ppt-core\.js\?v=20260719-0001/);
   assert.match(html, /script\.js\?v=20260622-0001/);
 });
 

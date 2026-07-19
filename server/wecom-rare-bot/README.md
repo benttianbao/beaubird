@@ -39,7 +39,7 @@ https://your-tunnel.example.com/wecom/rare-bot
 - 优先确认企业微信后台是否有“智能机器人 / API 模式”。有的话使用同一个回调地址，机器人可直接在群内回复。
 - 如果暂时不能使用智能机器人，则创建自建应用回调，并再准备目标群的群机器人 Webhook URL。自建应用负责接收消息，Webhook 负责把查询结果推回群里。
 - 需要准备：`CorpID`、`Token`、`EncodingAESKey`；兜底方案还需要 `WECOM_GROUP_WEBHOOK_URL`。
-- 云服务器部署时设置 `WECOM_PUBLIC_BASE_URL`，例如 `http://120.26.231.157`，用于生成 BirdReport 验证码图片链接。
+- 云服务器部署时设置 `WECOM_PUBLIC_BASE_URL=https://120.26.231.157`，用于生成 HTTPS BirdReport 验证码图片链接。
 
 ## 群内命令
 

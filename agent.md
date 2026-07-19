@@ -56,8 +56,9 @@ $env:GRADLE_USER_HOME='F:\beaubird\.gradle-home'
 ## 云端部署地址
 
 - 默认云服务器公网地址：`120.26.231.157`。
+- 默认云端网站地址：`https://120.26.231.157`，HTTP 网站入口重定向到 HTTPS。
 - 以后给用户生成云端部署、SSH、Nginx、回调地址或环境变量命令时，直接使用这个地址，不要使用 `example.com`、`your-server` 或其他占位符。
-- 企业微信机器人云端配置里，`WECOM_PUBLIC_BASE_URL` 默认写成 `http://120.26.231.157`，用于生成 BirdReport 验证码图片链接。
+- 企业微信机器人云端配置里，`WECOM_PUBLIC_BASE_URL` 默认写成 `https://120.26.231.157`，用于生成 BirdReport 验证码图片链接。
 
 ## 常用验证
 

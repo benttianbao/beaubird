@@ -11,6 +11,8 @@
   const PPT_WIDTH = 12192000;
   const PPT_HEIGHT = 6858000;
   const ZIP_UTF8_FLAG = 0x0800;
+  const ZIP_DOS_TIME = 0;
+  const ZIP_DOS_DATE = 0x0021;
 
   const SECTION_LIMITS = {
     overview: 230,
@@ -582,7 +584,7 @@
   <p:sldIdLst>
     ${slideIds.join("\n    ")}
   </p:sldIdLst>
-  <p:sldSz cx="${PPT_WIDTH}" cy="${PPT_HEIGHT}" type="wide"/>
+  <p:sldSz cx="${PPT_WIDTH}" cy="${PPT_HEIGHT}" type="screen16x9"/>
   <p:notesSz cx="6858000" cy="9144000"/>
   <p:defaultTextStyle>
     <a:defPPr><a:defRPr lang="zh-CN"/></a:defPPr>
@@ -668,10 +670,31 @@
       <a:folHlink><a:srgbClr val="5F6E61"/></a:folHlink>
     </a:clrScheme>
     <a:fontScheme name="BeauBird Fonts">
-      <a:majorFont><a:latin typeface="Microsoft YaHei"/><a:ea typeface="Microsoft YaHei"/></a:majorFont>
-      <a:minorFont><a:latin typeface="Microsoft YaHei"/><a:ea typeface="Microsoft YaHei"/></a:minorFont>
+      <a:majorFont><a:latin typeface="Microsoft YaHei"/><a:ea typeface="Microsoft YaHei"/><a:cs typeface=""/></a:majorFont>
+      <a:minorFont><a:latin typeface="Microsoft YaHei"/><a:ea typeface="Microsoft YaHei"/><a:cs typeface=""/></a:minorFont>
     </a:fontScheme>
-    <a:fmtScheme name="BeauBird Format"><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:lnStyleLst><a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst><a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:bgFillStyleLst></a:fmtScheme>
+    <a:fmtScheme name="BeauBird Format">
+      <a:fillStyleLst>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+      </a:fillStyleLst>
+      <a:lnStyleLst>
+        <a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>
+        <a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>
+        <a:ln w="9525"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln>
+      </a:lnStyleLst>
+      <a:effectStyleLst>
+        <a:effectStyle><a:effectLst/></a:effectStyle>
+        <a:effectStyle><a:effectLst/></a:effectStyle>
+        <a:effectStyle><a:effectLst/></a:effectStyle>
+      </a:effectStyleLst>
+      <a:bgFillStyleLst>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+      </a:bgFillStyleLst>
+    </a:fmtScheme>
   </a:themeElements>
 </a:theme>`);
   }
@@ -721,8 +744,8 @@
     pushU16(bytes, 20);
     pushU16(bytes, ZIP_UTF8_FLAG);
     pushU16(bytes, 0);
-    pushU16(bytes, 0);
-    pushU16(bytes, 0);
+    pushU16(bytes, ZIP_DOS_TIME);
+    pushU16(bytes, ZIP_DOS_DATE);
     pushU32(bytes, crc);
     pushU32(bytes, size);
     pushU32(bytes, size);
@@ -738,8 +761,8 @@
     pushU16(bytes, 20);
     pushU16(bytes, ZIP_UTF8_FLAG);
     pushU16(bytes, 0);
-    pushU16(bytes, 0);
-    pushU16(bytes, 0);
+    pushU16(bytes, ZIP_DOS_TIME);
+    pushU16(bytes, ZIP_DOS_DATE);
     pushU32(bytes, crc);
     pushU32(bytes, size);
     pushU32(bytes, size);

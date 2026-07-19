@@ -108,7 +108,14 @@ BeauBird 站点：127.0.0.1:3000
 - `/site/health` 由网站服务响应
 - `/wecom/health` 转发到机器人服务的 `/health`
 
-启用 HTTPS 后，把 `server/site/.env` 中的 `BEAUBIRD_SITE_SECURE_COOKIES` 设为 `1`。
+云端网站使用 `https://120.26.231.157`。Let’s Encrypt 的 IP 地址证书需要 Certbot 5.4 或更新版本，并使用 `shortlived` 配置；证书有效期约 6 天，因此必须保留 Certbot 定时续期任务和续期后的 Nginx reload hook：
+
+```bash
+sudo snap install certbot --classic
+sudo /snap/bin/certbot certonly --preferred-profile shortlived --webroot --webroot-path /var/www/letsencrypt --ip-address 120.26.231.157 --cert-name 120.26.231.157
+```
+
+启用 HTTPS 后，把 `server/site/.env` 中的 `BEAUBIRD_SITE_SECURE_COOKIES` 设为 `1`，并把企业微信机器人的 `WECOM_PUBLIC_BASE_URL` 设为 `https://120.26.231.157`。
 
 ### Android APK
 
