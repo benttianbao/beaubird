@@ -1157,12 +1157,19 @@ button.danger {
 
 .message.error {
   color: var(--danger);
+  background: color-mix(in oklch, var(--danger) 6%, var(--surface));
+  border: 1px solid color-mix(in oklch, var(--danger) 18%, var(--border));
+  border-radius: 8px;
+  padding: 6px 10px;
 }
 
 .message.is-loading {
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  background: color-mix(in oklch, var(--section-accent) 5%, var(--surface));
+  border-radius: 8px;
+  padding: 4px 10px;
 }
 
 .message.is-loading::before {
@@ -1209,10 +1216,10 @@ button.danger {
 
 .stats {
   margin: 12px 0 10px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   background: var(--stats-surface);
   border: 1px solid var(--section-divider);
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--muted);
   font-size: 0.95rem;
 }
@@ -2108,10 +2115,10 @@ button.danger {
   max-height: calc(100vh - 32px);
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-panel);
   background: var(--surface);
   padding: 16px;
-  box-shadow: 0 12px 32px rgba(24, 36, 38, 0.16);
+  box-shadow: var(--shadow-panel-active);
 }
 
 .birdreport-rare-detail-panel.is-hidden {
@@ -2122,8 +2129,8 @@ button.danger {
   position: fixed;
   inset: 0;
   z-index: 26;
-  background: rgba(34, 48, 36, 0.26);
-  backdrop-filter: blur(2px);
+  background: color-mix(in oklch, oklch(20% 0.02 200) 45%, transparent);
+  backdrop-filter: blur(3px);
 }
 
 .birdreport-rare-detail-backdrop.is-hidden {
@@ -2290,10 +2297,10 @@ body.unlocked-export-open {
   max-height: calc(100vh - 32px);
   overflow: auto;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-panel);
   background: var(--surface);
   padding: 16px;
-  box-shadow: 0 12px 32px rgba(24, 36, 38, 0.16);
+  box-shadow: var(--shadow-panel-active);
 }
 
 .query-detail-panel.is-hidden {
@@ -2304,8 +2311,8 @@ body.unlocked-export-open {
   position: fixed;
   inset: 0;
   z-index: 24;
-  background: rgba(34, 48, 36, 0.26);
-  backdrop-filter: blur(2px);
+  background: color-mix(in oklch, oklch(20% 0.02 200) 45%, transparent);
+  backdrop-filter: blur(3px);
 }
 
 .query-detail-backdrop.is-hidden {
@@ -2369,11 +2376,13 @@ body.query-detail-open {
 .empty-state {
   display: grid;
   justify-items: center;
-  gap: 4px;
-  border: 1px dashed color-mix(in oklch, var(--section-accent) 26%, var(--border));
-  border-radius: 10px;
-  padding: 16px;
-  background: color-mix(in oklch, var(--section-accent) 6%, var(--panel-muted));
+  gap: 6px;
+  border: 1px dashed color-mix(in oklch, var(--section-accent) 28%, var(--border));
+  border-radius: 12px;
+  padding: 20px 16px;
+  background:
+    radial-gradient(circle at 50% 0%, color-mix(in oklch, var(--section-accent) 10%, transparent), transparent 55%),
+    color-mix(in oklch, var(--section-accent) 5%, var(--panel-muted));
   color: var(--muted);
   text-align: center;
   font-size: 0.9rem;
@@ -2383,14 +2392,15 @@ body.query-detail-open {
 .empty-state::before {
   content: "";
   display: block;
-  width: 34px;
-  height: 34px;
-  margin: 0 auto 4px;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 2px;
   border-radius: 999px;
-  border: 2px solid color-mix(in oklch, var(--section-accent) 46%, transparent);
+  border: 2px solid color-mix(in oklch, var(--section-accent) 42%, transparent);
   background:
-    radial-gradient(circle at center, color-mix(in oklch, var(--section-accent) 58%, var(--surface)) 0 3px, transparent 4px),
-    color-mix(in oklch, var(--section-accent) 9%, var(--surface));
+    radial-gradient(circle at center, color-mix(in oklch, var(--section-accent) 62%, var(--surface)) 0 4px, transparent 5px),
+    color-mix(in oklch, var(--section-accent) 10%, var(--surface));
+  box-shadow: 0 6px 14px color-mix(in oklch, var(--section-accent) 12%, transparent);
 }
 
 .result-empty {
@@ -2400,8 +2410,8 @@ body.query-detail-open {
 
 .empty-state-title {
   display: block;
-  color: color-mix(in oklch, var(--section-accent) 46%, var(--text));
-  font-size: 0.94rem;
+  color: color-mix(in oklch, var(--section-accent) 40%, var(--text));
+  font-size: 0.96rem;
   font-weight: 800;
 }
 
