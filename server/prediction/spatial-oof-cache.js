@@ -18,13 +18,15 @@ const { dirname, resolve } = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 
 const { canonicalJson } = require("./spatial-splits");
+const { LOCATION_NORMALIZATION_VERSION } = require("./location-normalization");
 const {
   FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1,
   buildAdminExposureCapCandidates
 } = require("./spatial-transfer");
 
-const SPATIAL_OOF_CACHE_SCHEMA_VERSION = 2;
-const SPATIAL_OOF_CACHE_KIND = "zhejiang_development_strict_nested_spatial_oof_sufficient_statistics";
+const SPATIAL_OOF_CACHE_SCHEMA_VERSION = 3;
+const SPATIAL_OOF_CACHE_KIND =
+  "zhejiang_development_strict_nested_spatial_oof_sufficient_statistics_location_normalized_v3";
 const SPATIAL_OOF_CACHE_PANEL = "development";
 const DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY =
   "distinct_known_observer_group_key_outside_all_sealed_r6_buffers";
@@ -44,6 +46,7 @@ const SPATIAL_OOF_CACHE_DEEPEST_LEVELS = Object.freeze([
 const SPATIAL_OOF_CACHE_GENERATION_FILES = Object.freeze([
   "tools/build-zhejiang-prediction-model.js",
   "server/prediction/geo.js",
+  "server/prediction/location-normalization.js",
   "server/prediction/math.js",
   "server/prediction/model.js",
   "server/prediction/spatial-oof-cache.js",
@@ -85,6 +88,9 @@ const EVIDENCE_OPTIONS_KEYS = Object.freeze([
   "includeFlaggedCleanReports",
   "levels",
   "localHistoryYears",
+  "locationAliasMapSha256",
+  "locationNormalizationAuditSha256",
+  "locationNormalizationVersion",
   "outerCalibrationContextSampleModulo",
   "outerPriorTuningContextSampleModulo",
   "pointDriftMeters",
@@ -566,6 +572,17 @@ function normalizeEvidenceOptions(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.dataCutoffDate || ""))) {
     throw new SpatialOofCacheError("SPATIAL_OOF_CACHE_VALUE_INVALID", "evidenceOptions.dataCutoffDate 非法。" );
   }
+  if (value.locationNormalizationVersion !== LOCATION_NORMALIZATION_VERSION) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_VALUE_INVALID",
+      "evidenceOptions.locationNormalizationVersion 不匹配。"
+    );
+  }
+  for (const key of ["locationAliasMapSha256", "locationNormalizationAuditSha256"]) {
+    if (!/^[a-f0-9]{64}$/u.test(String(value[key] || ""))) {
+      throw new SpatialOofCacheError("SPATIAL_OOF_CACHE_VALUE_INVALID", `evidenceOptions.${key} 非法。`);
+    }
+  }
   for (const [key, expected] of Object.entries(EVIDENCE_POLICY_VALUES)) {
     if (value[key] !== expected) {
       throw new SpatialOofCacheError(
@@ -616,6 +633,9 @@ function normalizeEvidenceOptions(value) {
     includeFlaggedCleanReports: value.includeFlaggedCleanReports,
     levels: ["province", "city", "district"],
     localHistoryYears: finiteNumber(value.localHistoryYears, "evidenceOptions.localHistoryYears", { minimum: 0 }),
+    locationAliasMapSha256: String(value.locationAliasMapSha256),
+    locationNormalizationAuditSha256: String(value.locationNormalizationAuditSha256),
+    locationNormalizationVersion: LOCATION_NORMALIZATION_VERSION,
     outerCalibrationContextSampleModulo: finiteInteger(
       value.outerCalibrationContextSampleModulo,
       "evidenceOptions.outerCalibrationContextSampleModulo",
@@ -2043,14 +2063,22 @@ function loadSpatialOofCache({
     database.exec("PRAGMA query_only = ON; PRAGMA foreign_keys = ON;");
     validateSchema(database);
     const metadata = parseMetadata(database);
+    const earlyContractMismatches = [];
+    if (metadata.schemaVersion !== SPATIAL_OOF_CACHE_SCHEMA_VERSION) earlyContractMismatches.push("schemaVersion");
+    if (metadata.cacheKind !== SPATIAL_OOF_CACHE_KIND) earlyContractMismatches.push("cacheKind");
+    if (earlyContractMismatches.length) {
+      throw new SpatialOofCacheError(
+        "SPATIAL_OOF_CACHE_BINDING_MISMATCH",
+        "OOF 缓存版本或 kind 与当前地点规范化契约不匹配。",
+        { mismatches: earlyContractMismatches }
+      );
+    }
     validateMetadataShape(metadata);
     const expectedSnapshot = String(sourceSnapshotSha256 || "").toLowerCase();
     const expectedFoldIds = (verifiedSpatialSplit.panel?.folds || [])
       .map((fold) => Number(fold.foldId))
       .sort((left, right) => left - right);
     const mismatches = [];
-    if (metadata.schemaVersion !== SPATIAL_OOF_CACHE_SCHEMA_VERSION) mismatches.push("schemaVersion");
-    if (metadata.cacheKind !== SPATIAL_OOF_CACHE_KIND) mismatches.push("cacheKind");
     if (metadata.panel !== SPATIAL_OOF_CACHE_PANEL) mismatches.push("panel");
     if (metadata.diagnosticOnly !== true) mismatches.push("diagnosticOnly");
     if (metadata.sourceSnapshotSha256 !== expectedSnapshot) mismatches.push("sourceSnapshotSha256");

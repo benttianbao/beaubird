@@ -17,7 +17,11 @@ const {
 const { betaInterval, fitBetaCalibration, regularizedIncompleteBeta } = require("../server/prediction/math");
 const { PredictionError, PredictionModel } = require("../server/prediction/model");
 const {
+  DEFAULT_OPTIONS,
   PredictionBuildError,
+  aggregateTrainingStatistics,
+  aggregateUnitSummaries,
+  analyzeOccurrenceEvents,
   buildPredictionArtifact,
   cliResultSummary,
   createArtifactSchema,
@@ -27,6 +31,9 @@ const {
   evaluateReleaseQuality,
   guardCalibrationCandidates,
   inspectSnapshotQuality,
+  insertSpaceUnits,
+  insertTaxa,
+  insertTrainingRows,
   publishModelPointer,
   predictionImplementationSha256,
   selectTemporalFoldReports
@@ -726,6 +733,82 @@ test("quality gate rejects incomplete checklists", () => {
   database.close();
 });
 
+test("重复 point_id 在训练前合并并守恒报告、观察、观察者、年份和鸟种证据", () => {
+  const directory = testDirectory("point-location-aliases");
+  const sourcePath = join(directory, "source.sqlite");
+  createSourceDatabase(sourcePath, { reportCount: 12, yearSpan: 3, observerModulo: 12 });
+  const source = new DatabaseSync(sourcePath);
+  source.exec(`
+    UPDATE reports
+    SET point_id = CASE WHEN CAST(substr(report_id, 8) AS INTEGER) < 5 THEN '211370' ELSE '16431' END,
+        point_name = '岚山水库', city_name = '宁波市', district_name = '镇海区',
+        longitude = 121.63869, latitude = 30.02833
+  `);
+  const quality = inspectSnapshotQuality(source, {
+    minimumNormalReports: 1,
+    minimumCompleteCoverage: 1,
+    minimumCoordinateCoverage: 1,
+    minimumDateCoverage: 1,
+    coordinateSystemConfirmed: true
+  });
+  assert.equal(quality.locationNormalization.summary.automaticMergeGroupCount, 1);
+  assert.equal(quality.locationNormalization.automaticMergeGroups[0].reportCount, 12);
+
+  const artifact = new DatabaseSync(":memory:");
+  createArtifactSchema(artifact);
+  const options = {
+    ...DEFAULT_OPTIONS,
+    dataCutoffDate: quality.report.dataCutoffDate
+  };
+  const training = insertTrainingRows(
+    source,
+    artifact,
+    quality.pointStats,
+    quality.locationNormalization,
+    quality.report,
+    options
+  );
+  const sourceReportCount = source.prepare("SELECT COUNT(*) count FROM reports").get().count;
+  const sourceObservationCount = source.prepare("SELECT COUNT(*) count FROM observations").get().count;
+  const sourceTaxonCount = source.prepare("SELECT COUNT(DISTINCT taxon_id) count FROM observations").get().count;
+  assert.equal(training.stats.insertedReports, sourceReportCount);
+  assert.equal(training.stats.duplicateReports, 0);
+  assert.equal(artifact.prepare("SELECT COUNT(*) count FROM training_reports").get().count, sourceReportCount);
+  assert.equal(artifact.prepare("SELECT COUNT(*) count FROM training_detections").get().count, sourceObservationCount);
+
+  const occurrence = analyzeOccurrenceEvents(artifact, options);
+  assert.equal(occurrence.analyzedDetections, sourceObservationCount);
+  const summaries = aggregateUnitSummaries(artifact, options);
+  insertSpaceUnits(artifact, training.registry, summaries);
+  insertTaxa(artifact);
+  aggregateTrainingStatistics(artifact);
+  const lookupA = artifact.prepare(
+    "SELECT space_unit_id FROM location_lookup WHERE lookup_type='point_id' AND lookup_key='16431'"
+  ).get().space_unit_id;
+  const lookupB = artifact.prepare(
+    "SELECT space_unit_id FROM location_lookup WHERE lookup_type='point_id' AND lookup_key='211370'"
+  ).get().space_unit_id;
+  assert.equal(lookupA, lookupB);
+  const unit = artifact.prepare(
+    "SELECT code, checklist_count, observer_count, support_years_json FROM space_units WHERE id=?"
+  ).get(lookupA);
+  assert.equal(unit.code, "16431");
+  assert.equal(unit.checklist_count, 12);
+  assert.equal(unit.observer_count, 12);
+  assert.deepEqual(JSON.parse(unit.support_years_json).sort(), [2023, 2024, 2025]);
+  assert.equal(
+    artifact.prepare("SELECT SUM(raw_checklists) value FROM checklist_exposure WHERE space_unit_id=?").get(lookupA).value,
+    sourceReportCount
+  );
+  assert.equal(
+    artifact.prepare("SELECT SUM(raw_detections) value FROM taxon_detection WHERE space_unit_id=?").get(lookupA).value,
+    sourceObservationCount
+  );
+  assert.equal(artifact.prepare("SELECT COUNT(*) count FROM taxa").get().count, sourceTaxonCount);
+  artifact.close();
+  source.close();
+});
+
 test("production thresholds cannot be relaxed and test-only artifacts cannot publish", async () => {
   const directory = testDirectory("test-only-safety");
   const base = {
@@ -924,6 +1007,14 @@ test("end-to-end safe public artifact supports location and species queries", as
     ),
     "fixed_snapshot_coordinate_qc_target_independent_not_refit_per_fold"
   );
+  const locationNormalization = JSON.parse(
+    artifact.prepare("SELECT value FROM manifest WHERE key='location_normalization'").get().value
+  );
+  assert.equal(locationNormalization.version, "zhejiang_point_alias_exact_identity_v1");
+  assert.match(locationNormalization.contractSha256, /^[a-f0-9]{64}$/u);
+  assert.equal(locationNormalization.summary.automaticMergeGroupCount, 0);
+  const analysisReport = JSON.parse(readFileSync(result.reportPath, "utf8"));
+  assert.deepEqual(analysisReport.locationNormalization.summary, result.locationNormalization.summary);
   const priorMatrix = JSON.parse(
     artifact.prepare("SELECT value FROM manifest WHERE key='prior_strengths_by_prevalence'").get().value
   );

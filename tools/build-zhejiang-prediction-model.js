@@ -42,6 +42,11 @@ const {
 } = require("../server/prediction/model");
 const { analyzeTaxonDetections } = require("../server/prediction/vagrant-events");
 const {
+  finalizePointLocationNormalization,
+  locationNormalizationReport,
+  observePointLocation
+} = require("../server/prediction/location-normalization");
+const {
   adminCapForTaxon,
   buildAdminExposureCapCandidates,
   capEffectiveEvidence,
@@ -89,6 +94,7 @@ const NESTED_CALIBRATION_GUARD = Object.freeze({
 const PREDICTION_IMPLEMENTATION_FILES = Object.freeze([
   "tools/build-zhejiang-prediction-model.js",
   "server/prediction/geo.js",
+  "server/prediction/location-normalization.js",
   "server/prediction/math.js",
   "server/prediction/model.js",
   "server/prediction/sealed-evaluation-receipt.js",
@@ -706,6 +712,7 @@ function inspectSnapshotQuality(database, options = {}) {
     });
   }
   const pointStats = new Map();
+  const pointLocationProfiles = new Map();
   let validCoordinateCount = 0;
   let validDateCount = 0;
   let coordinateCandidateCount = 0;
@@ -734,12 +741,13 @@ function inspectSnapshotQuality(database, options = {}) {
       if (parts.iso > dataCutoffDate) dataCutoffDate = parts.iso;
     }
     const coordinate = convertReportCoordinate(row);
+    observePointLocation(pointLocationProfiles, row, coordinate);
     if (Number(row.location_metadata_fetched)) coordinateCandidateCount += 1;
     if (coordinate.swapped) swappedCoordinateCount += 1;
     if (coordinate.valid) validCoordinateCount += 1;
     else if (coordinate.conversionValid && !coordinate.withinZhejiang) outsideCoordinateCount += 1;
     if (!row.point_id) continue;
-    const key = String(row.point_id);
+    const key = String(row.point_id).trim();
     const stats = pointStats.get(key) || {
       count: 0,
       validCount: 0,
@@ -770,6 +778,7 @@ function inspectSnapshotQuality(database, options = {}) {
     stats.stable = !stats.hasCoordinateProblem && driftMeters <= resolvedOptions.pointDriftMeters;
     if (!stats.stable) unstablePointCount += 1;
   }
+  const locationNormalization = finalizePointLocationNormalization(pointLocationProfiles, pointStats);
 
   const completeCoverage = normalCount ? completeNormalCount / normalCount : 0;
   const flaggedEligibilityCoverage = flaggedCount ? eligibleFlaggedCount / flaggedCount : 1;
@@ -812,7 +821,14 @@ function inspectSnapshotQuality(database, options = {}) {
         driftMeters: Number(stats.driftMeters.toFixed(1)),
         longitude: Number(((stats.minLongitude + stats.maxLongitude) / 2).toFixed(6)),
         latitude: Number(((stats.minLatitude + stats.maxLatitude) / 2).toFixed(6))
-      }))
+      })),
+    locationNormalization: {
+      version: locationNormalization.version,
+      contractSha256: locationNormalization.contractSha256,
+      aliasMapSha256: locationNormalization.aliasMapSha256,
+      auditSha256: locationNormalization.auditSha256,
+      ...locationNormalization.summary
+    }
   };
   const failures = [];
   if (completeCoverage < resolvedOptions.minimumCompleteCoverage) failures.push("completeCoverage");
@@ -826,7 +842,7 @@ function inspectSnapshotQuality(database, options = {}) {
       report
     );
   }
-  return { report, pointStats };
+  return { report, pointStats, locationNormalization };
 }
 
 function createArtifactSchema(database) {
@@ -1402,7 +1418,7 @@ function registerGridUnit(registry, cell, parentId, cityName, districtName) {
   if (cell.level === "grid_r6") registry.voteParent(cell.id, parentId);
 }
 
-function insertTrainingRows(source, artifact, pointStats, quality, options) {
+function insertTrainingRows(source, artifact, pointStats, locationNormalization, quality, options) {
   const registry = createUnitRegistry();
   registerAdministrativeUnits(registry, "", "");
   const insertReport = artifact.prepare(
@@ -1440,7 +1456,7 @@ function insertTrainingRows(source, artifact, pointStats, quality, options) {
     const dateParts = isoDateParts(dateText);
     if (!dateParts) return;
     const coordinate = convertReportCoordinate(current);
-    const pointState = current.point_id ? pointStats.get(String(current.point_id)) : null;
+    const pointState = current.point_id ? pointStats.get(String(current.point_id).trim()) : null;
     const spatialUsable = coordinate.valid && (!pointState || pointState.stable);
     const admin = registerAdministrativeUnits(registry, current.city_name, current.district_name);
     for (const unitId of [admin.provinceId, admin.cityId, admin.districtId].filter(Boolean)) {
@@ -1455,15 +1471,20 @@ function insertTrainingRows(source, artifact, pointStats, quality, options) {
       registerGridUnit(registry, r6, admin.districtId || admin.cityId || admin.provinceId, current.city_name, current.district_name);
       registerGridUnit(registry, r7, r6.id, current.city_name, current.district_name);
       if (current.point_id) {
-        pointUnitId = `point:${stableHash(current.point_id).slice(0, 32)}`;
+        const sourcePointId = String(current.point_id).trim();
+        const canonicalPointId =
+          locationNormalization.canonicalPointIdByPointId.get(sourcePointId) || sourcePointId;
+        const canonicalLocation =
+          locationNormalization.canonicalLocationByPointId.get(sourcePointId) || null;
+        pointUnitId = `point:${stableHash(canonicalPointId).slice(0, 32)}`;
         registry.register({
           id: pointUnitId,
           level: "point",
-          code: String(current.point_id),
-          name: String(current.point_name || "未命名点位"),
+          code: canonicalPointId,
+          name: String(canonicalLocation?.pointName || current.point_name || "未命名点位"),
           parentId: r7.id,
-          cityName: String(current.city_name || ""),
-          districtName: String(current.district_name || ""),
+          cityName: String(canonicalLocation?.cityName || current.city_name || ""),
+          districtName: String(canonicalLocation?.districtName || current.district_name || ""),
           centroidLongitude: coordinate.longitude,
           centroidLatitude: coordinate.latitude,
           minLongitude: coordinate.longitude,
@@ -1473,7 +1494,7 @@ function insertTrainingRows(source, artifact, pointStats, quality, options) {
           boundary: null
         });
         registry.includeCoordinate(pointUnitId, coordinate.longitude, coordinate.latitude);
-        registry.votePointLookup(current.point_id, pointUnitId);
+        registry.votePointLookup(sourcePointId, pointUnitId);
       }
     }
     if (current.point_id && !pointUnitId) {
@@ -3905,6 +3926,9 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
         pointDriftMeters: options.pointDriftMeters,
         recencyHalfLifeYears: options.recencyHalfLifeYears,
         localHistoryYears: options.localHistoryYears,
+        locationNormalizationVersion: options.locationNormalizationVersion,
+        locationAliasMapSha256: options.locationAliasMapSha256,
+        locationNormalizationAuditSha256: options.locationNormalizationAuditSha256,
         bandwidthCandidates: options.bandwidthCandidates,
         priorStrengthMultipliers: options.priorStrengthMultipliers,
         priorStrengths: options.priorStrengths,
@@ -5611,6 +5635,9 @@ async function buildPredictionArtifact(options = {}) {
     const quality = inspectSnapshotQuality(source, resolvedOptions);
     emitProgress(resolvedOptions, "quality_gate_passed", quality.report);
     resolvedOptions.dataCutoffDate = quality.report.dataCutoffDate;
+    resolvedOptions.locationNormalizationVersion = quality.locationNormalization.version;
+    resolvedOptions.locationAliasMapSha256 = quality.locationNormalization.aliasMapSha256;
+    resolvedOptions.locationNormalizationAuditSha256 = quality.locationNormalization.auditSha256;
     artifact = new DatabaseSync(temporaryOutput);
     createArtifactSchema(artifact);
     emitProgress(resolvedOptions, "training_rows_started");
@@ -5618,6 +5645,7 @@ async function buildPredictionArtifact(options = {}) {
       source,
       artifact,
       quality.pointStats,
+      quality.locationNormalization,
       quality.report,
       resolvedOptions
     );
@@ -5677,6 +5705,15 @@ async function buildPredictionArtifact(options = {}) {
     manifestSet(artifact, "probability_definition", PROBABILITY_DEFINITION);
     manifestSet(artifact, "source_snapshot_sha256", snapshot.sha256);
     manifestSet(artifact, "training_data_contract", TRAINING_DATA_CONTRACT);
+    const normalizationReport = locationNormalizationReport(quality.locationNormalization);
+    manifestSet(artifact, "location_normalization", {
+      version: normalizationReport.version,
+      rules: normalizationReport.rules,
+      contractSha256: normalizationReport.contractSha256,
+      aliasMapSha256: normalizationReport.aliasMapSha256,
+      auditSha256: normalizationReport.auditSha256,
+      summary: normalizationReport.summary
+    });
     manifestSet(artifact, "source_contract", sourceContract);
     manifestSet(artifact, "input_features", ["calendar_date", "location"]);
     manifestSet(artifact, "weather_features", {
@@ -5862,6 +5899,7 @@ async function buildPredictionArtifact(options = {}) {
         dataCutoffDate: quality.report.dataCutoffDate
       },
       dataQuality: coverage,
+      locationNormalization: normalizationReport,
       occurrenceEvents: {
         ...occurrenceEvents,
         candidates: occurrenceCandidateDetails
@@ -5940,6 +5978,7 @@ async function buildPredictionArtifact(options = {}) {
       releaseEligible: releaseQuality.passed,
       temporal,
       occurrenceEvents,
+      locationNormalization: normalizationReport,
       forward,
       reverse,
       validation,
@@ -6107,6 +6146,8 @@ module.exports = {
   TRAINING_DATA_CONTRACT,
   PredictionBuildError,
   analyzeOccurrenceEvents,
+  aggregateTrainingStatistics,
+  aggregateUnitSummaries,
   assertTrainingSourceContract,
   buildPredictionArtifact,
   cliResultSummary,
@@ -6120,6 +6161,9 @@ module.exports = {
   evaluateSpatialHoldout,
   guardCalibrationCandidates,
   inspectSnapshotQuality,
+  insertSpaceUnits,
+  insertTaxa,
+  insertTrainingRows,
   parseCliArguments,
   predictionImplementationSha256,
   publishModelPointer,

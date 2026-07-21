@@ -4,7 +4,7 @@
 
 模型输出定义为：一份与输入日期、地点相似的典型完整 BirdReport 清单中，某鸟种被记录到的历史概率。它不是生态学上的绝对存在概率，也不预测数量、小时级活动或未来天气变化。
 
-首版 champion 是分层经验贝叶斯模型。日期使用 365 天循环核平滑，空间依次使用 `point_id → H3 r7 → H3 r6 → 区县 → 市 → 浙江省`；样本支持不足时自动回退，并返回实际层级、有效清单数、观察者数、支持年份、90% 区间和置信等级。正向与反向查询复用同一概率函数。
+首版 champion 是分层经验贝叶斯模型。日期使用 365 天循环核平滑，空间依次使用 `规范点位（一个或多个 point_id 别名）→ H3 r7 → H3 r6 → 区县 → 市 → 浙江省`；样本支持不足时自动回退，并返回实际层级、有效清单数、观察者数、支持年份、90% 区间和置信等级。正向与反向查询复用同一概率函数。
 
 ## 固定训练快照
 
@@ -20,6 +20,20 @@
 - 有效经纬度覆盖率 98.457%；原始 BD-09 转换为 WGS84 后计算 H3
 
 爬虫继续运行不会改变此快照。新增报告只进入下一版快照与模型。
+
+### 重复地点规范化
+
+固定快照在写入训练空间单元前执行 `zhejiang_point_alias_exact_identity_v1`。地点名、市和区县只做 Unicode NFKC、首尾与连续空白规范化及大小写归一；只有规范市、规范区县和规范地点名全部非空且完全相同、来源经纬度逐值完全相同、所有坐标均通过现有浙江覆盖校验、每个来源 point_id 自身也通过点位稳定性检查时才自动合并。非零近距同名、异名（即使坐标相同）、跨市或跨区县同名均只审计、不自动合并。规范代表按数值优先、随后字典序最小的来源 point_id 确定，所有原始 point_id 继续分别写入 `location_lookup` 并指向同一个规范空间单元。
+
+2026-07-21 对固定快照 87,065 份合格报告、12,150 个来源 point_id 的全量审计结果：
+
+- 53 组满足同市、同区县、同规范名、同来源坐标；其中 52 组同时通过坐标与点位稳定性门，自动合并 107 个 point_id 为 52 个规范点位，减少 55 个冗余训练点空间单元，涉及 4,119 份报告。
+- 另 1 组为象山县“渔山列岛”（point_id `110420`、`211335`，62 份报告）；来源坐标不通过现有浙江空间覆盖掩膜，因而不创建规范点位，报告仍完整保留并按行政层回退。
+- 非零近距同名 8 对、同区县同名但至少相距 1 km 37 对、100 m 内异名 1,711 对、同坐标异名 116 组、跨行政区同名 118 组，全部不自动合并。
+- “岚山水库” `16431` 与 `211370` 合并到以 `16431` 为代表的同一空间单元，报告数为 `90 + 75 = 165`；“镇海岚山水库” `170472` 保持独立。
+- 规范化规则 SHA-256：`b8562ce0339bb040ab988785a0654ab103bac248034e7f43ead7a44a4768803d`；固定快照别名映射 SHA-256：`bf3c545c12a62d3947eaef7be81208cf27ef17ab5c617e15ab523c564591c6a8`；完整审计 SHA-256：`8089af0e49f2c63ffbdcd1aa5dc09b9722a15c3ba9dd7a88741a23547f94317f`。
+
+模型 manifest 保存规则、版本、三个哈希及审计摘要；模型旁车报告另保存自动合并组和有界疑似样例。规范化只改变训练读取阶段的点位空间身份，不修改固定快照，也不改变 H3 r6 development split。
 
 ## 数据权重与偶发聚集
 
@@ -203,6 +217,19 @@ v2 继续只保存公共鸟种 ID、匿名 outer/inner 折号、折内稠密上�
 
 当前 runtime 和空间参数制品仍只支持按流行度组查询行政层上限，因此逐鸟候选即使改善 development，也只能先作为诊断。只有在另行扩展运行时和参数 schema、重新完成全部 development 折并通过所有门槛后，才可能进入冻结流程。
 
+#### 2026-07-21 地点规范化后的严格 cache v3 契约
+
+地点别名合并会改变点位空间身份及其聚合支持度，因此历史 cache v2 虽然文件完整，仍不得复用。新版缓存显式升级为 schema 3、kind `zhejiang_development_strict_nested_spatial_oof_sufficient_statistics_location_normalized_v3`，并在匿名 `evidenceOptions` 中绑定地点规范化版本、别名映射 SHA-256 和完整审计 SHA-256；缓存仍不得保存 point_id、地点名、报告 ID、观察者、坐标、H3 或任何精确空间标识。证据生成实现哈希另外覆盖 `server/prediction/location-normalization.js`，旧 v2 会因 schema、kind、证据契约和实现哈希不匹配而 fail closed。
+
+本批次使用新的输出，绝不覆盖历史 v2：
+
+- evaluation-only development 模型：`data/prediction-models/zhejiang-v1-20260715-development-location-normalized-v3.sqlite`
+- 严格 OOF cache v3：`data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v3.sqlite`
+- workers=4 候选报告：`data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-candidates-strict-v3-w4.json`
+- workers=1 确定性复跑：`data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-candidates-strict-v3-w1.json`
+
+候选集合、校准器集合、5 outer×4 inner、质量阈值和 sealed 隔离规则均不改变。只有地点身份规范化及其缓存绑定升级；`maximumSpeciesEce=0.05` 等所有发布门槛不得降低。
+
 ## 构建与测试
 
 复用已固定快照构建，不连接网站、不切换线上模型指针：
@@ -281,7 +308,7 @@ node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js `
 测试：
 
 ```powershell
-node --test tools\test-vagrant-events.js tools\test-zhejiang-prediction-model.js
+node --test tools\test-location-normalization.js tools\test-vagrant-events.js tools\test-zhejiang-prediction-model.js tools\test-spatial-oof-cache.js tools\test-spatial-candidate-scorer.js
 ```
 
 构建完成后应同时生成：

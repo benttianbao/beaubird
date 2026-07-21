@@ -31,6 +31,7 @@ const {
 } = require("../server/prediction/spatial-candidate-scorer");
 const { FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1 } = require("../server/prediction/spatial-transfer");
 const { prevalenceGroup } = require("../server/prediction/model");
+const { LOCATION_NORMALIZATION_VERSION } = require("../server/prediction/location-normalization");
 
 const SNAPSHOT_SHA = "a".repeat(64);
 const SPLIT_SHA = "b".repeat(64);
@@ -216,6 +217,9 @@ function fixtureEvidenceOptions() {
     includeFlaggedCleanReports: true,
     levels: ["province", "city", "district"],
     localHistoryYears: 5,
+    locationAliasMapSha256: "e".repeat(64),
+    locationNormalizationAuditSha256: "f".repeat(64),
+    locationNormalizationVersion: LOCATION_NORMALIZATION_VERSION,
     outerCalibrationContextSampleModulo: 10,
     outerPriorTuningContextSampleModulo: 20,
     pointDriftMeters: 2000,
@@ -292,6 +296,10 @@ test("development OOF 缓存规范化往返且不含身份或精确空间字段"
       sourceSnapshotSha256: SNAPSHOT_SHA
     });
     assert.equal(loaded.metadata.panel, "development");
+    assert.equal(loaded.metadata.schemaVersion, 3);
+    assert.equal(loaded.metadata.evidenceOptions.locationNormalizationVersion, LOCATION_NORMALIZATION_VERSION);
+    assert.equal(loaded.metadata.evidenceOptions.locationAliasMapSha256, "e".repeat(64));
+    assert.equal(loaded.metadata.evidenceOptions.locationNormalizationAuditSha256, "f".repeat(64));
     assert.equal(
       loaded.metadata.developmentPoolPositiveCountPolicy,
       DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY
@@ -372,7 +380,7 @@ test("缓存 writer 拒绝 scoreRows 隐私白名单之外的字段", () => {
   }
 });
 
-test("cache v2 拒绝 inner scoreRows 私密字段和不完整 outer×inner 折", () => {
+test("cache v3 拒绝 inner scoreRows 私密字段和不完整 outer×inner 折", () => {
   const directory = testDirectory("spatial-oof-inner-contract");
   try {
     const privatePath = join(directory, "private.sqlite");
@@ -612,6 +620,31 @@ test("缓存绑定拒绝错快照且 writer 拒绝缺折", () => {
         error instanceof SpatialOofCacheError &&
         error.code === "SPATIAL_OOF_CACHE_BINDING_MISMATCH" &&
         error.details.mismatches.includes("sourceSnapshotSha256")
+    );
+    const oldVersionPath = join(directory, "cache-v2.sqlite");
+    writeFixture(oldVersionPath);
+    try {
+      chmodSync(oldVersionPath, 0o666);
+    } catch {
+      // Windows ACLs may ignore POSIX mode bits.
+    }
+    const oldVersion = new DatabaseSync(oldVersionPath);
+    oldVersion.prepare("UPDATE metadata SET value='2' WHERE key='schemaVersion'").run();
+    oldVersion.prepare("UPDATE metadata SET value=? WHERE key='cacheKind'")
+      .run(JSON.stringify("zhejiang_development_strict_nested_spatial_oof_sufficient_statistics"));
+    oldVersion.close();
+    writeFileSync(`${oldVersionPath}.sha256`, `${sha256File(oldVersionPath)}  cache-v2.sqlite\n`, "utf8");
+    assert.throws(
+      () => loadSpatialOofCache({
+        cachePath: oldVersionPath,
+        verifiedSpatialSplit: verifiedSplit(),
+        sourceSnapshotSha256: SNAPSHOT_SHA
+      }),
+      (error) =>
+        error instanceof SpatialOofCacheError &&
+        error.code === "SPATIAL_OOF_CACHE_BINDING_MISMATCH" &&
+        error.details.mismatches.includes("schemaVersion") &&
+        error.details.mismatches.includes("cacheKind")
     );
     const incompletePath = join(directory, "incomplete.sqlite");
     assert.throws(
