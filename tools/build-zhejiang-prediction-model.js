@@ -2199,6 +2199,55 @@ function resetHoldoutTables(artifact) {
   `);
 }
 
+function populateSpatialHoldoutTables(artifact, {
+  validationR6Units,
+  excludedR6Units,
+  reservedR6Units
+}) {
+  resetHoldoutTables(artifact);
+  const insertExcluded = artifact.prepare("INSERT OR IGNORE INTO evaluation_excluded_r6(unit_id) VALUES (?)");
+  const insertReserved = artifact.prepare("INSERT OR IGNORE INTO evaluation_reserved_r6(unit_id) VALUES (?)");
+  const insertValidation = artifact.prepare("INSERT OR IGNORE INTO evaluation_validation_r6(unit_id) VALUES (?)");
+  for (const unitId of [...new Set(excludedR6Units || [])].map(String).sort()) insertExcluded.run(unitId);
+  for (const unitId of [...new Set(reservedR6Units || [])].map(String).sort()) insertReserved.run(unitId);
+  for (const unitId of [...new Set(validationR6Units || [])].map(String).sort()) insertValidation.run(unitId);
+  artifact.exec(`
+    INSERT INTO evaluation_validation_reports(report_id, evaluation_weight, local_recent)
+    SELECT reports.report_id, reports.weight, reports.is_recent
+    FROM training_reports reports
+    JOIN evaluation_validation_r6 validation ON validation.unit_id = reports.grid_r6_unit
+    WHERE reports.is_recent = 1;
+    INSERT INTO evaluation_training_reports(report_id, evaluation_weight, local_recent)
+    SELECT reports.report_id, reports.weight, reports.is_recent
+    FROM training_reports reports
+    WHERE reports.grid_r6_unit IS NOT NULL
+      AND NOT EXISTS (
+         SELECT 1 FROM evaluation_excluded_r6 excluded WHERE excluded.unit_id = reports.grid_r6_unit
+       )
+      AND NOT EXISTS (
+         SELECT 1 FROM evaluation_reserved_r6 reserved WHERE reserved.unit_id = reports.grid_r6_unit
+       );
+  `);
+  const diagnostics = holdoutSelectionDiagnostics(artifact);
+  const bufferLeakage = Number(
+    artifact.prepare(`
+      SELECT COUNT(*) AS count
+      FROM training_reports reports
+      JOIN evaluation_training_reports selected USING (report_id)
+      JOIN evaluation_excluded_r6 excluded ON excluded.unit_id = reports.grid_r6_unit
+    `).get().count
+  ) || 0;
+  const reservedLeakage = Number(
+    artifact.prepare(`
+      SELECT COUNT(*) AS count
+      FROM training_reports reports
+      JOIN evaluation_training_reports selected USING (report_id)
+      JOIN evaluation_reserved_r6 reserved ON reserved.unit_id = reports.grid_r6_unit
+    `).get().count
+  ) || 0;
+  return { ...diagnostics, bufferLeakage, reservedLeakage };
+}
+
 function collectDevelopmentPoolPositiveCounts(artifact, reservedUnitIds) {
   const reservedIds = [...new Set((reservedUnitIds || []).map(String))].sort();
   if (!reservedIds.length) {
@@ -3594,9 +3643,6 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
         cities: [...(fold.cities || [])].sort()
       }))
     : anchors.map((anchor) => ({ foldId: anchor.unit_id, anchorIds: [anchor.unit_id], cities: [] }));
-  const insertExcluded = artifact.prepare("INSERT OR IGNORE INTO evaluation_excluded_r6(unit_id) VALUES (?)");
-  const insertReserved = artifact.prepare("INSERT OR IGNORE INTO evaluation_reserved_r6(unit_id) VALUES (?)");
-  const insertValidation = artifact.prepare("INSERT OR IGNORE INTO evaluation_validation_r6(unit_id) VALUES (?)");
   const adminCapCandidates = frozenSplit?.panelName === "development"
     ? buildAdminExposureCapCandidates()
     : [];
@@ -3605,9 +3651,18 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
         frozenSplit.manifest.sealedRelease.anchors.flatMap((anchor) => anchor.bufferCellIds || [])
       )].sort()
     : [];
+  const developmentBuffersByFold = frozenSplit?.panelName === "development"
+    ? new Map(evaluationFolds.map((fold) => [
+        String(fold.foldId),
+        [...new Set(
+          anchors
+            .filter((anchor) => fold.anchorIds.includes(anchor.unit_id))
+            .flatMap((anchor) => anchor.bufferCellIds || [anchor.unit_id])
+        )].sort()
+      ]))
+    : new Map();
   const folds = [];
   for (const evaluationFold of evaluationFolds) {
-    resetHoldoutTables(artifact);
     const validationAnchors = anchors.filter((anchor) => evaluationFold.anchorIds.includes(anchor.unit_id));
     const excludedIds = frozenSplit
       ? [...new Set(validationAnchors.flatMap((anchor) => anchor.bufferCellIds || [anchor.unit_id]))].sort()
@@ -3616,49 +3671,11 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
           .map((cell) => cell.unit_id)
           .sort();
     const reservedIds = developmentReservedIds;
-    for (const unitId of excludedIds) insertExcluded.run(unitId);
-    for (const unitId of reservedIds) insertReserved.run(unitId);
-    for (const unitId of evaluationFold.anchorIds) insertValidation.run(unitId);
-    artifact.exec(`
-      INSERT INTO evaluation_validation_reports(report_id, evaluation_weight, local_recent)
-      SELECT reports.report_id, reports.weight, reports.is_recent
-      FROM training_reports reports
-      JOIN evaluation_validation_r6 validation ON validation.unit_id = reports.grid_r6_unit
-      WHERE reports.is_recent = 1;
-    `);
-    artifact.exec(`
-      INSERT INTO evaluation_training_reports(report_id, evaluation_weight, local_recent)
-      SELECT reports.report_id, reports.weight, reports.is_recent
-      FROM training_reports reports
-      WHERE reports.grid_r6_unit IS NOT NULL
-        AND NOT EXISTS (
-           SELECT 1 FROM evaluation_excluded_r6 excluded WHERE excluded.unit_id = reports.grid_r6_unit
-         )
-        AND NOT EXISTS (
-           SELECT 1 FROM evaluation_reserved_r6 reserved WHERE reserved.unit_id = reports.grid_r6_unit
-         );
-    `);
-    const diagnostics = holdoutSelectionDiagnostics(artifact);
-    const bufferLeakage = Number(
-      artifact
-        .prepare(
-          `SELECT COUNT(*) AS count
-           FROM training_reports reports
-           JOIN evaluation_training_reports selected USING (report_id)
-           JOIN evaluation_excluded_r6 excluded ON excluded.unit_id = reports.grid_r6_unit`
-        )
-        .get().count
-    ) || 0;
-    const reservedLeakage = Number(
-      artifact
-        .prepare(
-          `SELECT COUNT(*) AS count
-           FROM training_reports reports
-           JOIN evaluation_training_reports selected USING (report_id)
-           JOIN evaluation_reserved_r6 reserved ON reserved.unit_id = reports.grid_r6_unit`
-        )
-        .get().count
-    ) || 0;
+    const diagnostics = populateSpatialHoldoutTables(artifact, {
+      validationR6Units: evaluationFold.anchorIds,
+      excludedR6Units: excludedIds,
+      reservedR6Units: reservedIds
+    });
     if (frozenSplit && (!validationAnchors.length || diagnostics.validationReports === 0)) {
       throw new PredictionBuildError("EMPTY_FROZEN_SPATIAL_FOLD", "冻结空间开发折没有可评估的最近五年清单。", {
         panel: frozenSplit.panelName,
@@ -3700,19 +3717,83 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
             calibratorForTaxon: nestedCalibration.calibratorForTaxon
           }).metrics
       : rawMetrics;
+    const strictInnerFolds = [];
+    if (options.writeSpatialOofCachePath !== undefined && frozenSplit?.panelName === "development") {
+      for (const innerEvaluationFold of evaluationFolds) {
+        const innerFoldId = String(innerEvaluationFold.foldId);
+        if (innerFoldId === String(evaluationFold.foldId)) continue;
+        const innerExcludedIds = [...new Set([
+          ...excludedIds,
+          ...(developmentBuffersByFold.get(innerFoldId) || [])
+        ])].sort();
+        const innerDiagnostics = populateSpatialHoldoutTables(artifact, {
+          validationR6Units: innerEvaluationFold.anchorIds,
+          excludedR6Units: innerExcludedIds,
+          reservedR6Units: reservedIds
+        });
+        if (
+          innerDiagnostics.validationReports === 0 ||
+          innerDiagnostics.reportOverlap !== 0 ||
+          innerDiagnostics.bufferLeakage !== 0 ||
+          innerDiagnostics.reservedLeakage !== 0
+        ) {
+          throw new PredictionBuildError(
+            "SPATIAL_OOF_CACHE_INNER_SELECTION_INVALID",
+            "严格 outer×inner 空间证据未能保持目标折、双重 buffer 与 sealed reservation 隔离。",
+            {
+              outerFoldId: String(evaluationFold.foldId),
+              innerFoldId,
+              diagnostics: innerDiagnostics
+            }
+          );
+        }
+        const innerRawDetails = evaluatePreparedHoldoutDetails(
+          artifact,
+          nestedCalibration.bandwidthDays,
+          nestedOptions,
+          { collectAdminCapTasks: true, collectScoreRows: true }
+        );
+        if (!innerRawDetails.metrics || !innerRawDetails.scoreRows?.length) {
+          throw new PredictionBuildError(
+            "SPATIAL_OOF_CACHE_INNER_FOLD_EMPTY",
+            "严格 outer×inner 空间证据没有生成完整评分行。",
+            { outerFoldId: String(evaluationFold.foldId), innerFoldId }
+          );
+        }
+        strictInnerFolds.push({
+          innerFoldId,
+          trainingFoldIds: evaluationFolds
+            .map((fold) => String(fold.foldId))
+            .filter((foldId) => foldId !== String(evaluationFold.foldId) && foldId !== innerFoldId)
+            .sort(),
+          evidenceConfiguration: {
+            bandwidthDays: nestedCalibration.summary.bandwidthDays,
+            calibrationContextSampleModulo: nestedCalibration.summary.calibrationContextSampleModulo,
+            calibrationFitYears: nestedCalibration.summary.calibrationFitYears,
+            calibrationGuardYear: nestedCalibration.summary.calibrationGuardYear,
+            hyperparameterSelectionYears: nestedCalibration.summary.hyperparameterSelectionYears,
+            priorStrengthsByPrevalence: nestedCalibration.summary.priorStrengthsByPrevalence,
+            validationYears: nestedCalibration.summary.validationYears
+          },
+          referenceRawMetrics: innerRawDetails.metrics,
+          scoreRows: innerRawDetails.scoreRows
+        });
+      }
+    }
     folds.push({
       foldId: evaluationFold.foldId,
       cities: evaluationFold.cities,
       validationR6Units: evaluationFold.anchorIds,
       excludedR6Units: excludedIds,
       reservedR6Units: reservedIds,
-      diagnostics: { ...diagnostics, bufferLeakage, reservedLeakage },
+      diagnostics,
       nestedCalibration: nestedCalibration.summary,
       adminCapTuning: foldAdminCapTuning,
       rawMetrics,
       temporalCalibratedMetrics,
       metrics: temporalCalibratedMetrics,
-      scoreRows: rawDetails.scoreRows
+      scoreRows: rawDetails.scoreRows,
+      innerFolds: strictInnerFolds
     });
   }
   let developmentPoolPositiveCounts = null;
@@ -3770,6 +3851,7 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
       expectedFoldCount !== 5 ||
       folds.length !== expectedFoldCount ||
       folds.some((fold) => !fold.rawMetrics || !fold.metrics || !fold.scoreRows?.length) ||
+      folds.some((fold) => !Array.isArray(fold.innerFolds) || fold.innerFolds.length !== expectedFoldCount - 1) ||
       !rawMetrics ||
       !metrics
     ) {
@@ -3797,7 +3879,8 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
           priorStrengthsByPrevalence: fold.nestedCalibration.priorStrengthsByPrevalence,
           validationYears: fold.nestedCalibration.validationYears
         },
-        referenceRawMetrics: fold.rawMetrics
+        referenceRawMetrics: fold.rawMetrics,
+        innerFolds: fold.innerFolds
       })),
       verifiedSpatialSplit: frozenSplit,
       sourceSnapshotSha256: options.sourceSnapshotSha256,
@@ -3835,7 +3918,10 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
       developmentPoolPositiveCounts
     });
   }
-  for (const fold of folds) delete fold.scoreRows;
+  for (const fold of folds) {
+    delete fold.scoreRows;
+    delete fold.innerFolds;
+  }
   return {
     status: metrics ? "evaluated" : "unavailable",
     split: frozenSplit

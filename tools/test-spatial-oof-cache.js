@@ -136,7 +136,7 @@ function fixtureFolds() {
       )
     ])
   );
-  return Array.from({ length: 5 }, (_, foldIndex) => {
+  const folds = Array.from({ length: 5 }, (_, foldIndex) => {
     const scoreRows = Array.from({ length: 2 }, (_, contextIndex) =>
       taxa.map((taxon, taxonIndex) => scoreRow({
         foldId: foldIndex + 1,
@@ -165,6 +165,37 @@ function fixtureFolds() {
       scoreRows
     };
   });
+  for (const outerFold of folds) {
+    const outerFoldId = Number(outerFold.foldId);
+    outerFold.innerFolds = folds
+      .filter((candidate) => candidate !== outerFold)
+      .map((innerTarget) => {
+        const innerFoldId = Number(innerTarget.foldId);
+        const innerRows = Array.from({ length: 2 }, (_, contextIndex) =>
+          taxa.map((taxon, taxonIndex) => scoreRow({
+            foldId: outerFoldId * 10 + innerFoldId,
+            contextIndex,
+            taxonId: taxon.taxonId,
+            positiveCount: Math.max(0, taxon.positiveCount - 10),
+            taxonIndex
+          }))
+        ).flat();
+        return {
+          innerFoldId: String(innerFoldId),
+          trainingFoldIds: folds
+            .map((fold) => Number(fold.foldId))
+            .filter((foldId) => foldId !== outerFoldId && foldId !== innerFoldId),
+          evidenceConfiguration: structuredClone(outerFold.evidenceConfiguration),
+          referenceRawMetrics: evaluateCandidateRows(innerRows.map((row) => ({
+            foldId: `${outerFoldId}:${innerFoldId}`,
+            row,
+            probability: row.rawProbability
+          }))),
+          scoreRows: innerRows
+        };
+      });
+  }
+  return folds;
 }
 
 function fixtureEvidenceOptions() {
@@ -249,7 +280,10 @@ test("development OOF 缓存规范化往返且不含身份或精确空间字段"
     const cachePath = join(directory, "cache.sqlite");
     const written = writeFixture(cachePath);
     assert.equal(written.foldCount, 5);
-    assert.equal(written.rowCount, 30);
+    assert.equal(written.innerFoldCount, 20);
+    assert.equal(written.outerRowCount, 30);
+    assert.equal(written.innerRowCount, 120);
+    assert.equal(written.rowCount, 150);
     assert.equal(written.diagnosticOnly, true);
     assert.equal(existsSync(`${cachePath}.sha256`), true);
     const loaded = loadSpatialOofCache({
@@ -262,9 +296,25 @@ test("development OOF 缓存规范化往返且不含身份或精确空间字段"
       loaded.metadata.developmentPoolPositiveCountPolicy,
       DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY
     );
-    assert.equal(loaded.metadata.rowCount, 30);
+    assert.equal(loaded.metadata.outerRowCount, 30);
+    assert.equal(loaded.metadata.innerRowCount, 120);
+    assert.equal(loaded.metadata.rowCount, 150);
     assert.deepEqual(loaded.folds.map((fold) => fold.foldId), ["1", "2", "3", "4", "5"]);
     assert.equal(loaded.folds.every((fold) => fold.scoreRows.length === 6), true);
+    assert.equal(loaded.folds.every((fold) => fold.innerFolds.length === 4), true);
+    for (const fold of loaded.folds) {
+      for (const innerFold of fold.innerFolds) {
+        assert.equal(innerFold.innerFoldId === fold.foldId, false);
+        assert.deepEqual(
+          innerFold.trainingFoldIds,
+          ["1", "2", "3", "4", "5"].filter(
+            (foldId) => foldId !== fold.foldId && foldId !== innerFold.innerFoldId
+          )
+        );
+        assert.equal(innerFold.scoreRows.length, 6);
+        assert.equal(innerFold.scoreRows.every((row) => row.positiveCount <= row.outerPositiveCount), true);
+      }
+    }
     assert.equal(
       loaded.folds[0].scoreRows.find((row) => row.taxonId === "common-a").developmentPositiveCount,
       320
@@ -317,6 +367,40 @@ test("缓存 writer 拒绝 scoreRows 隐私白名单之外的字段", () => {
       (error) => error instanceof SpatialOofCacheError && error.code === "SPATIAL_OOF_CACHE_PRIVACY_VIOLATION"
     );
     assert.equal(existsSync(cachePath), false);
+  } finally {
+    cleanupDirectory(directory);
+  }
+});
+
+test("cache v2 拒绝 inner scoreRows 私密字段和不完整 outer×inner 折", () => {
+  const directory = testDirectory("spatial-oof-inner-contract");
+  try {
+    const privatePath = join(directory, "private.sqlite");
+    const privateFolds = fixtureFolds();
+    privateFolds[0].innerFolds[0].scoreRows[0].observerHash = "private-observer";
+    assert.throws(
+      () => writeFixture(privatePath, { folds: privateFolds }),
+      (error) => error instanceof SpatialOofCacheError && error.code === "SPATIAL_OOF_CACHE_PRIVACY_VIOLATION"
+    );
+    assert.equal(existsSync(privatePath), false);
+
+    const incompletePath = join(directory, "incomplete.sqlite");
+    const incompleteFolds = fixtureFolds();
+    incompleteFolds[0].innerFolds.pop();
+    assert.throws(
+      () => writeFixture(incompletePath, { folds: incompleteFolds }),
+      (error) => error instanceof SpatialOofCacheError && error.code === "SPATIAL_OOF_CACHE_INNER_FOLDS_INVALID"
+    );
+    assert.equal(existsSync(incompletePath), false);
+
+    const leakedTrainingPath = join(directory, "leaked-training.sqlite");
+    const leakedTrainingFolds = fixtureFolds();
+    leakedTrainingFolds[0].innerFolds[0].trainingFoldIds.push(Number(leakedTrainingFolds[0].foldId));
+    assert.throws(
+      () => writeFixture(leakedTrainingPath, { folds: leakedTrainingFolds }),
+      (error) => error instanceof SpatialOofCacheError && error.code === "SPATIAL_OOF_CACHE_INNER_FOLDS_INVALID"
+    );
+    assert.equal(existsSync(leakedTrainingPath), false);
   } finally {
     cleanupDirectory(directory);
   }

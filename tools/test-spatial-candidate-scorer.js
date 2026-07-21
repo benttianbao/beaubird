@@ -6,6 +6,8 @@ const test = require("node:test");
 
 const {
   DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY,
+  INNER_TRAINING_POSITIVE_COUNT_POLICY,
+  OUTER_TRAINING_POSITIVE_COUNT_POLICY,
   candidateSetSha256
 } = require("../server/prediction/spatial-oof-cache");
 const {
@@ -25,15 +27,22 @@ const { prevalenceGroup } = require("../server/prediction/model");
 const { parseArguments } = require("./score-zhejiang-spatial-oof-cache");
 
 const EXPECTED_CAP_POLICY = Object.freeze({
-  strategy: "near_optimal_0.1pct_minimax_regret_v1",
-  maximumRelativePooledBrierRegret: 0.001
+  strategy: "strict_nested_near_optimal_0.1pct_minimax_regret_5pct_fallback_v2",
+  maximumRelativePooledBrierRegret: 0.001,
+  maximumFoldRelativeBrierRegret: 0.05
 });
-const EXPECTED_SELECTION_STRATEGY = "nested_scope_adaptive_fixed_v1";
+const EXPECTED_ROBUST_SCOPE_POLICY = Object.freeze({
+  strategy: "strict_nested_every_fold_guard_minimax_ece_v2",
+  requireEveryFoldGuard: true,
+  requireWorstFoldEceNonDegradation: true
+});
+const EXPECTED_SELECTION_STRATEGY = "strict_nested_scope_adaptive_fixed_v2";
 
 function makeRow({
   contextIndex,
   taxonId,
   positiveCount,
+  outerPositiveCount,
   developmentPositiveCount,
   kind,
   taxonIndex,
@@ -52,6 +61,7 @@ function makeRow({
     contextIndex,
     taxonId,
     positiveCount,
+    ...(outerPositiveCount === undefined ? {} : { outerPositiveCount }),
     developmentPositiveCount,
     actualPositive: high ? 9 : low ? 1 : (taxonIndex + contextIndex + foldIndex) % 6,
     total,
@@ -93,6 +103,8 @@ function makeCache() {
       diagnosticOnly: true,
       candidateSetSha256: candidateSetSha256(),
       developmentPoolPositiveCountPolicy: DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY,
+      outerTrainingPositiveCountPolicy: OUTER_TRAINING_POSITIVE_COUNT_POLICY,
+      innerTrainingPositiveCountPolicy: INNER_TRAINING_POSITIVE_COUNT_POLICY,
       baseAdminExposureCapsByPrevalence: FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1,
       sourceSnapshotSha256: "a".repeat(64),
       spatialSplitFileSha256: "b".repeat(64),
@@ -114,6 +126,34 @@ function makeCache() {
           foldIndex
         }))
       ).flat();
+      const innerFolds = Array.from({ length: 5 }, (_, innerFoldIndex) => String(innerFoldIndex + 1))
+        .filter((innerFoldId) => innerFoldId !== foldId)
+        .map((innerFoldId) => {
+          const innerFoldIndex = Number(innerFoldId) - 1;
+          return {
+            innerFoldId,
+            trainingFoldIds: ["1", "2", "3", "4", "5"]
+              .filter((candidate) => candidate !== foldId && candidate !== innerFoldId),
+            scoreRows: Array.from({ length: 3 }, (_, contextIndex) =>
+              taxa.map((taxon, taxonIndex) => {
+                const innerPositiveCount = Math.max(
+                  0,
+                  taxon.positiveCount - 20 - ((foldIndex + innerFoldIndex) % 3)
+                );
+                return makeRow({
+                  contextIndex,
+                  taxonId: taxon.taxonId,
+                  positiveCount: innerPositiveCount,
+                  outerPositiveCount: taxon.positiveCount,
+                  developmentPositiveCount: taxon.developmentPositiveCount,
+                  kind: taxon.kind,
+                  taxonIndex,
+                  foldIndex: foldIndex * 5 + innerFoldIndex
+                });
+              })
+            ).flat()
+          };
+        });
       return {
         foldId,
         referenceRawMetrics: evaluateCandidateRows(scoreRows.map((row) => ({
@@ -121,7 +161,8 @@ function makeCache() {
           row,
           probability: row.rawProbability
         }))),
-        scoreRows
+        scoreRows,
+        innerFolds
       };
     })
   };
@@ -158,7 +199,8 @@ function assertCandidateManifest(report) {
     capCandidateCount: 25,
     capPolicy: EXPECTED_CAP_POLICY,
     calibratorFamilies: DEFAULT_CALIBRATOR_FAMILIES,
-    calibrationGuard: SPATIAL_CALIBRATION_GUARD
+    calibrationGuard: SPATIAL_CALIBRATION_GUARD,
+    robustScopeSelectionPolicy: EXPECTED_ROBUST_SCOPE_POLICY
   });
   assert.equal(report.scoring.candidateSetSha256, payload.capCandidateSetSha256);
   assert.equal(report.scoring.candidateCount, payload.capCandidateCount);
@@ -170,7 +212,8 @@ function assertCandidateManifest(report) {
 function assertInnerFoldProvenance(container, selectionFoldIds, allFoldIds) {
   const selected = [...selectionFoldIds].map(String).sort();
   const all = [...allFoldIds].map(String).sort();
-  assert.equal(container.cachedEvidenceRebuiltForInnerFolds, false);
+  assert.ok(selected.every((foldId) => all.includes(foldId)));
+  assert.equal(container.cachedEvidenceRebuiltForInnerFolds, true);
   assert.ok(Array.isArray(container.innerFolds));
   assert.deepEqual(container.innerFolds.map((fold) => fold.heldoutFoldId), selected);
   for (const innerFold of container.innerFolds) {
@@ -178,10 +221,7 @@ function assertInnerFoldProvenance(container, selectionFoldIds, allFoldIds) {
       innerFold.trainingFoldIds,
       selected.filter((foldId) => foldId !== innerFold.heldoutFoldId)
     );
-    assert.deepEqual(
-      innerFold.cachedEvidenceTrainingFoldIds,
-      all.filter((foldId) => foldId !== innerFold.heldoutFoldId)
-    );
+    assert.equal(Object.hasOwn(innerFold, "cachedEvidenceTrainingFoldIds"), false);
     assert.equal(innerFold.trainingFoldIds.includes(innerFold.heldoutFoldId), false);
   }
 }
@@ -242,6 +282,10 @@ function crossFittedFold(report, heldoutFoldId) {
   assert.equal(
     fold.capPolicy.maximumRelativePooledBrierRegret,
     EXPECTED_CAP_POLICY.maximumRelativePooledBrierRegret
+  );
+  assert.equal(
+    fold.capPolicy.maximumFoldRelativeBrierRegret,
+    EXPECTED_CAP_POLICY.maximumFoldRelativeBrierRegret
   );
   assert.ok(Array.isArray(fold.capPolicy.speciesCaps));
   assert.deepEqual(fold.capPolicy.trainingFoldIds, fold.trainingFoldIds);
@@ -380,6 +424,31 @@ test("改变 heldout 折标签不影响该折使用的 cap、family、校准强�
   delete changedDecision.metrics;
   delete changedDecision.validationSha256;
   assert.deepEqual(changedDecision, originalDecision);
+});
+
+test("严格内层标签参与对应外层的候选选择且不读取外层 heldout 标签", async () => {
+  const outerFoldId = "3";
+  const originalCache = makeCache();
+  const changedCache = structuredClone(originalCache);
+  const changedOuterFold = changedCache.folds.find((fold) => String(fold.foldId) === outerFoldId);
+  const changedInnerFold = changedOuterFold.innerFolds.find((fold) => String(fold.innerFoldId) === "2");
+  for (const row of changedInnerFold.scoreRows) row.actualPositive = row.total - row.actualPositive;
+
+  const original = await scoreSpatialOofCandidates(originalCache, { workers: 1, generatedAt: "fixed" });
+  const changed = await scoreSpatialOofCandidates(changedCache, { workers: 1, generatedAt: "fixed" });
+  const originalFold = crossFittedFold(original, outerFoldId);
+  const changedFold = crossFittedFold(changed, outerFoldId);
+  assert.notEqual(changedFold.selectionSha256, originalFold.selectionSha256);
+  assert.notDeepEqual(changedFold.overallGuard, originalFold.overallGuard);
+});
+
+test("离线评分器拒绝缺失严格内层证据的 v1 形状缓存", async () => {
+  const cache = makeCache();
+  delete cache.folds[0].innerFolds;
+  await assert.rejects(
+    () => scoreSpatialOofCandidates(cache, { workers: 1, generatedAt: "fixed" }),
+    (error) => error.code === "SPATIAL_OOF_INNER_FOLDS_INVALID"
+  );
 });
 
 test("校准器候选 manifest 拒绝未预登记的 ridge 或 shrinkage batch", async () => {

@@ -115,14 +115,14 @@
 
 缓存同时绑定快照 SHA、split 文件 SHA、split manifest hash、五折及上游证据生成契约。证据生成器哈希与下游评分器哈希分开；仅修改独立候选评分器或诊断报告代码不要求重新执行 SQLite 聚合。当前为保守绑定，证据生成器哈希仍覆盖整个模型构建器及相关证据模块，因此构建器中即使是不影响充分统计的改动也可能使缓存失效；后续只有把 OOF 生成核心抽成独立模块后才能进一步缩小失效范围。缓存和评分报告都属于 development diagnostic，不能直接供参数冻结、sealed 解封或正式发布使用。
 
-首次缓存已于 2026-07-17 随完整 development 五折生成：
+历史 cache v1 已于 2026-07-17 随完整 development 五折生成：
 
 - 缓存：`data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof.sqlite`
 - SHA-256：`6009b8664635154778557f0996f1cd2cba262d0e1f23a253db497f21b7b6665a`
 - 文件大小：16,814,080 bytes
 - `quick_check=ok`、`freelist_count=0`；schema 只含 `metadata`、`folds`、`contexts`、`taxa`、`scores`
 
-后续只要缓存绑定的快照、split 和证据生成器哈希未变，就可反复离线评分，不再为每组候选重跑约 151 分钟的 SQLite 聚合。若需重新生成，在完整 development 命令中增加：
+cache v1 只适用于下述 2026-07-17 历史诊断；严格 v2 评分器会拒绝其缺少 outer×inner 证据的 schema。缓存生成参数仍是在完整 development 命令中增加：
 
 ```powershell
   --write-spatial-oof-cache data\prediction-models\development-cache\zhejiang-v1-20260715-spatial-oof.sqlite
@@ -158,6 +158,21 @@ node tools\score-zhejiang-spatial-oof-cache.js `
 - 唯一失败仍为 `spatial.species_calibration.maximumEce`
 
 固定批次结论为 **no-go**。失败来自明显的逐折异质性，不是 worker 调度或确定性归并噪声；按预登记约束不追加候选、不降低门槛、不冻结参数、不打开 sealed，也不启动下一次完整 development 回测。
+
+#### 2026-07-21 严格 cache v2 与候选批次预登记
+
+下一次且仅下一次长 development 缓存生成改用 schema v2。五个 outer 折各保存四个 inner held-out 折：outer 证据训练集排除该 outer 的 H3 r6 锚点及一环缓冲和全部 sealed 缓冲；每个 inner 证据训练集再额外排除该 inner 的锚点及一环缓冲。inner `positive_count` 必须在对应三折训练集上按已知观察者的 distinct `group_key` 精确重算，同时保存 outer-training 与 development-pool 计数用于固定各阶段 scope 资格。缓存总计必须为 5 个 outer、20 个 inner；任一折号、训练折补集、计数关系或绑定哈希不匹配即 fail closed。
+
+v2 继续只保存公共鸟种 ID、匿名 outer/inner 折号、折内稠密上下文序号、标签/权重、基线/原始概率和未封顶省市区县充分统计；禁止保存报告 ID、观察者、原始坐标、地点、H3、点位或精确行政单元标识。外层标签不进入该外层的 cap/family/scope 决策；自动测试必须同时证明修改 outer held-out 标签不改变 selection SHA，而修改对应严格 inner 标签会改变选择证据。
+
+本批次在查看 v2 离线结果前固定如下，不得运行后再追加候选：
+
+- 行政层上限仍仅为已经定义的 25 组 `city×district` 组合。逐鸟 pooled Brier 距最佳不超过 0.1% 的候选进入稳定集，按最坏内折 regret、平均 regret、pooled Brier、候选 ID 排序；若所选 cap 的最坏内折相对 Brier regret 超过 5%，回退到当前按流行度组的基础 cap。
+- 校准器固定为 13 组：恒等映射；ridge 0.1 的截距校准与温度缩放各使用 `0.25/0.5/0.75/1.0` shrinkage；ridge 1 的 beta calibration 使用 `0.25/0.5/0.75/1.0` shrinkage。删除 v1 中容易过拟合的完整 ridge 0.001/0.1 beta，不允许自由输入 ridge、shrinkage 或候选顺序。
+- 每个 outer 内按三折拟合、一折验证覆盖全部四个 inner 折。作用域候选必须在 pooled 及每个可评估 inner 折同时满足 Brier 相对恶化不超过 1%、ECE 恶化不超过 0.01，且候选最坏 inner-fold ECE 不得高于原始最坏 inner-fold ECE；合格项依次按最坏折 ECE、pooled ECE、最坏折 Brier 恶化、较小 shrinkage、family ID 排序。无合格项回退恒等映射；混合后的整体结果也必须在 pooled 与每个 inner 折重新通过同一保护门。
+- outer 验证仍汇总全部五个 development 折并执行完整 Brier Skill、ECE、逐鸟/共享组 ECE、Recall@20 门槛；十箱 ECE 只由逐行概率重算，不替代正式完整 development 回测。`maximumSpeciesEce=0.05` 及其他门槛均不变。
+
+预登记的首次 v2 长运行输出为 `data/prediction-models/zhejiang-v1-20260715-development-strict-cache-v2.sqlite`，紧凑缓存为 `data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v2.sqlite`；随后固定离线报告输出为 `data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-candidates-strict-v2-w4.json`。先完成 schema/隐私/确定性和反泄漏短测，再启动一次长缓存生成；生成后先离线评分。若仍有任一门槛失败，立即 no-go，不扩展 runtime/schema、不冻结参数、不打开 sealed；只有全部通过才进入 runtime/schema 正式化和完整 development 复验。
 
 当前 runtime 和空间参数制品仍只支持按流行度组查询行政层上限，因此逐鸟候选即使改善 development，也只能先作为诊断。只有在另行扩展运行时和参数 schema、重新完成全部 development 折并通过所有门槛后，才可能进入冻结流程。
 

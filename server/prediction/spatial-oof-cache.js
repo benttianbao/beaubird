@@ -23,11 +23,15 @@ const {
   buildAdminExposureCapCandidates
 } = require("./spatial-transfer");
 
-const SPATIAL_OOF_CACHE_SCHEMA_VERSION = 1;
-const SPATIAL_OOF_CACHE_KIND = "zhejiang_development_spatial_oof_sufficient_statistics";
+const SPATIAL_OOF_CACHE_SCHEMA_VERSION = 2;
+const SPATIAL_OOF_CACHE_KIND = "zhejiang_development_strict_nested_spatial_oof_sufficient_statistics";
 const SPATIAL_OOF_CACHE_PANEL = "development";
 const DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY =
   "distinct_known_observer_group_key_outside_all_sealed_r6_buffers";
+const OUTER_TRAINING_POSITIVE_COUNT_POLICY =
+  "distinct_known_observer_group_key_outside_outer_and_all_sealed_r6_buffers";
+const INNER_TRAINING_POSITIVE_COUNT_POLICY =
+  "distinct_known_observer_group_key_outside_outer_inner_and_all_sealed_r6_buffers";
 const SPATIAL_OOF_CACHE_FOLD_IDS = Object.freeze([1, 2, 3, 4, 5]);
 const SPATIAL_OOF_CACHE_DEEPEST_LEVELS = Object.freeze([
   "province",
@@ -192,6 +196,50 @@ const CACHE_TABLE_COLUMNS = Object.freeze({
     "evidence_configuration_json",
     "reference_raw_metrics_json"
   ]),
+  inner_contexts: Object.freeze([
+    "outer_fold_id",
+    "inner_fold_id",
+    "context_index",
+    "total",
+    "province_exposure",
+    "city_exposure",
+    "district_exposure",
+    "has_supported_local_unit",
+    "deepest_level"
+  ]),
+  inner_folds: Object.freeze([
+    "outer_fold_id",
+    "inner_fold_id",
+    "training_fold_ids_json",
+    "context_count",
+    "taxon_count",
+    "score_count",
+    "evidence_configuration_json",
+    "reference_raw_metrics_json"
+  ]),
+  inner_scores: Object.freeze([
+    "outer_fold_id",
+    "inner_fold_id",
+    "context_index",
+    "taxon_index",
+    "actual_positive",
+    "province_detections",
+    "city_detections",
+    "district_detections",
+    "reference_raw_probability",
+    "reference_baseline_probability"
+  ]),
+  inner_taxa: Object.freeze([
+    "outer_fold_id",
+    "inner_fold_id",
+    "taxon_index",
+    "taxon_id",
+    "positive_count",
+    "outer_positive_count",
+    "development_positive_count",
+    "city_strength",
+    "district_strength"
+  ]),
   metadata: Object.freeze(["key", "value"]),
   scores: Object.freeze([
     "fold_id",
@@ -224,6 +272,11 @@ const CACHE_METADATA_KEYS = Object.freeze([
   "evidenceOptions",
   "foldCount",
   "generationImplementationSha256",
+  "innerFoldCount",
+  "innerRowCount",
+  "innerTrainingPositiveCountPolicy",
+  "outerRowCount",
+  "outerTrainingPositiveCountPolicy",
   "panel",
   "payloadSha256",
   "predictionImplementationSha256",
@@ -251,9 +304,12 @@ const SPATIAL_OOF_CACHE_EVIDENCE_CONTRACT_SHA256 = sha256(Buffer.from(canonicalJ
   adminEvidenceValueKeys: ADMIN_EVIDENCE_VALUE_KEYS,
   foldEvidenceConfigurationKeys: FOLD_EVIDENCE_CONFIGURATION_KEYS,
   evidenceOptionsKeys: EVIDENCE_OPTIONS_KEYS,
-  contextIdentity: "fold_local_dense_ordinal_without_location_mapping",
+  contextIdentity: "outer_inner_fold_local_dense_ordinal_without_location_mapping",
   candidateEvidence: "uncapped_province_city_district_float64_sufficient_statistics",
-  developmentPoolPositiveCountPolicy: DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY
+  developmentPoolPositiveCountPolicy: DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY,
+  outerTrainingPositiveCountPolicy: OUTER_TRAINING_POSITIVE_COUNT_POLICY,
+  innerTrainingPositiveCountPolicy: INNER_TRAINING_POSITIVE_COUNT_POLICY,
+  nestedEvidence: "five_outer_folds_each_with_four_inner_heldout_folds_trained_without_outer_inner_or_sealed_buffers"
 }), "utf8"));
 
 class SpatialOofCacheError extends Error {
@@ -608,7 +664,7 @@ function normalizeEvidenceOptions(value) {
 function normalizePrivacyContract(value) {
   assertExactKeys(value, PRIVACY_CONTRACT_KEYS, "SPATIAL_OOF_CACHE_PRIVACY_VIOLATION", "privacyContract");
   const expected = {
-    contextIdentity: "fold_local_dense_ordinal_without_location_mapping",
+    contextIdentity: "outer_inner_fold_local_dense_ordinal_without_location_mapping",
     reportIds: false,
     observers: false,
     coordinates: false,
@@ -683,8 +739,8 @@ function normalizeAdminEvidence(value, path) {
   return result;
 }
 
-function normalizeSourceRow(row, foldId, rowIndex) {
-  const path = `folds[${foldId}].scoreRows[${rowIndex}]`;
+function normalizeSourceRow(row, foldId, rowIndex, pathPrefix = `folds[${foldId}]`) {
+  const path = `${pathPrefix}.scoreRows[${rowIndex}]`;
   assertExactKeys(row, SOURCE_ROW_KEYS, "SPATIAL_OOF_CACHE_PRIVACY_VIOLATION", path);
   const contextIndex = finiteNumber(row.contextIndex, `${path}.contextIndex`, { minimum: 0 });
   if (!Number.isInteger(contextIndex)) {
@@ -735,6 +791,129 @@ function normalizeSourceRow(row, foldId, rowIndex) {
 
 function comparableNumber(left, right) {
   return Math.abs(Number(left) - Number(right)) <= 1e-12 * Math.max(1, Math.abs(Number(left)), Math.abs(Number(right)));
+}
+
+function normalizeEvidenceSet({
+  scoreRows,
+  path,
+  foldId,
+  evidenceConfiguration,
+  developmentPositiveCounts,
+  outerPositiveCounts = null
+}) {
+  if (!Array.isArray(scoreRows) || !scoreRows.length) {
+    throw new SpatialOofCacheError("SPATIAL_OOF_CACHE_FOLD_EMPTY", `${path} 没有 scoreRows。`);
+  }
+  const normalizedRows = scoreRows.map((row, index) =>
+    normalizeSourceRow(row, foldId, index, path)
+  ).sort(
+    (left, right) => left.contextIndex - right.contextIndex || left.taxonId.localeCompare(right.taxonId)
+  );
+  const normalizedEvidenceConfiguration = normalizeFoldEvidenceConfiguration(
+    evidenceConfiguration,
+    `${path}.evidenceConfiguration`
+  );
+  const contexts = new Map();
+  const taxa = new Map();
+  for (const row of normalizedRows) {
+    const context = {
+      total: row.total,
+      provinceExposure: row.adminEvidence.province.exposure,
+      cityExposure: row.adminEvidence.city.exposure,
+      districtExposure: row.adminEvidence.district.exposure,
+      hasSupportedLocalUnit: row.hasSupportedLocalUnit,
+      deepestLevel: row.deepestLevel
+    };
+    const priorContext = contexts.get(row.contextIndex);
+    if (priorContext) {
+      for (const key of ["total", "provinceExposure", "cityExposure", "districtExposure"]) {
+        if (!comparableNumber(priorContext[key], context[key])) {
+          throw new SpatialOofCacheError(
+            "SPATIAL_OOF_CACHE_CONTEXT_INCONSISTENT",
+            `${path} context ${row.contextIndex} 的 ${key} 不一致。`
+          );
+        }
+      }
+      if (
+        priorContext.hasSupportedLocalUnit !== context.hasSupportedLocalUnit ||
+        priorContext.deepestLevel !== context.deepestLevel
+      ) {
+        throw new SpatialOofCacheError(
+          "SPATIAL_OOF_CACHE_CONTEXT_INCONSISTENT",
+          `${path} context ${row.contextIndex} 的层级信息不一致。`
+        );
+      }
+    } else {
+      contexts.set(row.contextIndex, context);
+    }
+    const outerPositiveCount = outerPositiveCounts instanceof Map
+      ? outerPositiveCounts.get(row.taxonId)
+      : row.positiveCount;
+    const developmentPositiveCount = developmentPositiveCounts.get(row.taxonId);
+    if (
+      outerPositiveCount === undefined ||
+      developmentPositiveCount === undefined ||
+      row.positiveCount > outerPositiveCount ||
+      outerPositiveCount > developmentPositiveCount
+    ) {
+      throw new SpatialOofCacheError(
+        "SPATIAL_OOF_CACHE_VALUE_INVALID",
+        `${path} taxon ${row.taxonId} 的三折、四折或 development positive_count 不一致。`,
+        { positiveCount: row.positiveCount, outerPositiveCount, developmentPositiveCount }
+      );
+    }
+    const taxon = {
+      positiveCount: row.positiveCount,
+      outerPositiveCount,
+      developmentPositiveCount,
+      cityStrength: row.adminEvidence.city.strength,
+      districtStrength: row.adminEvidence.district.strength
+    };
+    const priorTaxon = taxa.get(row.taxonId);
+    if (priorTaxon) {
+      for (const key of [
+        "positiveCount",
+        "outerPositiveCount",
+        "developmentPositiveCount",
+        "cityStrength",
+        "districtStrength"
+      ]) {
+        if (!comparableNumber(priorTaxon[key], taxon[key])) {
+          throw new SpatialOofCacheError(
+            "SPATIAL_OOF_CACHE_TAXON_INCONSISTENT",
+            `${path} taxon ${row.taxonId} 的 ${key} 不一致。`
+          );
+        }
+      }
+    } else {
+      taxa.set(row.taxonId, taxon);
+    }
+  }
+  const contextIds = [...contexts.keys()].sort((left, right) => left - right);
+  if (contextIds.some((value, index) => value !== index)) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_CONTEXT_ORDINALS_INVALID",
+      `${path} contextIndex 必须从 0 开始连续。`,
+      { contextIds }
+    );
+  }
+  const taxonIds = [...taxa.keys()].sort();
+  if (normalizedRows.length !== contextIds.length * taxonIds.length) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_ROSTER_INCOMPLETE",
+      `${path} 每个 context 必须包含完整 taxon roster。`,
+      { rows: normalizedRows.length, contexts: contextIds.length, taxa: taxonIds.length }
+    );
+  }
+  return {
+    normalizedRows,
+    normalizedEvidenceConfiguration,
+    contexts,
+    taxa,
+    contextIds,
+    taxonIds,
+    taxonIndexes: new Map(taxonIds.map((taxonId, index) => [taxonId, index]))
+  };
 }
 
 function metricProjection(metrics, path = "referenceRawMetrics") {
@@ -792,6 +971,18 @@ function createCacheSchema(database) {
       evidence_configuration_json TEXT NOT NULL,
       reference_raw_metrics_json TEXT
     );
+    CREATE TABLE inner_folds (
+      outer_fold_id INTEGER NOT NULL CHECK(outer_fold_id BETWEEN 1 AND 5),
+      inner_fold_id INTEGER NOT NULL CHECK(inner_fold_id BETWEEN 1 AND 5 AND inner_fold_id <> outer_fold_id),
+      training_fold_ids_json TEXT NOT NULL,
+      context_count INTEGER NOT NULL CHECK(context_count > 0),
+      taxon_count INTEGER NOT NULL CHECK(taxon_count > 0),
+      score_count INTEGER NOT NULL CHECK(score_count > 0),
+      evidence_configuration_json TEXT NOT NULL,
+      reference_raw_metrics_json TEXT,
+      PRIMARY KEY (outer_fold_id, inner_fold_id),
+      FOREIGN KEY (outer_fold_id) REFERENCES folds(fold_id)
+    ) WITHOUT ROWID;
     CREATE TABLE contexts (
       fold_id INTEGER NOT NULL,
       context_index INTEGER NOT NULL CHECK(context_index >= 0),
@@ -804,6 +995,19 @@ function createCacheSchema(database) {
       PRIMARY KEY (fold_id, context_index),
       FOREIGN KEY (fold_id) REFERENCES folds(fold_id)
     ) WITHOUT ROWID;
+    CREATE TABLE inner_contexts (
+      outer_fold_id INTEGER NOT NULL,
+      inner_fold_id INTEGER NOT NULL,
+      context_index INTEGER NOT NULL CHECK(context_index >= 0),
+      total REAL NOT NULL CHECK(total > 0),
+      province_exposure REAL NOT NULL CHECK(province_exposure >= 0),
+      city_exposure REAL NOT NULL CHECK(city_exposure >= 0),
+      district_exposure REAL NOT NULL CHECK(district_exposure >= 0),
+      has_supported_local_unit INTEGER NOT NULL CHECK(has_supported_local_unit IN (0, 1)),
+      deepest_level TEXT NOT NULL CHECK(deepest_level IN ('province','city','district','grid_r6','grid_r7','point')),
+      PRIMARY KEY (outer_fold_id, inner_fold_id, context_index),
+      FOREIGN KEY (outer_fold_id, inner_fold_id) REFERENCES inner_folds(outer_fold_id, inner_fold_id)
+    ) WITHOUT ROWID;
     CREATE TABLE taxa (
       fold_id INTEGER NOT NULL,
       taxon_index INTEGER NOT NULL CHECK(taxon_index >= 0),
@@ -815,6 +1019,20 @@ function createCacheSchema(database) {
       PRIMARY KEY (fold_id, taxon_index),
       UNIQUE (fold_id, taxon_id),
       FOREIGN KEY (fold_id) REFERENCES folds(fold_id)
+    ) WITHOUT ROWID;
+    CREATE TABLE inner_taxa (
+      outer_fold_id INTEGER NOT NULL,
+      inner_fold_id INTEGER NOT NULL,
+      taxon_index INTEGER NOT NULL CHECK(taxon_index >= 0),
+      taxon_id TEXT NOT NULL,
+      positive_count INTEGER NOT NULL CHECK(positive_count >= 0),
+      outer_positive_count INTEGER NOT NULL CHECK(outer_positive_count >= positive_count),
+      development_positive_count INTEGER NOT NULL CHECK(development_positive_count >= outer_positive_count),
+      city_strength REAL NOT NULL CHECK(city_strength >= 0),
+      district_strength REAL NOT NULL CHECK(district_strength >= 0),
+      PRIMARY KEY (outer_fold_id, inner_fold_id, taxon_index),
+      UNIQUE (outer_fold_id, inner_fold_id, taxon_id),
+      FOREIGN KEY (outer_fold_id, inner_fold_id) REFERENCES inner_folds(outer_fold_id, inner_fold_id)
     ) WITHOUT ROWID;
     CREATE TABLE scores (
       fold_id INTEGER NOT NULL,
@@ -830,6 +1048,23 @@ function createCacheSchema(database) {
       FOREIGN KEY (fold_id, context_index) REFERENCES contexts(fold_id, context_index),
       FOREIGN KEY (fold_id, taxon_index) REFERENCES taxa(fold_id, taxon_index)
     ) WITHOUT ROWID;
+    CREATE TABLE inner_scores (
+      outer_fold_id INTEGER NOT NULL,
+      inner_fold_id INTEGER NOT NULL,
+      context_index INTEGER NOT NULL,
+      taxon_index INTEGER NOT NULL,
+      actual_positive REAL NOT NULL CHECK(actual_positive >= 0),
+      province_detections REAL NOT NULL CHECK(province_detections >= 0),
+      city_detections REAL NOT NULL CHECK(city_detections >= 0),
+      district_detections REAL NOT NULL CHECK(district_detections >= 0),
+      reference_raw_probability REAL NOT NULL CHECK(reference_raw_probability BETWEEN 0 AND 1),
+      reference_baseline_probability REAL NOT NULL CHECK(reference_baseline_probability BETWEEN 0 AND 1),
+      PRIMARY KEY (outer_fold_id, inner_fold_id, context_index, taxon_index),
+      FOREIGN KEY (outer_fold_id, inner_fold_id, context_index)
+        REFERENCES inner_contexts(outer_fold_id, inner_fold_id, context_index),
+      FOREIGN KEY (outer_fold_id, inner_fold_id, taxon_index)
+        REFERENCES inner_taxa(outer_fold_id, inner_fold_id, taxon_index)
+    ) WITHOUT ROWID;
   `);
 }
 
@@ -844,16 +1079,29 @@ function logicalPayloadSha256(database) {
   addRows("fold", `SELECT fold_id, context_count, taxon_count, score_count, evidence_configuration_json,
                            reference_raw_metrics_json
                     FROM folds ORDER BY fold_id`);
+  addRows("inner_fold", `SELECT outer_fold_id, inner_fold_id, training_fold_ids_json, context_count,
+                                 taxon_count, score_count, evidence_configuration_json, reference_raw_metrics_json
+                          FROM inner_folds ORDER BY outer_fold_id, inner_fold_id`);
   addRows("context", `SELECT fold_id, context_index, total, province_exposure, city_exposure,
                               district_exposure, has_supported_local_unit, deepest_level
                        FROM contexts ORDER BY fold_id, context_index`);
+  addRows("inner_context", `SELECT outer_fold_id, inner_fold_id, context_index, total, province_exposure,
+                                    city_exposure, district_exposure, has_supported_local_unit, deepest_level
+                             FROM inner_contexts ORDER BY outer_fold_id, inner_fold_id, context_index`);
   addRows("taxon", `SELECT fold_id, taxon_index, taxon_id, positive_count, development_positive_count,
                             city_strength, district_strength
                      FROM taxa ORDER BY fold_id, taxon_index`);
+  addRows("inner_taxon", `SELECT outer_fold_id, inner_fold_id, taxon_index, taxon_id, positive_count,
+                                  outer_positive_count, development_positive_count, city_strength, district_strength
+                           FROM inner_taxa ORDER BY outer_fold_id, inner_fold_id, taxon_index`);
   addRows("score", `SELECT fold_id, context_index, taxon_index, actual_positive, province_detections,
                             city_detections, district_detections, reference_raw_probability,
                             reference_baseline_probability
                      FROM scores ORDER BY fold_id, context_index, taxon_index`);
+  addRows("inner_score", `SELECT outer_fold_id, inner_fold_id, context_index, taxon_index, actual_positive,
+                                  province_detections, city_detections, district_detections,
+                                  reference_raw_probability, reference_baseline_probability
+                           FROM inner_scores ORDER BY outer_fold_id, inner_fold_id, context_index, taxon_index`);
   return hash.digest("hex");
 }
 
@@ -1006,8 +1254,35 @@ function writeSpatialOofCache({
          reference_baseline_probability)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
+    const insertInnerFold = database.prepare(`
+      INSERT INTO inner_folds
+        (outer_fold_id, inner_fold_id, training_fold_ids_json, context_count, taxon_count,
+         score_count, evidence_configuration_json, reference_raw_metrics_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertInnerContext = database.prepare(`
+      INSERT INTO inner_contexts
+        (outer_fold_id, inner_fold_id, context_index, total, province_exposure, city_exposure,
+         district_exposure, has_supported_local_unit, deepest_level)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertInnerTaxon = database.prepare(`
+      INSERT INTO inner_taxa
+        (outer_fold_id, inner_fold_id, taxon_index, taxon_id, positive_count, outer_positive_count,
+         development_positive_count, city_strength, district_strength)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertInnerScore = database.prepare(`
+      INSERT INTO inner_scores
+        (outer_fold_id, inner_fold_id, context_index, taxon_index, actual_positive,
+         province_detections, city_detections, district_detections, reference_raw_probability,
+         reference_baseline_probability)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
 
     let totalRows = 0;
+    let totalInnerRows = 0;
+    let totalInnerFolds = 0;
     const seenFoldIds = [];
     database.exec("BEGIN IMMEDIATE");
     for (const fold of [...folds].sort((left, right) => Number(left.foldId) - Number(right.foldId))) {
@@ -1167,11 +1442,133 @@ function writeSpatialOofCache({
         );
       }
       totalRows += normalizedRows.length;
+
+      const expectedInnerFoldIds = SPATIAL_OOF_CACHE_FOLD_IDS
+        .filter((candidateFoldId) => candidateFoldId !== foldId);
+      if (!Array.isArray(fold.innerFolds) || fold.innerFolds.length !== expectedInnerFoldIds.length) {
+        throw new SpatialOofCacheError(
+          "SPATIAL_OOF_CACHE_INNER_FOLDS_INVALID",
+          `第 ${foldId} 个 outer 折必须包含其余四个严格 inner heldout 折。`
+        );
+      }
+      const seenInnerFoldIds = [];
+      const outerPositiveCounts = new Map(
+        [...taxa].map(([taxonId, taxon]) => [taxonId, taxon.positiveCount])
+      );
+      for (const innerFold of [...fold.innerFolds].sort(
+        (left, right) => Number(left.innerFoldId ?? left.foldId) - Number(right.innerFoldId ?? right.foldId)
+      )) {
+        const innerFoldId = Number(innerFold.innerFoldId ?? innerFold.foldId);
+        if (
+          innerFoldId === foldId ||
+          !expectedInnerFoldIds.includes(innerFoldId) ||
+          seenInnerFoldIds.includes(innerFoldId)
+        ) {
+          throw new SpatialOofCacheError(
+            "SPATIAL_OOF_CACHE_INNER_FOLDS_INVALID",
+            `outer ${foldId} 的 inner 折号必须恰为其余四折且不可重复。`,
+            { innerFoldId }
+          );
+        }
+        seenInnerFoldIds.push(innerFoldId);
+        const expectedTrainingFoldIds = SPATIAL_OOF_CACHE_FOLD_IDS
+          .filter((candidateFoldId) => candidateFoldId !== foldId && candidateFoldId !== innerFoldId);
+        const trainingFoldIds = Array.isArray(innerFold.trainingFoldIds)
+          ? innerFold.trainingFoldIds.map(Number).sort((left, right) => left - right)
+          : [];
+        if (!sameStringArray(trainingFoldIds.map(String), expectedTrainingFoldIds.map(String))) {
+          throw new SpatialOofCacheError(
+            "SPATIAL_OOF_CACHE_INNER_FOLDS_INVALID",
+            `outer ${foldId} / inner ${innerFoldId} 必须只使用其余三折训练。`,
+            { expectedTrainingFoldIds, actualTrainingFoldIds: trainingFoldIds }
+          );
+        }
+        const path = `folds[${foldId}].innerFolds[${innerFoldId}]`;
+        const prepared = normalizeEvidenceSet({
+          scoreRows: innerFold.scoreRows,
+          path,
+          foldId: innerFoldId,
+          evidenceConfiguration: innerFold.evidenceConfiguration,
+          developmentPositiveCounts: normalizedDevelopmentPoolPositiveCounts,
+          outerPositiveCounts
+        });
+        insertInnerFold.run(
+          foldId,
+          innerFoldId,
+          JSON.stringify(trainingFoldIds),
+          prepared.contextIds.length,
+          prepared.taxonIds.length,
+          prepared.normalizedRows.length,
+          JSON.stringify(prepared.normalizedEvidenceConfiguration),
+          JSON.stringify(metricProjection(
+            innerFold.referenceRawMetrics || innerFold.rawMetrics || null,
+            `${path}.referenceRawMetrics`
+          ))
+        );
+        for (const contextIndex of prepared.contextIds) {
+          const context = prepared.contexts.get(contextIndex);
+          insertInnerContext.run(
+            foldId,
+            innerFoldId,
+            contextIndex,
+            context.total,
+            context.provinceExposure,
+            context.cityExposure,
+            context.districtExposure,
+            context.hasSupportedLocalUnit ? 1 : 0,
+            context.deepestLevel
+          );
+        }
+        for (const [taxonIndex, taxonId] of prepared.taxonIds.entries()) {
+          const taxon = prepared.taxa.get(taxonId);
+          insertInnerTaxon.run(
+            foldId,
+            innerFoldId,
+            taxonIndex,
+            taxonId,
+            taxon.positiveCount,
+            taxon.outerPositiveCount,
+            taxon.developmentPositiveCount,
+            taxon.cityStrength,
+            taxon.districtStrength
+          );
+        }
+        for (const row of prepared.normalizedRows) {
+          insertInnerScore.run(
+            foldId,
+            innerFoldId,
+            row.contextIndex,
+            prepared.taxonIndexes.get(row.taxonId),
+            row.actualPositive,
+            row.adminEvidence.province.detections,
+            row.adminEvidence.city.detections,
+            row.adminEvidence.district.detections,
+            row.rawProbability,
+            row.baselineProbability
+          );
+        }
+        totalInnerRows += prepared.normalizedRows.length;
+        totalInnerFolds += 1;
+      }
+      if (!sameStringArray(seenInnerFoldIds.map(String), expectedInnerFoldIds.map(String))) {
+        throw new SpatialOofCacheError(
+          "SPATIAL_OOF_CACHE_INNER_FOLDS_INVALID",
+          `outer ${foldId} 的 inner 折不完整。`,
+          { expectedInnerFoldIds, seenInnerFoldIds }
+        );
+      }
     }
     if (!sameStringArray(seenFoldIds.map(String), SPATIAL_OOF_CACHE_FOLD_IDS.map(String))) {
       throw new SpatialOofCacheError("SPATIAL_OOF_CACHE_FOLDS_INVALID", "OOF 缓存折号不完整。", {
         seenFoldIds
       });
+    }
+    if (totalInnerFolds !== SPATIAL_OOF_CACHE_FOLD_IDS.length * (SPATIAL_OOF_CACHE_FOLD_IDS.length - 1)) {
+      throw new SpatialOofCacheError(
+        "SPATIAL_OOF_CACHE_INNER_FOLDS_INVALID",
+        "严格 nested OOF 缓存必须包含完整 20 个 outer×inner 折。",
+        { totalInnerFolds }
+      );
     }
     database.exec("COMMIT");
 
@@ -1187,13 +1584,18 @@ function writeSpatialOofCache({
       predictionImplementationSha256: normalizedPredictionImplementationSha256,
       candidateSetSha256: candidateSetSha256(),
       developmentPoolPositiveCountPolicy: DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY,
+      outerTrainingPositiveCountPolicy: OUTER_TRAINING_POSITIVE_COUNT_POLICY,
+      innerTrainingPositiveCountPolicy: INNER_TRAINING_POSITIVE_COUNT_POLICY,
       baseAdminExposureCapsByPrevalence: normalizedBaseAdminExposureCaps,
       qualityThresholds: normalizedQualityThresholds,
       evidenceOptions: normalizedEvidenceOptions,
       foldCount: SPATIAL_OOF_CACHE_FOLD_IDS.length,
-      rowCount: totalRows,
+      innerFoldCount: totalInnerFolds,
+      outerRowCount: totalRows,
+      innerRowCount: totalInnerRows,
+      rowCount: totalRows + totalInnerRows,
       privacyContract: normalizePrivacyContract({
-        contextIdentity: "fold_local_dense_ordinal_without_location_mapping",
+        contextIdentity: "outer_inner_fold_local_dense_ordinal_without_location_mapping",
         reportIds: false,
         observers: false,
         coordinates: false,
@@ -1239,7 +1641,10 @@ function writeSpatialOofCache({
       schemaVersion: SPATIAL_OOF_CACHE_SCHEMA_VERSION,
       panel: SPATIAL_OOF_CACHE_PANEL,
       foldCount: SPATIAL_OOF_CACHE_FOLD_IDS.length,
-      rowCount: totalRows,
+      innerFoldCount: totalInnerFolds,
+      outerRowCount: totalRows,
+      innerRowCount: totalInnerRows,
+      rowCount: totalRows + totalInnerRows,
       bytes: statSync(absolutePath).size,
       evidenceContractSha256: SPATIAL_OOF_CACHE_EVIDENCE_CONTRACT_SHA256,
       generationImplementationSha256,
@@ -1302,6 +1707,9 @@ function validateMetadataShape(metadata) {
   ]) normalizeSha256(metadata[key], `metadata.${key}`);
   finiteInteger(metadata.schemaVersion, "metadata.schemaVersion", { minimum: 1 });
   finiteInteger(metadata.foldCount, "metadata.foldCount", { minimum: 1 });
+  finiteInteger(metadata.innerFoldCount, "metadata.innerFoldCount", { minimum: 1 });
+  finiteInteger(metadata.outerRowCount, "metadata.outerRowCount", { minimum: 1 });
+  finiteInteger(metadata.innerRowCount, "metadata.innerRowCount", { minimum: 1 });
   finiteInteger(metadata.rowCount, "metadata.rowCount", { minimum: 1 });
   if (typeof metadata.diagnosticOnly !== "boolean") {
     throw new SpatialOofCacheError("SPATIAL_OOF_CACHE_METADATA_INVALID", "metadata.diagnosticOnly 必须是布尔值。" );
@@ -1310,6 +1718,18 @@ function validateMetadataShape(metadata) {
     throw new SpatialOofCacheError(
       "SPATIAL_OOF_CACHE_METADATA_INVALID",
       "metadata.developmentPoolPositiveCountPolicy 不匹配。"
+    );
+  }
+  if (metadata.outerTrainingPositiveCountPolicy !== OUTER_TRAINING_POSITIVE_COUNT_POLICY) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_METADATA_INVALID",
+      "metadata.outerTrainingPositiveCountPolicy 不匹配。"
+    );
+  }
+  if (metadata.innerTrainingPositiveCountPolicy !== INNER_TRAINING_POSITIVE_COUNT_POLICY) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_METADATA_INVALID",
+      "metadata.innerTrainingPositiveCountPolicy 不匹配。"
     );
   }
   assertCanonicalNormalization(
@@ -1444,6 +1864,91 @@ function validateCacheContents(database, metadata, expectedFoldIds) {
     }
     totalRows += Number(counts.score_count);
   }
+  let totalInnerRows = 0;
+  const innerFoldRows = database.prepare(
+    "SELECT * FROM inner_folds ORDER BY outer_fold_id, inner_fold_id"
+  ).all();
+  const expectedInnerFoldCount = expectedFoldIds.length * (expectedFoldIds.length - 1);
+  if (innerFoldRows.length !== expectedInnerFoldCount) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_INNER_FOLDS_INVALID",
+      "OOF 缓存必须包含完整 20 个 outer×inner 折。",
+      { expectedInnerFoldCount, actualInnerFoldCount: innerFoldRows.length }
+    );
+  }
+  for (const innerFold of innerFoldRows) {
+    const outerFoldId = Number(innerFold.outer_fold_id);
+    const innerFoldId = Number(innerFold.inner_fold_id);
+    const expectedTrainingFoldIds = expectedFoldIds
+      .filter((foldId) => foldId !== outerFoldId && foldId !== innerFoldId);
+    const trainingFoldIds = parseWhitelistedJson(
+      innerFold.training_fold_ids_json,
+      `innerFolds[${outerFoldId}:${innerFoldId}].trainingFoldIds`
+    );
+    if (
+      !Array.isArray(trainingFoldIds) ||
+      !sameStringArray(trainingFoldIds.map(String), expectedTrainingFoldIds.map(String))
+    ) {
+      throw new SpatialOofCacheError(
+        "SPATIAL_OOF_CACHE_INNER_FOLDS_INVALID",
+        `outer ${outerFoldId} / inner ${innerFoldId} 的三折训练来源不匹配。`,
+        { expectedTrainingFoldIds, trainingFoldIds }
+      );
+    }
+    const path = `innerFolds[${outerFoldId}:${innerFoldId}]`;
+    const evidenceConfiguration = parseWhitelistedJson(
+      innerFold.evidence_configuration_json,
+      `${path}.evidenceConfiguration`
+    );
+    assertCanonicalNormalization(
+      evidenceConfiguration,
+      normalizeFoldEvidenceConfiguration(evidenceConfiguration, `${path}.evidenceConfiguration`),
+      `${path}.evidenceConfiguration`
+    );
+    const referenceRawMetrics = parseWhitelistedJson(
+      innerFold.reference_raw_metrics_json,
+      `${path}.referenceRawMetrics`
+    );
+    assertCanonicalNormalization(
+      referenceRawMetrics,
+      metricProjection(referenceRawMetrics, `${path}.referenceRawMetrics`),
+      `${path}.referenceRawMetrics`
+    );
+    const counts = database.prepare(`
+      SELECT COUNT(*) AS score_count,
+             COUNT(DISTINCT context_index) AS context_count,
+             COUNT(DISTINCT taxon_index) AS taxon_count
+      FROM inner_scores WHERE outer_fold_id = ? AND inner_fold_id = ?
+    `).get(outerFoldId, innerFoldId);
+    if (
+      Number(counts.score_count) !== Number(innerFold.score_count) ||
+      Number(counts.context_count) !== Number(innerFold.context_count) ||
+      Number(counts.taxon_count) !== Number(innerFold.taxon_count) ||
+      Number(counts.score_count) !== Number(innerFold.context_count) * Number(innerFold.taxon_count)
+    ) {
+      throw new SpatialOofCacheError(
+        "SPATIAL_OOF_CACHE_ROSTER_INCOMPLETE",
+        `${path} 的 context×taxon roster 不完整。`,
+        { innerFold, counts }
+      );
+    }
+    const roster = database.prepare(`
+      SELECT MIN(count) AS minimum_count, MAX(count) AS maximum_count
+      FROM (
+        SELECT context_index, COUNT(*) AS count
+        FROM inner_scores
+        WHERE outer_fold_id=? AND inner_fold_id=?
+        GROUP BY context_index
+      )
+    `).get(outerFoldId, innerFoldId);
+    if (
+      Number(roster.minimum_count) !== Number(innerFold.taxon_count) ||
+      Number(roster.maximum_count) !== Number(innerFold.taxon_count)
+    ) {
+      throw new SpatialOofCacheError("SPATIAL_OOF_CACHE_ROSTER_INCOMPLETE", `${path} roster 不一致。`);
+    }
+    totalInnerRows += Number(counts.score_count);
+  }
   const invalidScores = Number(database.prepare(`
     SELECT COUNT(*) AS count
     FROM scores scores
@@ -1463,10 +1968,38 @@ function validateCacheContents(database, metadata, expectedFoldIds) {
       invalidScores
     });
   }
-  if (Number(metadata.rowCount) !== totalRows || Number(metadata.foldCount) !== foldRows.length) {
+  const invalidInnerScores = Number(database.prepare(`
+    SELECT COUNT(*) AS count
+    FROM inner_scores scores
+    JOIN inner_contexts contexts USING (outer_fold_id, inner_fold_id, context_index)
+    JOIN inner_taxa taxa USING (outer_fold_id, inner_fold_id, taxon_index)
+    WHERE scores.actual_positive < 0 OR scores.actual_positive > contexts.total
+       OR scores.province_detections < 0 OR scores.province_detections > contexts.province_exposure
+       OR scores.city_detections < 0 OR scores.city_detections > contexts.city_exposure
+       OR scores.district_detections < 0 OR scores.district_detections > contexts.district_exposure
+       OR scores.reference_raw_probability < 0 OR scores.reference_raw_probability > 1
+       OR scores.reference_baseline_probability < 0 OR scores.reference_baseline_probability > 1
+       OR taxa.positive_count < 0 OR taxa.outer_positive_count < taxa.positive_count
+       OR taxa.development_positive_count < taxa.outer_positive_count
+       OR taxa.city_strength < 0 OR taxa.district_strength < 0
+  `).get().count) || 0;
+  if (invalidInnerScores) {
+    throw new SpatialOofCacheError("SPATIAL_OOF_CACHE_VALUE_INVALID", "OOF 缓存含越界 inner 数值。", {
+      invalidInnerScores
+    });
+  }
+  if (
+    Number(metadata.outerRowCount) !== totalRows ||
+    Number(metadata.innerRowCount) !== totalInnerRows ||
+    Number(metadata.rowCount) !== totalRows + totalInnerRows ||
+    Number(metadata.foldCount) !== foldRows.length ||
+    Number(metadata.innerFoldCount) !== innerFoldRows.length
+  ) {
     throw new SpatialOofCacheError("SPATIAL_OOF_CACHE_COUNTS_MISMATCH", "OOF 缓存 metadata 计数不匹配。", {
       metadataRowCount: metadata.rowCount,
-      actualRowCount: totalRows
+      actualRowCount: totalRows + totalInnerRows,
+      totalRows,
+      totalInnerRows
     });
   }
   const payloadSha256 = logicalPayloadSha256(database);
@@ -1548,9 +2081,29 @@ function loadSpatialOofCache({
         return value == null ? null : JSON.parse(value);
       })(),
       evidenceConfiguration: JSON.parse(foldMetadata.get(foldId).evidence_configuration_json),
-      scoreRows: []
+      scoreRows: [],
+      innerFolds: []
     }));
     const foldById = new Map(folds.map((fold) => [Number(fold.foldId), fold]));
+    for (const row of database.prepare(
+      "SELECT * FROM inner_folds ORDER BY outer_fold_id, inner_fold_id"
+    ).all()) {
+      foldById.get(Number(row.outer_fold_id)).innerFolds.push({
+        innerFoldId: String(row.inner_fold_id),
+        trainingFoldIds: JSON.parse(row.training_fold_ids_json).map(String),
+        referenceRawMetrics: row.reference_raw_metrics_json == null
+          ? null
+          : JSON.parse(row.reference_raw_metrics_json),
+        evidenceConfiguration: JSON.parse(row.evidence_configuration_json),
+        scoreRows: []
+      });
+    }
+    const innerFoldById = new Map(folds.flatMap((fold) =>
+      fold.innerFolds.map((innerFold) => [
+        `${fold.foldId}\0${innerFold.innerFoldId}`,
+        innerFold
+      ])
+    ));
     for (const row of database.prepare(`
       SELECT scores.fold_id, scores.context_index, taxa.taxon_id, taxa.positive_count,
              taxa.development_positive_count,
@@ -1586,6 +2139,43 @@ function loadSpatialOofCache({
         districtStrength: Number(row.district_strength)
       });
     }
+    for (const row of database.prepare(`
+      SELECT scores.outer_fold_id, scores.inner_fold_id, scores.context_index,
+             taxa.taxon_id, taxa.positive_count, taxa.outer_positive_count,
+             taxa.development_positive_count,
+             scores.actual_positive, contexts.total,
+             scores.reference_raw_probability, scores.reference_baseline_probability,
+             contexts.deepest_level, contexts.has_supported_local_unit,
+             contexts.province_exposure, scores.province_detections,
+             contexts.city_exposure, scores.city_detections, taxa.city_strength,
+             contexts.district_exposure, scores.district_detections, taxa.district_strength
+      FROM inner_scores scores
+      JOIN inner_contexts contexts USING (outer_fold_id, inner_fold_id, context_index)
+      JOIN inner_taxa taxa USING (outer_fold_id, inner_fold_id, taxon_index)
+      ORDER BY scores.outer_fold_id, scores.inner_fold_id, scores.context_index, taxa.taxon_id
+    `).iterate()) {
+      innerFoldById.get(`${row.outer_fold_id}\0${row.inner_fold_id}`).scoreRows.push({
+        contextIndex: Number(row.context_index),
+        taxonId: String(row.taxon_id),
+        positiveCount: Number(row.positive_count),
+        outerPositiveCount: Number(row.outer_positive_count),
+        developmentPositiveCount: Number(row.development_positive_count),
+        actualPositive: Number(row.actual_positive),
+        total: Number(row.total),
+        rawProbability: Number(row.reference_raw_probability),
+        baselineProbability: Number(row.reference_baseline_probability),
+        deepestLevel: String(row.deepest_level),
+        hasSupportedLocalUnit: Boolean(row.has_supported_local_unit),
+        provinceExposure: Number(row.province_exposure),
+        provinceDetections: Number(row.province_detections),
+        cityExposure: Number(row.city_exposure),
+        cityDetections: Number(row.city_detections),
+        cityStrength: Number(row.city_strength),
+        districtExposure: Number(row.district_exposure),
+        districtDetections: Number(row.district_detections),
+        districtStrength: Number(row.district_strength)
+      });
+    }
     return {
       path: absolutePath,
       fileSha256,
@@ -1602,6 +2192,8 @@ module.exports = {
   CACHE_METADATA_KEYS,
   CACHE_TABLE_COLUMNS,
   DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY,
+  INNER_TRAINING_POSITIVE_COUNT_POLICY,
+  OUTER_TRAINING_POSITIVE_COUNT_POLICY,
   SPATIAL_OOF_CACHE_EVIDENCE_CONTRACT_SHA256,
   SPATIAL_OOF_CACHE_FOLD_IDS,
   SPATIAL_OOF_CACHE_GENERATION_FILES,
