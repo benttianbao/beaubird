@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#153f35">
+    <title>浙江鸟种离线预测</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#prediction-form">跳到预测设置</a>
+    <header class="masthead">
+      <div class="masthead__inner">
+        <div class="brand" aria-label="BeauBird 离线预测">
+          <span class="brand__mark" aria-hidden="true">鸟</span>
+          <div>
+            <p class="eyebrow">BEAUBIRD · LOCAL</p>
+            <h1>浙江鸟种离线预测</h1>
+          </div>
+        </div>
+        <div class="local-badge"><span aria-hidden="true"></span>只在本机运行</div>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section class="intro" aria-labelledby="intro-title">
+        <div>
+          <p class="kicker">按地点与日期预测</p>
+          <h2 id="intro-title">今天去这里，可能看到哪些鸟？</h2>
+          <p>选择模型、日期和浙江省内地点，即可读取电脑里的完整预测结果。不会联网，也不会改动网站。</p>
+        </div>
+        <div class="model-summary" id="model-summary" aria-live="polite">
+          <span class="model-summary__label">当前模型</span>
+          <strong>正在读取…</strong>
+          <span>请稍候</span>
+        </div>
+      </section>
+
+      <div class="workspace">
+        <section class="control-card" aria-labelledby="controls-title">
+          <div class="section-heading">
+            <span class="step-number">01</span>
+            <div>
+              <h2 id="controls-title">设置预测条件</h2>
+              <p>只需完成下面三项</p>
+            </div>
+          </div>
+
+          <form id="prediction-form" novalidate>
+            <div class="field">
+              <label for="model-select">使用哪个模型</label>
+              <div class="select-wrap">
+                <select id="model-select" name="model" disabled>
+                  <option>正在读取模型…</option>
+                </select>
+              </div>
+              <p class="field-help" id="model-help">会自动选择默认模型，你也可以更换。</p>
+            </div>
+
+            <div class="field">
+              <label for="prediction-date">哪一天</label>
+              <input id="prediction-date" name="date" type="date" required>
+            </div>
+
+            <div class="field location-field">
+              <label for="location-search">去哪里</label>
+              <div class="search-wrap">
+                <span class="search-icon" aria-hidden="true"></span>
+                <input
+                  id="location-search"
+                  name="location"
+                  type="search"
+                  placeholder="输入城市、区县或观鸟点"
+                  autocomplete="off"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-controls="location-options"
+                  aria-expanded="false"
+                  required
+                >
+              </div>
+              <div class="location-options" id="location-options" role="listbox" hidden></div>
+              <p class="field-help" id="location-help">点击输入框可先从 11 个地市中选择。</p>
+            </div>
+
+            <button class="primary-button" id="predict-button" type="submit" disabled>
+              <span>开始预测</span><span aria-hidden="true">→</span>
+            </button>
+          </form>
+
+          <div class="privacy-note">
+            <span aria-hidden="true">⌂</span>
+            <p><strong>本机只读</strong>　页面只读取模型文件，不上传位置，也不写入模型。</p>
+          </div>
+        </section>
+
+        <section class="results-card" aria-labelledby="results-title">
+          <div class="section-heading section-heading--results">
+            <span class="step-number">02</span>
+            <div>
+              <h2 id="results-title">预测结果</h2>
+              <p id="results-subtitle">选择地点后开始预测</p>
+            </div>
+            <span class="result-count" id="result-count" hidden></span>
+          </div>
+
+          <div class="notice notice--warning" id="quality-notice" hidden>
+            <span class="notice__icon" aria-hidden="true">!</span>
+            <p><strong>实验结果</strong><span id="quality-message">当前模型还没有通过正式发布检查，仅供本地参考。</span></p>
+          </div>
+
+          <div id="status-region" class="status-region" role="status" aria-live="polite">
+            <div class="empty-state">
+              <div class="empty-state__illustration" aria-hidden="true">
+                <span class="branch"></span><span class="bird">⌁</span>
+              </div>
+              <h3>结果会显示在这里</h3>
+              <p>左侧选择日期和地点后，点击“开始预测”。</p>
+            </div>
+          </div>
+
+          <div id="results-region" hidden>
+            <div class="result-context" id="result-context"></div>
+            <ol class="bird-results" id="bird-results"></ol>
+            <p class="results-footnote">预测概率不是“必然看到”。天气、路线、停留时间和鸟况都会影响实际观察。</p>
+          </div>
+        </section>
+      </div>
+
+      <aside class="plain-note" aria-label="使用提醒">
+        <strong>使用提醒</strong>
+        <p>敏感鸟种不会显示精确位置。白头鹎等部分常见鸟的误差目前仍偏大，因此实验模型不能用于正式发布或重要决策。</p>
+      </aside>
+    </main>
+  </body>
+</html>
