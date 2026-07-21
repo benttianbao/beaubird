@@ -174,6 +174,33 @@ v2 继续只保存公共鸟种 ID、匿名 outer/inner 折号、折内稠密上�
 
 预登记的首次 v2 长运行输出为 `data/prediction-models/zhejiang-v1-20260715-development-strict-cache-v2.sqlite`，紧凑缓存为 `data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v2.sqlite`；随后固定离线报告输出为 `data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-candidates-strict-v2-w4.json`。先完成 schema/隐私/确定性和反泄漏短测，再启动一次长缓存生成；生成后先离线评分。若仍有任一门槛失败，立即 no-go，不扩展 runtime/schema、不冻结参数、不打开 sealed；只有全部通过才进入 runtime/schema 正式化和完整 development 复验。
 
+#### 2026-07-21 严格 cache v2 固定批次结果
+
+首次严格 v2 缓存生成按预登记命令完成，耗时 8,849.596 秒：
+
+- evaluation-only 模型 SHA-256：`932eabb11626ce1c445c421474ef1b7bfef92a9db8e5c0edc3126a07830f0002`
+- 构建报告 SHA-256：`95bd0c15435b09d69e6c279b5383ace497d6cd52685147493eab445bca54817f`
+- cache v2 SHA-256：`81ca506f2f26490b66355b6d0bb389ea9cf55f68eb91405b2fa462ca76270cec`，86,454,272 bytes
+- cache v2 为 schema 2，含 5 个 outer、20 个 inner；outer 347,436 行、inner 1,385,452 行，共 1,732,888 行
+- 模型与缓存均为 `quick_check=ok`、`freelist_count=0`；缓存只含 9 张 schema 白名单表，隐私契约全部为 false；evaluation-only 正向和反向索引均为 0
+- 快照、split 文件和 split manifest hash 与固定值一致，`sealedPanelViewed=false`
+
+固定候选 manifest SHA-256 为 `169b1d659bc546b732e75b29cb8288ee949da0dadd532281bf7e1a975d369475`。workers=4 报告 SHA-256 为 `7ee5e8c2d4a8671a432e8bf3b78e36e04e39570aa7b5b9d14011211320d071d1`；workers=1 复跑 SHA-256 为 `4d1ca7ae1db54768fe6954b89bcd80343a16d0b36724a5899093d5ff3be0e699`。删除仅允许变化的 `generatedAt` 和 `scoring.workers` 后，两份完整报告完全一致，投影 SHA-256 均为 `6590e472f0b355d4404b7b5279e2505672d4566205f28f25f8d6a233ab3ebde0`。
+
+严格嵌套 recommendation 指标：
+
+- Brier Skill `+3.6355840578%`
+- ECE `0.004873285661880443`
+- Recall@20 delta `+4.0067820810pp`
+- 共享校准组最大 ECE `0.0007227490645086525`
+- 逐鸟最大 ECE `0.12259799938175632`，最差仍为 `taxon_id=4866` 白头鹎
+- 中杓鹬 `taxon_id=4356` 为 `0.10595078846445175`，山斑鸠 `taxon_id=4145` 为 `0.10002577890038877`，黑腹滨鹬 `taxon_id=4375` 为 `0.09402649640766556`，暗绿绣眼鸟 `taxon_id=5013` 为 `0.08417674656811518`
+- 共 28 个逐鸟作用域超过固定 `maximumSpeciesEce=0.05`
+
+生产候选名单含 369 个正例至少 200 的鸟种；其中 335 个因最坏内折相对 Brier regret 超过 5% 而按预登记规则回退基础 `city=100,district=10`，显示逐折空间迁移上限高度不稳定。372 个校准作用域中 176 个通过每折保护门，196 个回退恒等映射；白头鹎、中杓鹬、山斑鸠等最差作用域均没有稳健校准器通过每折守门。
+
+因此严格 v2 固定批次结论为 **no-go**，唯一失败仍是 `spatial.species_calibration.maximumEce`。按预登记约束到此停止：不追加候选、不降低门槛、不扩展 runtime/schema、不冻结空间参数、不打开 sealed，也不执行 full 正式构建。
+
 当前 runtime 和空间参数制品仍只支持按流行度组查询行政层上限，因此逐鸟候选即使改善 development，也只能先作为诊断。只有在另行扩展运行时和参数 schema、重新完成全部 development 折并通过所有门槛后，才可能进入冻结流程。
 
 ## 构建与测试
