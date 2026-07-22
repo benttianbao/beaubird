@@ -150,6 +150,13 @@ async function run(options) {
       diagnosticOnly: true,
       freezeEligible: false,
       sealedPanelViewed: false,
+      rankingReference: report.rankingReference
+        ? {
+            passed: report.rankingReference.passed,
+            failures: report.rankingReference.failures,
+            formalProbabilityGateUnchanged: report.rankingReference.formalProbabilityGateUnchanged
+          }
+        : null,
       recommendation: report.recommendation
         ? { familyId: report.recommendation.familyId, failures: report.recommendation.failures }
         : null

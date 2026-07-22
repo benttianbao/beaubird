@@ -22,6 +22,10 @@ const {
 const {
   FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1
 } = require("../server/prediction/spatial-transfer");
+const {
+  RANKING_REFERENCE_CONTRACT,
+  RANKING_REFERENCE_CONTRACT_SHA256
+} = require("../server/prediction/ranking-reference");
 const { canonicalJson } = require("../server/prediction/spatial-splits");
 const { prevalenceGroup } = require("../server/prediction/model");
 const { parseArguments } = require("./score-zhejiang-spatial-oof-cache");
@@ -200,7 +204,8 @@ function assertCandidateManifest(report) {
     capPolicy: EXPECTED_CAP_POLICY,
     calibratorFamilies: DEFAULT_CALIBRATOR_FAMILIES,
     calibrationGuard: SPATIAL_CALIBRATION_GUARD,
-    robustScopeSelectionPolicy: EXPECTED_ROBUST_SCOPE_POLICY
+    robustScopeSelectionPolicy: EXPECTED_ROBUST_SCOPE_POLICY,
+    rankingReferenceContract: RANKING_REFERENCE_CONTRACT
   });
   assert.equal(report.scoring.candidateSetSha256, payload.capCandidateSetSha256);
   assert.equal(report.scoring.candidateCount, payload.capCandidateCount);
@@ -327,6 +332,7 @@ test("逐鸟 25 组 cap 使用四折选择一折验证并能区分相反空间�
   const cache = makeCache();
   const before = structuredClone(cache);
   const report = await scoreSpatialOofCandidates(cache, { workers: 2, generatedAt: "fixed" });
+  assert.equal(report.schemaVersion, 5);
   assert.equal(report.diagnosticOnly, true);
   assert.equal(report.freezeEligible, false);
   assert.equal(report.sealedPanelViewed, false);
@@ -334,6 +340,15 @@ test("逐鸟 25 组 cap 使用四折选择一折验证并能区分相反空间�
   assert.equal(report.scoring.chunkRecords, 4096);
   assert.equal(report.scoring.fitFoldCount, 4);
   assert.equal(report.scoring.heldoutFoldCount, 5);
+  assert.equal(report.rankingReference.contractId, RANKING_REFERENCE_CONTRACT.id);
+  assert.equal(report.rankingReference.contractSha256, RANKING_REFERENCE_CONTRACT_SHA256);
+  assert.equal(report.rankingReference.developmentDiagnosticOnly, true);
+  assert.equal(report.rankingReference.freezeEligible, false);
+  assert.equal(report.rankingReference.formalProbabilityGateUnchanged, true);
+  assert.equal(report.rankingReference.retention.cachedCandidateRetention, 1);
+  assert.equal(report.rankingReference.retention.thresholdFilteringApplied, false);
+  assert.equal(report.rankingReference.crossFitting.fitFoldCount, 4);
+  assert.equal(report.rankingReference.crossFitting.heldoutFoldCount, 5);
   const low = report.speciesCapTuning.species.find((row) => row.taxonId === "common-low");
   const high = report.speciesCapTuning.species.find((row) => row.taxonId === "common-high");
   const boundary = report.speciesCapTuning.species.find((row) => row.taxonId === "boundary-common");

@@ -6,6 +6,10 @@ const { resolve } = require("node:path");
 
 const { calibrateProbability, fitBetaCalibration } = require("./math");
 const { PREVALENCE_GROUPS, prevalenceGroup } = require("./model");
+const {
+  RANKING_REFERENCE_CONTRACT,
+  evaluateRankingReference
+} = require("./ranking-reference");
 const { canonicalJson } = require("./spatial-splits");
 const { buildAdminExposureCapCandidates } = require("./spatial-transfer");
 const {
@@ -19,10 +23,11 @@ const {
   candidateSetSha256
 } = require("./spatial-oof-cache");
 
-const SPATIAL_CANDIDATE_SCORER_SCHEMA_VERSION = 2;
+const SPATIAL_CANDIDATE_SCORER_SCHEMA_VERSION = 5;
 const SPATIAL_CANDIDATE_SCORER_FILES = Object.freeze([
   "server/prediction/math.js",
   "server/prediction/model.js",
+  "server/prediction/ranking-reference.js",
   "server/prediction/spatial-candidate-scorer.js",
   "server/prediction/spatial-oof-cache.js",
   "server/prediction/spatial-transfer.js",
@@ -1582,7 +1587,8 @@ function fixedCandidateManifest(families, candidates) {
     capPolicy: STABLE_CAP_SELECTION_POLICY,
     calibratorFamilies: families,
     calibrationGuard: SPATIAL_CALIBRATION_GUARD,
-    robustScopeSelectionPolicy: ROBUST_SCOPE_SELECTION_POLICY
+    robustScopeSelectionPolicy: ROBUST_SCOPE_SELECTION_POLICY,
+    rankingReferenceContract: RANKING_REFERENCE_CONTRACT
   };
   return { ...manifest, sha256: canonicalSha256(manifest) };
 }
@@ -1932,6 +1938,7 @@ function buildNestedScopeAdaptiveSelection({ cache, capPlans, baseCaps, families
     .filter((scope) => scope.accepted && scope.fit?.fitted)
     .map((scope) => ({ scope: scope.scope, family: scope.familyId, fit: scope.fit }));
   const metrics = evaluateCandidateRows(heldoutEntries);
+  const rankingReference = evaluateRankingReference(heldoutEntries);
   const productionRecord = {
     trainingFoldIds: foldIds,
     innerFolds: productionSelection.innerFolds,
@@ -1954,6 +1961,7 @@ function buildNestedScopeAdaptiveSelection({ cache, capPlans, baseCaps, families
     metrics,
     compactMetrics: compactMetrics(metrics),
     failures: spatialQualityFailures(metrics),
+    rankingReference,
     productionCalibrators
   };
 }
@@ -2064,6 +2072,7 @@ async function scoreSpatialOofCandidates(cache, {
       folds: crossFittedSelection.folds,
       production: crossFittedSelection.production
     },
+    rankingReference: crossFittedSelection.rankingReference,
     calibratorFamilies: familyResults.map((result) => ({
       family: result.family,
       guard: result.guard,

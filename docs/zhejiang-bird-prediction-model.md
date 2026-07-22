@@ -230,6 +230,25 @@ v2 继续只保存公共鸟种 ID、匿名 outer/inner 折号、折内稠密上�
 
 候选集合、校准器集合、5 outer×4 inner、质量阈值和 sealed 隔离规则均不改变。只有地点身份规范化及其缓存绑定升级；`maximumSpeciesEce=0.05` 等所有发布门槛不得降低。
 
+#### 2026-07-22 候选排序与参考范围 development 诊断
+
+产品目标调整为“按可能性排序并保留低分候选”，低分只体现为更小的参考数字，不以概率阈值删鸟。为避免把仍未通过逐鸟 ECE 的分数伪装成绝对概率，新增独立的 `zhejiang_ranking_reference_cross_fitted_residual_v3` 契约：排序继续使用严格嵌套选择后的 OOF 分数；参考范围表示相似地点和日期下一份完整清单中的历史观察频率范围，不表示个体鸟真实存在概率。正式 Brier/ECE 发布门槛保持原样，参考范围诊断通过也不能覆盖 `spatial.species_calibration.maximumEce` 的 no-go。
+
+参考范围对每个 outer held-out 折仅使用其余四折：先在每个训练折分别计算加权绝对残差的 90% 分位数，再取最保守折；单鸟范围宽度不得窄于对应流行度组和全局范围。固定诊断门槛为 Recall@20 与 NDCG@20 相对基线均不退化、总体覆盖至少 90%、最差逐鸟覆盖至少 80%、加权平均宽度不超过 35pp、缓存候选保留率 100%。输入行不执行低概率过滤；低于 3% 只用于审计保留率。契约、门槛和分层规则进入固定候选 manifest 与 SHA-256。
+
+前两次 development 诊断保留为失败审计：v1 的 pooled 残差分位数总体覆盖仅 87.49%、最差逐鸟覆盖 58.40%；v2 的逐折最保守分位数把总体覆盖提高到 92.90%，但最差逐鸟覆盖仍为 58.76%。未降低门槛，最终 v3 增加分层宽度下限后通过该独立诊断：
+
+- contract SHA-256：`ade8ce90c3f83c609eb7cd48c8e3f4f3a8262f5ff2479d3f645ba73d37f8682b`
+- 固定候选 manifest SHA-256：`23f47a8cd8219dc546ab73c802b24459362f7ec628bde9d090f0cb4fe5cd071d`
+- workers=4 报告：`data/prediction-models/development-cache/zhejiang-v1-20260715-ranking-reference-v3-w4.json`，SHA-256 `2e7ee8bf13d756bfdb6876fccfdd8321aeb48730648aeb8341bea3ab8126c321`
+- workers=1 复跑：`data/prediction-models/development-cache/zhejiang-v1-20260715-ranking-reference-v3-w1.json`，SHA-256 `c5c5c9dcb2e5ebe204e6c804fac143efb68f1b16046239a38c48e3f21f73cec6`
+- 删除 `generatedAt` 和 `scoring.workers` 后，两份完整报告相同，投影 SHA-256 均为 `a4c68aacbbf16bb7bcc870a6ed525590130ee83a698a07fcd7ccd2daacd3bce4`
+- Recall@20 delta `+4.0067820810pp`，NDCG@20 delta `+4.2432527751pp`
+- 总体覆盖 `97.8688956301%`，最差逐鸟覆盖 `83.0624037471%`，加权平均宽度 `24.4627208318pp`
+- 347,436 行全部保留；其中低于 3% 的 285,253 行全部保留，`thresholdFilteringApplied=false`
+
+该结果仍是 `developmentDiagnosticOnly=true`、`freezeEligible=false`、`sealedPanelViewed=false`。缓存名单只有 475–480 个 release-evaluated taxa，尚不能证明全部公共鸟种已进入正向物化；当前离线页仍有查询 `limit` 且正式模型仍为旧范围语义。因此本批次只完成契约和 OOF 证据验证，不切换默认模型、不声称 UI 已展示全部低分鸟种、不冻结参数、不打开 sealed。后续若进入运行时正式化，必须先扩展物化/schema，使全部公共鸟种有序保留并写入该参考范围，再执行完整时间、空间、观察者 development 复验；现有正式概率结论仍为 **no-go**。
+
 ## 构建与测试
 
 复用已固定快照构建，不连接网站、不切换线上模型指针：
@@ -308,7 +327,7 @@ node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js `
 测试：
 
 ```powershell
-node --test tools\test-location-normalization.js tools\test-vagrant-events.js tools\test-zhejiang-prediction-model.js tools\test-spatial-oof-cache.js tools\test-spatial-candidate-scorer.js
+node --test tools\test-location-normalization.js tools\test-vagrant-events.js tools\test-zhejiang-prediction-model.js tools\test-spatial-oof-cache.js tools\test-spatial-candidate-scorer.js tools\test-ranking-reference.js
 ```
 
 构建完成后应同时生成：
