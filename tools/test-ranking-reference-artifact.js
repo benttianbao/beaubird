@@ -20,6 +20,8 @@ const { PredictionError, PredictionModel, SCHEMA_VERSION } = require("../server/
 const {
   buildReverseHotspots,
   createArtifactSchema,
+  createUnitRegistry,
+  insertSpaceUnits,
   materializeLocationPredictions
 } = require("./build-zhejiang-prediction-model");
 
@@ -167,6 +169,81 @@ test("参考范围构建在完整层级保留全部公共鸟种而不受 forward
       "SELECT COUNT(DISTINCT taxon_id) AS count FROM location_predictions WHERE season_bucket = 1"
     ).get().count,
     2
+  );
+  database.close();
+});
+
+test("反向热点完全并列时不受候选输入顺序影响", () => {
+  const candidates = [
+    [1, 14, 8, 0.4, 0.52, 0.4, 0.61, "medium", 10, 5, "[2025,2026]", "medium"],
+    [1, 14, 7, 0.4, 0.51, 0.4, 0.6, "medium", 10, 5, "[2025,2026]", "medium"],
+    [15, 28, 21, 0.3, 0.42, 0.3, 0.5, "medium", 9, 4, "[2025,2026]", "medium"],
+    [350, 365, 357, 0.35, 0.46, 0.35, 0.54, "medium", 9, 4, "[2025,2026]", "medium"]
+  ];
+  const orders = [
+    [0, 1, 2, 3],
+    [3, 2, 1, 0],
+    [1, 3, 2, 0],
+    [2, 0, 3, 1]
+  ];
+  const projections = orders.map((order, orderIndex) => {
+    const path = fixturePath(`reverse-order-${orderIndex}.sqlite`);
+    createFixture(path);
+    const database = new DatabaseSync(path);
+    const insert = database.prepare(
+      `INSERT INTO reverse_candidates
+         (taxon_id, space_unit_id, temporal_granularity, season_start_day, season_end_day,
+          peak_day, rank_score, probability, interval_lower, interval_upper,
+          probability_level, effective_checklists, observer_count, support_years_json, confidence)
+       VALUES ('bird-a', 'province:zhejiang', 'week', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const index of order) insert.run(...candidates[index]);
+    const result = buildReverseHotspots(database, { reverseTopK: 300 });
+    const rows = database.prepare(
+      "SELECT * FROM reverse_hotspots ORDER BY season_start_day, season_end_day"
+    ).all();
+    database.close();
+    return { result, rows };
+  });
+  for (const projection of projections.slice(1)) assert.deepEqual(projection, projections[0]);
+  assert.equal(projections[0].rows[0].season_start_day, 350);
+  assert.equal(projections[0].rows[0].season_end_day, 28);
+  assert.equal(projections[0].rows[0].peak_day, 7);
+});
+
+test("空间单元和地点查询键发生冲突时失败而不是静默覆盖", () => {
+  const registry = createUnitRegistry();
+  registry.register({ id: "point:collision", level: "point", code: "point-a" });
+  assert.throws(
+    () => registry.register({ id: "point:collision", level: "point", code: "point-b" }),
+    (error) => error.code === "SPACE_UNIT_ID_COLLISION"
+  );
+
+  const database = new DatabaseSync(":memory:");
+  createArtifactSchema(database);
+  const unit = {
+    id: "point:strict-lookup",
+    level: "point",
+    code: "strict-lookup",
+    name: "严格查询测试点",
+    parentId: null
+  };
+  insertSpaceUnits(database, {
+    units: new Map([[unit.id, unit]]),
+    locationLookups: new Map([["legacy-point", unit.id]])
+  }, new Map());
+  assert.throws(
+    () => insertSpaceUnits(database, {
+      units: new Map(),
+      locationLookups: new Map([["legacy-point", unit.id]])
+    }, new Map()),
+    /UNIQUE constraint failed: location_lookup/
+  );
+  assert.equal(
+    database.prepare(
+      "SELECT space_unit_id FROM location_lookup WHERE lookup_type='point_id' AND lookup_key='legacy-point'"
+    ).get().space_unit_id,
+    unit.id
   );
   database.close();
 });

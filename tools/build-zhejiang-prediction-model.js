@@ -1410,6 +1410,17 @@ function createUnitRegistry() {
       });
       return units.get(unit.id);
     }
+    if (existing.level !== unit.level || existing.code !== unit.code) {
+      throw new PredictionBuildError(
+        "SPACE_UNIT_ID_COLLISION",
+        `空间单元 ID ${unit.id} 对应了不同的层级或代码，已拒绝静默合并。`,
+        {
+          unitId: unit.id,
+          existing: { level: existing.level, code: existing.code },
+          incoming: { level: unit.level, code: unit.code }
+        }
+      );
+    }
     for (const [key, value] of Object.entries(unit)) {
       if ((existing[key] == null || existing[key] === "") && value != null && value !== "") existing[key] = value;
     }
@@ -1927,7 +1938,7 @@ function insertSpaceUnits(artifact, registry, summaries) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const lookup = artifact.prepare(
-    "INSERT OR REPLACE INTO location_lookup(lookup_type, lookup_key, space_unit_id) VALUES (?, ?, ?)"
+    "INSERT INTO location_lookup(lookup_type, lookup_key, space_unit_id) VALUES (?, ?, ?)"
   );
   const order = { province: 0, city: 1, district: 2, grid_r6: 3, grid_r7: 4, point: 5 };
   const units = [...registry.units.values()].sort(
@@ -5375,13 +5386,36 @@ function mergedHotspotBoundary(rows) {
 }
 
 function rankedHotspotComponent(componentRows) {
-  const representative = [...componentRows].sort(
-    (left, right) => Number(right.rank_score) - Number(left.rank_score) ||
-      left.space_unit_id.localeCompare(right.space_unit_id) ||
-      Number(left.season_start_day) - Number(right.season_start_day) ||
-      Number(left.season_end_day) - Number(right.season_end_day)
-  )[0];
+  const representative = [...componentRows].sort(compareHotspotRepresentativeRows)[0];
   return { componentRows, representative, window: mergedSeasonWindow(componentRows) };
+}
+
+function hotspotRepresentativeTieBreakKey(row) {
+  return JSON.stringify([
+    row.taxon_id,
+    row.temporal_granularity,
+    Number(row.peak_day),
+    row.probability == null ? null : Number(row.probability),
+    Number(row.interval_lower),
+    Number(row.interval_upper),
+    row.probability_level,
+    Number(row.effective_checklists),
+    Number(row.observer_count),
+    row.support_years_json,
+    row.confidence,
+    row.level,
+    row.boundary_json,
+    row.centroid_longitude == null ? null : Number(row.centroid_longitude),
+    row.centroid_latitude == null ? null : Number(row.centroid_latitude)
+  ]);
+}
+
+function compareHotspotRepresentativeRows(left, right) {
+  return Number(right.rank_score) - Number(left.rank_score) ||
+    left.space_unit_id.localeCompare(right.space_unit_id) ||
+    Number(left.season_start_day) - Number(right.season_start_day) ||
+    Number(left.season_end_day) - Number(right.season_end_day) ||
+    hotspotRepresentativeTieBreakKey(left).localeCompare(hotspotRepresentativeTieBreakKey(right));
 }
 
 function hotspotComponentIdentity(component) {
@@ -5485,6 +5519,13 @@ function buildReverseHotspots(artifact, options) {
     );
     deduplicatedComponents += collapsed.mergedCollisions;
     const ranked = collapsed.components;
+    const finalIdentities = ranked.map(hotspotComponentIdentity);
+    if (new Set(finalIdentities).size !== finalIdentities.length) {
+      throw new PredictionBuildError(
+        "REVERSE_HOTSPOT_IDENTITY_COLLISION",
+        `鸟种 ${rows[0].taxon_id} 的反向热点折叠后仍存在重复输出键，已在写入前停止。`
+      );
+    }
     for (const component of ranked.slice(0, options.reverseTopK)) {
       const row = component.representative;
       const memberIds = [...new Set(component.componentRows.map((item) => item.space_unit_id))].sort();
@@ -6461,6 +6502,7 @@ module.exports = {
   cliResultSummary,
   collectDevelopmentPoolPositiveCounts,
   createArtifactSchema,
+  createUnitRegistry,
   createTrainingSnapshot,
   crossFitSpatialCalibrators,
   evaluateCachedSpatialRows,
