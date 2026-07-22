@@ -37,6 +37,7 @@ const {
   PREVALENCE_GROUPS,
   PredictionModel,
   SCHEMA_VERSION,
+  SUPPORTED_SCHEMA_VERSIONS,
   prevalenceGroup,
   resolvePriorStrength
 } = require("../server/prediction/model");
@@ -56,6 +57,13 @@ const {
 const { scoreAdminCapTasks } = require("../server/prediction/spatial-transfer-worker");
 const { loadSpatialParameterArtifact } = require("../server/prediction/spatial-parameters");
 const { loadSealedEvaluationReceipt } = require("../server/prediction/sealed-evaluation-receipt");
+const {
+  manifestSummary: rankingReferenceManifestSummary,
+  reportBinding: buildRankingReferenceBinding
+} = require("../server/prediction/ranking-reference-runtime");
+const {
+  spatialCandidateScorerImplementationSha256
+} = require("../server/prediction/spatial-candidate-scorer");
 const {
   spatialOofCacheGenerationImplementationSha256,
   writeSpatialOofCache
@@ -91,12 +99,20 @@ const NESTED_CALIBRATION_GUARD = Object.freeze({
   maximumRelativeBrierDegradation: 0.01,
   maximumEceDegradation: 0.01
 });
+const RANKING_REFERENCE_COMPLETE_FORWARD_LEVELS = Object.freeze([
+  "province",
+  "city",
+  "district",
+  "point"
+]);
 const PREDICTION_IMPLEMENTATION_FILES = Object.freeze([
   "tools/build-zhejiang-prediction-model.js",
   "server/prediction/geo.js",
   "server/prediction/location-normalization.js",
   "server/prediction/math.js",
   "server/prediction/model.js",
+  "server/prediction/ranking-reference-runtime.js",
+  "server/prediction/ranking-reference.js",
   "server/prediction/sealed-evaluation-receipt.js",
   "server/prediction/spatial-parameters.js",
   "server/prediction/spatial-oof-cache.js",
@@ -340,6 +356,33 @@ function validateBuildSafetyOptions(options) {
       );
     }
   }
+  if (options.rankingReferenceReportPath !== undefined) {
+    const referenceFailures = [];
+    if (
+      typeof options.rankingReferenceReportPath !== "string" ||
+      !options.rankingReferenceReportPath.trim()
+    ) referenceFailures.push("rankingReferenceReportPath.invalid");
+    if (options.testOnly !== true) referenceFailures.push("testOnly.required");
+    if (options.pointerPath) referenceFailures.push("pointerPath.forbidden");
+    if (options.materializationProfile !== "full") referenceFailures.push("materializationProfile.full_required");
+    if (!options.spatialSplitManifestPath) referenceFailures.push("spatialSplitManifestPath.required");
+    if (options.spatialEvaluationPanel !== "development") {
+      referenceFailures.push("spatialEvaluationPanel.explicit_development_required");
+    }
+    if (options.writeSpatialOofCachePath) referenceFailures.push("writeSpatialOofCachePath.forbidden");
+    if (options.spatialParametersPath) referenceFailures.push("spatialParametersPath.forbidden");
+    if (options.sealedEvaluationReceiptPath) referenceFailures.push("sealedEvaluationReceiptPath.forbidden");
+    if (options.sealedSpatialPanelConfirmation) {
+      referenceFailures.push("sealedSpatialPanelConfirmation.forbidden");
+    }
+    if (referenceFailures.length) {
+      throw new PredictionBuildError(
+        "RANKING_REFERENCE_BUILD_FORBIDDEN",
+        "参考范围参数当前只允许显式 development、testOnly、no-publish 的完整物化构建。",
+        { failures: referenceFailures }
+      );
+    }
+  }
   if (options.testOnly) return;
 
   const atLeast = (path, actual, required) => {
@@ -418,6 +461,35 @@ function sha256File(path) {
     closeSync(descriptor);
   }
   return hash.digest("hex");
+}
+
+function loadRankingReferenceBinding(reportPath, expected) {
+  const path = resolve(reportPath);
+  let report;
+  try {
+    report = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new PredictionBuildError(
+      "RANKING_REFERENCE_REPORT_INVALID",
+      `无法读取参考范围 development 报告：${error.message}`,
+      { path }
+    );
+  }
+  const reportSha256 = sha256File(path);
+  try {
+    return buildRankingReferenceBinding(report, {
+      reportPath: path,
+      reportSha256,
+      scorerImplementationSha256: spatialCandidateScorerImplementationSha256(),
+      ...expected
+    });
+  } catch (error) {
+    throw new PredictionBuildError(
+      "RANKING_REFERENCE_REPORT_MISMATCH",
+      error.message,
+      { path, reportSha256, ...(error.details || {}) }
+    );
+  }
 }
 
 function predictionImplementationSha256(projectRoot = resolve(__dirname, "..")) {
@@ -939,6 +1011,15 @@ function createArtifactSchema(database) {
       PRIMARY KEY (scope, scope_id)
     ) WITHOUT ROWID;
 
+    CREATE TABLE ranking_reference_parameters (
+      scope TEXT PRIMARY KEY,
+      half_width REAL NOT NULL CHECK (half_width BETWEEN 0 AND 1),
+      row_count INTEGER NOT NULL CHECK (row_count > 0),
+      total_weight REAL NOT NULL CHECK (total_weight > 0),
+      calibration_fold_count INTEGER NOT NULL CHECK (calibration_fold_count >= 2),
+      fold_quantiles_json TEXT NOT NULL
+    ) WITHOUT ROWID;
+
     CREATE TABLE location_predictions (
       space_unit_id TEXT NOT NULL REFERENCES space_units(id),
       resolved_space_unit_id TEXT NOT NULL REFERENCES space_units(id),
@@ -1079,6 +1160,31 @@ function manifestSet(database, key, value) {
   database.prepare("INSERT OR REPLACE INTO manifest(key, value) VALUES (?, ?)").run(key, JSON.stringify(value));
 }
 
+function insertRankingReferenceParameters(database, binding) {
+  const insert = database.prepare(
+    `INSERT INTO ranking_reference_parameters
+       (scope, half_width, row_count, total_weight, calibration_fold_count, fold_quantiles_json)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  database.exec("BEGIN");
+  try {
+    for (const parameter of binding.parameters) {
+      insert.run(
+        parameter.scope,
+        parameter.halfWidth,
+        parameter.rowCount,
+        parameter.totalWeight,
+        parameter.calibrationFoldCount,
+        JSON.stringify(parameter.foldQuantiles)
+      );
+    }
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function assertArtifactPublishable(path, metadata) {
   const database = new DatabaseSync(path, { readOnly: true });
   try {
@@ -1093,7 +1199,7 @@ function assertArtifactPublishable(path, metadata) {
       }
       manifest.set(row.key, value);
     }
-    if (String(manifest.get("schema_version")) !== SCHEMA_VERSION) {
+    if (!SUPPORTED_SCHEMA_VERSIONS.has(String(manifest.get("schema_version")))) {
       throw new Error("公共模型 schema_version 不可发布");
     }
     if (manifest.get("quality_gate")?.passed !== true) {
@@ -5004,17 +5110,22 @@ function materializeLocationPredictions(artifact, options) {
      VALUES (?, ?, 'week', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const reverseLevels = new Set(["province", "city", "district", "grid_r6", "grid_r7"]);
+  const completeForwardLevels = new Set(
+    options.rankingReferenceBinding ? RANKING_REFERENCE_COMPLETE_FORWARD_LEVELS : []
+  );
   let inserted = 0;
+  let completeForwardRows = 0;
   let reverseCandidateRows = 0;
   artifact.exec("BEGIN");
   try {
     for (let unitIndex = 0; unitIndex < units.length; unitIndex += 1) {
       const unit = units[unitIndex];
       const reverseEligible = reverseLevels.has(unit.level);
+      const completeForward = completeForwardLevels.has(unit.level);
       // Reverse search must not inherit the forward Top-K truncation. Every
       // public taxon is scored for reverse-eligible units before forward rows
       // are sliced; local-only forward units retain the bounded candidate set.
-      const candidates = reverseEligible
+      const candidates = reverseEligible || completeForward
         ? globalTaxa
         : taxonCandidatesForUnit(artifact, model, unit, globalTaxa);
       const reverseRowsByTaxon = reverseEligible ? new Map() : null;
@@ -5051,7 +5162,8 @@ function materializeLocationPredictions(artifact, options) {
             right.intervalLower - left.intervalLower ||
             left.taxonId.localeCompare(right.taxonId)
         );
-        for (const row of scored.slice(0, options.forwardTopK)) {
+        const forwardRows = completeForward ? scored : scored.slice(0, options.forwardTopK);
+        for (const row of forwardRows) {
           insert.run(
             unit.id,
             row.resolvedSpaceUnitId,
@@ -5069,6 +5181,7 @@ function materializeLocationPredictions(artifact, options) {
             row.fallbackLevel
           );
           inserted += 1;
+          if (completeForward) completeForwardRows += 1;
         }
       }
       if (reverseRowsByTaxon) {
@@ -5115,7 +5228,14 @@ function materializeLocationPredictions(artifact, options) {
     // The shared DatabaseSync belongs to the builder; PredictionModel does not close it.
     model.close();
   }
-  return { insertedRows: inserted, reverseCandidateRows, supportedUnits: units.length };
+  return {
+    insertedRows: inserted,
+    completeForwardRows,
+    completeForwardLevels: [...completeForwardLevels],
+    reverseCandidateRows,
+    supportedUnits: units.length,
+    publicTaxa: globalTaxa.length
+  };
 }
 
 function seasonalWindows(rows) {
@@ -5378,6 +5498,9 @@ function validateArtifact(artifact, options = {}) {
   const taxonCount = Number(artifact.prepare("SELECT COUNT(*) AS count FROM taxa").get().count) || 0;
   const predictionCount = Number(artifact.prepare("SELECT COUNT(*) AS count FROM location_predictions").get().count) || 0;
   const reverseHotspotCount = Number(artifact.prepare("SELECT COUNT(*) AS count FROM reverse_hotspots").get().count) || 0;
+  const rankingReferenceParameterCount = Number(
+    artifact.prepare("SELECT COUNT(*) AS count FROM ranking_reference_parameters").get().count
+  ) || 0;
   const temporaryTableCount = Number(
     artifact
       .prepare(
@@ -5431,6 +5554,57 @@ function validateArtifact(artifact, options = {}) {
         reverseHotspotCount
       });
     }
+    if (options.rankingReferenceBinding) {
+      const completeLevels = [...(options.completeForwardLevels || [])];
+      const placeholders = completeLevels.map(() => "?").join(", ");
+      const completeUnitCount = Number(
+        artifact.prepare(
+          `SELECT COUNT(*) AS count FROM space_units
+           WHERE supported = 1 AND level IN (${placeholders})`
+        ).get(...completeLevels).count
+      ) || 0;
+      const completeForwardRowCount = Number(
+        artifact.prepare(
+          `SELECT COUNT(*) AS count
+           FROM location_predictions predictions
+           JOIN space_units units ON units.id = predictions.space_unit_id
+           WHERE predictions.temporal_granularity = 'week'
+             AND units.supported = 1
+             AND units.level IN (${placeholders})`
+        ).get(...completeLevels).count
+      ) || 0;
+      const expectedCompleteForwardRows = completeUnitCount * 52 * publicTaxonCount;
+      const manifestReferenceRow = artifact
+        .prepare("SELECT value FROM manifest WHERE key = 'ranking_reference'")
+        .get();
+      const manifestSchemaRow = artifact
+        .prepare("SELECT value FROM manifest WHERE key = 'schema_version'")
+        .get();
+      const manifestReference = manifestReferenceRow ? JSON.parse(manifestReferenceRow.value) : null;
+      const manifestSchemaVersion = manifestSchemaRow ? String(JSON.parse(manifestSchemaRow.value)) : "";
+      if (
+        manifestSchemaVersion !== SCHEMA_VERSION ||
+        rankingReferenceParameterCount !== Number(options.rankingReferenceBinding.parameterCount) ||
+        manifestReference?.parametersSha256 !== options.rankingReferenceBinding.parametersSha256 ||
+        completeForwardRowCount !== expectedCompleteForwardRows
+      ) {
+        throw new PredictionBuildError(
+          "RANKING_REFERENCE_ARTIFACT_INCOMPLETE",
+          "参考范围参数或完整正向鸟种物化不完整。",
+          {
+            rankingReferenceParameterCount,
+            expectedParameterCount: options.rankingReferenceBinding.parameterCount,
+            parametersSha256: manifestReference?.parametersSha256 || null,
+            expectedParametersSha256: options.rankingReferenceBinding.parametersSha256,
+            completeLevels,
+            completeUnitCount,
+            publicTaxonCount,
+            expectedCompleteForwardRows,
+            completeForwardRowCount
+          }
+        );
+      }
+    }
   }
   if (temporaryTableCount || freePages) {
     throw new PredictionBuildError("ARTIFACT_NOT_SANITIZED", "模型制品仍含临时训练表或空闲页。", {
@@ -5442,6 +5616,7 @@ function validateArtifact(artifact, options = {}) {
     taxonCount,
     predictionCount,
     reverseHotspotCount,
+    rankingReferenceParameterCount,
     freePages,
     materializationProfile: options.materializationProfile || "full"
   };
@@ -5505,6 +5680,31 @@ async function buildPredictionArtifact(options = {}) {
   if (existsSync(outputPath)) {
     throw new PredictionBuildError("OUTPUT_EXISTS", `模型输出已存在：${outputPath}`);
   }
+  if (resolvedOptions.rankingReferenceReportPath !== undefined) {
+    const rankingReportPath = resolve(resolvedOptions.rankingReferenceReportPath);
+    const normalizedRankingPath = process.platform === "win32"
+      ? rankingReportPath.toLowerCase()
+      : rankingReportPath;
+    const conflictingPaths = [
+      outputPath,
+      `${outputPath}.sha256`,
+      resolvedOptions.reportPath || `${outputPath}.report.json`,
+      resolvedOptions.sourcePath,
+      resolvedOptions.snapshotPath,
+      resolvedOptions.spatialSplitManifestPath,
+      resolvedOptions.pointerPath
+    ].filter(Boolean).map((path) => {
+      const absolute = resolve(path);
+      return process.platform === "win32" ? absolute.toLowerCase() : absolute;
+    });
+    if (conflictingPaths.includes(normalizedRankingPath)) {
+      throw new PredictionBuildError(
+        "RANKING_REFERENCE_PATH_CONFLICT",
+        "参考范围报告不得与快照、split、模型、构建报告或发布指针共用路径。"
+      );
+    }
+    resolvedOptions.rankingReferenceReportPath = rankingReportPath;
+  }
   if (resolvedOptions.writeSpatialOofCachePath !== undefined) {
     const normalizePath = (path) => {
       const normalized = resolve(path);
@@ -5560,6 +5760,25 @@ async function buildPredictionArtifact(options = {}) {
     throw new PredictionBuildError(
       "SPATIAL_OOF_CACHE_SPLIT_INVALID",
       "空间 OOF 缓存要求通过校验的冻结 development 五折 split manifest。"
+    );
+  }
+  if (resolvedOptions.rankingReferenceReportPath !== undefined) {
+    if (
+      resolvedOptions.verifiedSpatialSplit?.panelName !== "development" ||
+      Number(resolvedOptions.verifiedSpatialSplit?.panel?.folds?.length) !== 5
+    ) {
+      throw new PredictionBuildError(
+        "RANKING_REFERENCE_SPLIT_INVALID",
+        "参考范围构建要求通过校验的冻结 development 五折 split manifest。"
+      );
+    }
+    resolvedOptions.rankingReferenceBinding = loadRankingReferenceBinding(
+      resolvedOptions.rankingReferenceReportPath,
+      {
+        sourceSnapshotSha256: snapshot.sha256,
+        spatialSplitFileSha256: resolvedOptions.verifiedSpatialSplit.fileSha256,
+        spatialSplitManifestHash: resolvedOptions.verifiedSpatialSplit.manifestHash
+      }
     );
   }
   if (resolvedOptions.spatialParametersPath) {
@@ -5697,7 +5916,8 @@ async function buildPredictionArtifact(options = {}) {
       occurrenceEventCandidates: occurrenceEvents.candidateTaxa,
       supportedUnits: [...summaries.values()].filter((summary) => summary.supported).length
     };
-    manifestSet(artifact, "schema_version", SCHEMA_VERSION);
+    const artifactSchemaVersion = resolvedOptions.rankingReferenceBinding ? SCHEMA_VERSION : "2";
+    manifestSet(artifact, "schema_version", artifactSchemaVersion);
     manifestSet(artifact, "model_version", modelVersion);
     manifestSet(artifact, "implementation_sha256", resolvedOptions.implementationSha256);
     manifestSet(artifact, "built_at", new Date().toISOString());
@@ -5767,6 +5987,22 @@ async function buildPredictionArtifact(options = {}) {
       novelGridSpatialCalibrators.length > 0
     );
     manifestSet(artifact, "novel_grid_spatial_calibrators", novelGridSpatialCalibrators);
+    if (resolvedOptions.rankingReferenceBinding) {
+      insertRankingReferenceParameters(artifact, resolvedOptions.rankingReferenceBinding);
+      manifestSet(
+        artifact,
+        "ranking_reference",
+        rankingReferenceManifestSummary(resolvedOptions.rankingReferenceBinding)
+      );
+      manifestSet(
+        artifact,
+        "forward_complete_taxa_levels",
+        RANKING_REFERENCE_COMPLETE_FORWARD_LEVELS
+      );
+    } else {
+      manifestSet(artifact, "ranking_reference", null);
+      manifestSet(artifact, "forward_complete_taxa_levels", []);
+    }
     manifestSet(
       artifact,
       "novel_grid_spatial_parameter_source",
@@ -5857,7 +6093,11 @@ async function buildPredictionArtifact(options = {}) {
     artifact.exec("PRAGMA optimize");
     const validation = validateArtifact(artifact, {
       requireOnlineIndexes: materializationProfile === "full",
-      materializationProfile
+      materializationProfile,
+      rankingReferenceBinding: resolvedOptions.rankingReferenceBinding || null,
+      completeForwardLevels: resolvedOptions.rankingReferenceBinding
+        ? RANKING_REFERENCE_COMPLETE_FORWARD_LEVELS
+        : []
     });
     artifact.close();
     artifact = null;
@@ -5883,7 +6123,7 @@ async function buildPredictionArtifact(options = {}) {
         implementationSha256: resolvedOptions.implementationSha256,
         sealedEvaluationReceiptSha256:
           resolvedOptions.verifiedSealedEvaluationReceipt?.fileSha256 || null,
-        schemaVersion: SCHEMA_VERSION,
+        schemaVersion: artifactSchemaVersion,
         releaseEligible: releaseQuality.passed,
         probabilityDefinition: PROBABILITY_DEFINITION,
         inputFeatures: ["calendar_date", "location"],
@@ -5909,6 +6149,9 @@ async function buildPredictionArtifact(options = {}) {
       spatial,
       observer,
       materialization: { forward, reverse, validation },
+      rankingReference: resolvedOptions.rankingReferenceBinding
+        ? rankingReferenceManifestSummary(resolvedOptions.rankingReferenceBinding)
+        : null,
       hyperparameters: {
         recencyHalfLifeYears: resolvedOptions.recencyHalfLifeYears,
         localHistoryYears: resolvedOptions.localHistoryYears,
@@ -5982,6 +6225,9 @@ async function buildPredictionArtifact(options = {}) {
       forward,
       reverse,
       validation,
+      rankingReference: resolvedOptions.rankingReferenceBinding
+        ? rankingReferenceManifestSummary(resolvedOptions.rankingReferenceBinding)
+        : null,
       published
     };
   } catch (error) {
@@ -6026,8 +6272,13 @@ function parseCliArguments(argv) {
     else if (argument === "--sealed-evaluation-receipt") options.sealedEvaluationReceiptPath = value();
     else if (argument === "--confirm-open-sealed-spatial-panel") options.sealedSpatialPanelConfirmation = value();
     else if (argument === "--write-spatial-oof-cache") options.writeSpatialOofCachePath = value();
+    else if (argument === "--ranking-reference-report") options.rankingReferenceReportPath = value();
     else if (argument === "--forward-top-k") options.forwardTopK = Number(value());
     else if (argument === "--workers") options.workers = Number(value());
+    else if (argument === "--test-only") {
+      options.testOnly = true;
+      options.pointerPath = null;
+    }
     else if (argument === "--evaluation-only") {
       options.testOnly = true;
       options.materializationProfile = "evaluation-only";
@@ -6055,9 +6306,9 @@ function usage() {
     --output data/prediction-models/zhejiang-YYYYMMDD.sqlite \\
     --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json \\
     --spatial-panel development \\
-    --write-spatial-oof-cache data/prediction-models/zhejiang-development-spatial-oof-cache.sqlite \\
+    --ranking-reference-report data/prediction-models/development-cache/zhejiang-ranking-reference-v3-w4.json \\
     --workers 4 \\
-    --evaluation-only \\
+    --test-only \\
     --no-publish \\
     --confirm-coordinate-system bd09
 
@@ -6110,6 +6361,7 @@ function cliResultSummary(result) {
     occurrenceEventCandidates: result.occurrenceEvents?.candidateTaxa ?? null,
     forwardRows: result.forward?.insertedRows ?? null,
     reverseRows: result.reverse?.insertedRows ?? null,
+    rankingReference: result.rankingReference || null,
     validation: result.validation,
     published: result.published
   };
@@ -6164,6 +6416,7 @@ module.exports = {
   insertSpaceUnits,
   insertTaxa,
   insertTrainingRows,
+  materializeLocationPredictions,
   parseCliArguments,
   predictionImplementationSha256,
   publishModelPointer,

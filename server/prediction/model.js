@@ -16,13 +16,26 @@ const {
   probabilityLevel
 } = require("./math");
 const { adminCapForTaxon, capEffectiveEvidence } = require("./spatial-transfer");
+const {
+  RANKING_REFERENCE_CONTRACT,
+  RANKING_REFERENCE_CONTRACT_SHA256
+} = require("./ranking-reference");
+const {
+  RANKING_REFERENCE_BINDING_KIND,
+  RANKING_REFERENCE_OUTPUT_MEANING,
+  normalizeParameters,
+  parameterMap,
+  parameterSetSha256,
+  referenceRange
+} = require("./ranking-reference-runtime");
 class SensitivePredictionModel {
   constructor() {
     throw new Error("当前离线模型不启用独立敏感鸟制品；所有有效鸟种统一来自公共训练快照。");
   }
 }
 
-const SCHEMA_VERSION = "2";
+const SCHEMA_VERSION = "3";
+const SUPPORTED_SCHEMA_VERSIONS = Object.freeze(new Set(["2", SCHEMA_VERSION]));
 const REQUIRED_RUNTIME_TABLES = Object.freeze([
   "manifest",
   "taxa",
@@ -99,7 +112,7 @@ function parseManifestValue(value) {
 function toLimit(value, fallback = 20) {
   const parsed = Number.parseInt(value ?? fallback, 10);
   if (!Number.isFinite(parsed)) return fallback;
-  return Math.max(1, Math.min(100, parsed));
+  return Math.max(1, Math.min(600, parsed));
 }
 
 function normalizeDate(value) {
@@ -247,6 +260,9 @@ class PredictionModel {
     this.calibrationCache = new Map();
     this.spatialCalibrationCache = new Map();
     this.spatialCalibrationEnabled = false;
+    this.rankingReferenceParameters = new Map();
+    this.rankingReferenceEnabled = false;
+    this.schemaVersion = "";
     this.locationPredictionsHaveResolvedUnit = false;
     this.sensitiveModel = null;
     try {
@@ -299,8 +315,9 @@ class PredictionModel {
       for (const row of this.database.prepare("SELECT key, value FROM manifest").iterate()) {
         this.manifestMap.set(row.key, parseManifestValue(row.value));
       }
-      if (String(this.manifestMap.get("schema_version")) !== SCHEMA_VERSION) {
-        throw new Error(`不支持的模型 schema_version=${this.manifestMap.get("schema_version")}`);
+      this.schemaVersion = String(this.manifestMap.get("schema_version") || "");
+      if (!SUPPORTED_SCHEMA_VERSIONS.has(this.schemaVersion)) {
+        throw new Error(`不支持的模型 schema_version=${this.schemaVersion}`);
       }
       const qualityGate = this.manifestMap.get("quality_gate");
       if (!qualityGate || typeof qualityGate !== "object" || qualityGate.passed !== true) {
@@ -344,6 +361,41 @@ class PredictionModel {
           c: Number(fit.c)
         });
       }
+      if (this.schemaVersion === SCHEMA_VERSION) {
+        const binding = this.manifestMap.get("ranking_reference");
+        if (
+          !binding || binding.kind !== RANKING_REFERENCE_BINDING_KIND ||
+          binding.outputMeaning !== RANKING_REFERENCE_OUTPUT_MEANING ||
+          binding.contractId !== RANKING_REFERENCE_CONTRACT.id ||
+          binding.contractSha256 !== RANKING_REFERENCE_CONTRACT_SHA256 ||
+          binding.diagnosticOnly !== true || binding.freezeEligible !== false ||
+          binding.sealedPanelViewed !== false
+        ) {
+          throw new Error("schema v3 缺少有效的 ranking_reference manifest 绑定");
+        }
+        const rows = this.database.prepare(
+          `SELECT scope, half_width, row_count, total_weight,
+                  calibration_fold_count, fold_quantiles_json
+           FROM ranking_reference_parameters
+           ORDER BY scope`
+        ).all();
+        const parameters = normalizeParameters(rows.map((row) => ({
+          scope: row.scope,
+          halfWidth: row.half_width,
+          rowCount: row.row_count,
+          totalWeight: row.total_weight,
+          calibrationFoldCount: row.calibration_fold_count,
+          foldQuantiles: parseJson(row.fold_quantiles_json, [])
+        })));
+        if (
+          Number(binding.parameterCount) !== parameters.length ||
+          binding.parametersSha256 !== parameterSetSha256(parameters)
+        ) {
+          throw new Error("ranking_reference 参数数量或 SHA-256 不匹配");
+        }
+        this.rankingReferenceParameters = parameterMap(parameters);
+        this.rankingReferenceEnabled = true;
+      }
       this.locationPredictionsHaveResolvedUnit = this.database
         .prepare("PRAGMA table_info(location_predictions)")
         .all()
@@ -364,6 +416,9 @@ class PredictionModel {
     try {
       for (const table of REQUIRED_RUNTIME_TABLES) {
         this.database.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get();
+      }
+      if (this.schemaVersion === SCHEMA_VERSION) {
+        this.database.prepare("SELECT 1 FROM ranking_reference_parameters LIMIT 1").get();
       }
       if (this.sensitiveModel) this.sensitiveModel.meta();
       const meta = this.meta();
@@ -398,6 +453,7 @@ class PredictionModel {
       administrativeCoverageIndex: String(this.manifestMap.get("administrative_coverage_index") || ""),
       temporalBandwidthDays: Number(this.manifestMap.get("temporal_bandwidth_days") || 14),
       temporalEvaluationModel: String(this.manifestMap.get("temporal_evaluation_model") || ""),
+      rankingReference: this.manifestMap.get("ranking_reference") || null,
       temporalBaselineModel: String(this.manifestMap.get("temporal_baseline_model") || ""),
       coverage,
       sensitiveAvailable: Boolean(this.sensitiveModel),
@@ -667,19 +723,38 @@ class PredictionModel {
       ? this.#spatialCalibratorFor(taxon)
       : this.#calibratorFor(taxon);
     const probability = calibrateProbability(rawProbability, calibrator);
-    const lower = calibrateProbability(rawInterval.lower, calibrator);
-    const upper = calibrateProbability(rawInterval.upper, calibrator);
+    const posteriorLower = calibrateProbability(rawInterval.lower, calibrator);
+    const posteriorUpper = calibrateProbability(rawInterval.upper, calibrator);
+    const range = this.rankingReferenceEnabled
+      ? referenceRange(probability, taxon.taxonId, taxon.positiveCount, this.rankingReferenceParameters)
+      : {
+          lower: Math.min(posteriorLower, posteriorUpper),
+          upper: Math.max(posteriorLower, posteriorUpper),
+          confidence: confidenceLevel(
+            effective,
+            detectionSupport.observers,
+            posteriorLower,
+            posteriorUpper
+          ),
+          sourceScopes: []
+        };
     return {
       taxon,
       rawProbability,
       probability,
-      intervalLower: Math.min(lower, upper),
-      intervalUpper: Math.max(lower, upper),
+      intervalLower: range.lower,
+      intervalUpper: range.upper,
+      intervalMeaning: this.rankingReferenceEnabled
+        ? RANKING_REFERENCE_OUTPUT_MEANING
+        : "beta_posterior_probability_interval",
+      referenceSourceScopes: range.sourceScopes,
+      posteriorIntervalLower: Math.min(posteriorLower, posteriorUpper),
+      posteriorIntervalUpper: Math.max(posteriorLower, posteriorUpper),
       probabilityLevel: probabilityLevel(probability),
       effectiveChecklists: effective,
       observerCount: detectionSupport.observers,
       supportYears: detectionSupport.years,
-      confidence: confidenceLevel(effective, detectionSupport.observers, lower, upper),
+      confidence: range.confidence,
       unit: deepest
     };
   }
@@ -705,6 +780,9 @@ class PredictionModel {
         lower: Number(row.interval_lower),
         upper: Number(row.interval_upper)
       },
+      intervalMeaning: this.rankingReferenceEnabled
+        ? RANKING_REFERENCE_OUTPUT_MEANING
+        : "beta_posterior_probability_interval",
       effectiveChecklists: Number(row.effective_checklists),
       observerCount: Number(row.observer_count),
       supportYears: parseJson(row.support_years_json, []),
@@ -778,7 +856,7 @@ class PredictionModel {
          LIMIT ?`;
     const ordinaryRows = this.database
       .prepare(locationPredictionSql)
-      .all(location.resolvedUnit.id, week, 100)
+      .all(location.resolvedUnit.id, week, limit)
       .filter((row) => !this.#isSensitiveTaxon(row.taxon_id))
       .slice(0, limit);
 
@@ -1007,6 +1085,7 @@ module.exports = {
   PredictionError,
   PredictionModel,
   SCHEMA_VERSION,
+  SUPPORTED_SCHEMA_VERSIONS,
   prevalenceGroup,
   resolvePriorStrength
 };

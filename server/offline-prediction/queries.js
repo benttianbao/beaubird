@@ -23,7 +23,7 @@ function normalizeDate(value) {
 
 function normalizeLimit(value, fallback = 20) {
   const parsed = Number.parseInt(value ?? fallback, 10);
-  return Math.max(1, Math.min(100, Number.isFinite(parsed) ? parsed : fallback));
+  return Math.max(1, Math.min(600, Number.isFinite(parsed) ? parsed : fallback));
 }
 
 function parseJson(value, fallback) {
@@ -115,7 +115,7 @@ function getLocation(database, spaceUnitId) {
 function locationPredictions(database, input = {}) {
   const date = normalizeDate(input.date);
   const week = seasonWeek(date);
-  const limit = normalizeLimit(input.limit, 30);
+  const limit = normalizeLimit(input.limit, 600);
   const location = getLocation(database, input.spaceUnitId);
   const rows = database
     .prepare(

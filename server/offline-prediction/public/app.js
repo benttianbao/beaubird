@@ -218,7 +218,7 @@ function renderPredictions(body) {
     elements.resultContext.append(chip);
   }
 
-  elements.birdResults.replaceChildren();
+  const resultFragment = document.createDocumentFragment();
   for (const bird of body.results) {
     const item = document.createElement("li");
     item.className = "bird-row";
@@ -248,8 +248,9 @@ function renderPredictions(body) {
       : `参考范围 ${formatPercent(bird.interval.lower)}–${formatPercent(bird.interval.upper)}`;
     probability.append(number, interval);
     item.append(rank, name, probability);
-    elements.birdResults.append(item);
+    resultFragment.append(item);
   }
+  elements.birdResults.replaceChildren(resultFragment);
 }
 
 async function runPrediction() {
@@ -266,7 +267,7 @@ async function runPrediction() {
       model: elements.modelSelect.value,
       spaceUnitId: state.selectedLocation.id,
       date: elements.date.value,
-      limit: "30"
+      limit: "600"
     });
     const body = await fetchJson(`/api/predictions?${params}`);
     renderPredictions(body);

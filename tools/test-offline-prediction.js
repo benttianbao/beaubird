@@ -164,4 +164,7 @@ test("静态页面独立提供，并阻止读取目录外文件", async () => {
   const html = readFileSync(resolve(__dirname, "..", "server", "offline-prediction", "public", "index.html"), "utf8");
   assert.match(html, /id="model-select"/);
   assert.match(html, /只在本机运行/);
+  const script = readFileSync(resolve(__dirname, "..", "server", "offline-prediction", "public", "app.js"), "utf8");
+  assert.match(script, /limit:\s*"600"/);
+  assert.match(script, /createDocumentFragment\(\)/);
 });

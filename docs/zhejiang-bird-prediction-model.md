@@ -327,7 +327,7 @@ node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js `
 测试：
 
 ```powershell
-node --test tools\test-location-normalization.js tools\test-vagrant-events.js tools\test-zhejiang-prediction-model.js tools\test-spatial-oof-cache.js tools\test-spatial-candidate-scorer.js tools\test-ranking-reference.js
+node --test tools\test-location-normalization.js tools\test-vagrant-events.js tools\test-zhejiang-prediction-model.js tools\test-spatial-oof-cache.js tools\test-spatial-candidate-scorer.js tools\test-ranking-reference.js tools\test-ranking-reference-runtime.js tools\test-ranking-reference-artifact.js tools\test-offline-prediction.js
 ```
 
 构建完成后应同时生成：
@@ -340,6 +340,27 @@ node --test tools\test-location-normalization.js tools\test-vagrant-events.js to
 公共模型会在 `VACUUM` 前删除报告 ID、观察者哈希、训练明细和精确事件网格表；运行制品只保留聚合统计、校准参数与正反向索引。
 
 上面的命令是 development 调参命令，因此会跳过线上索引物化。正式发布构建不得带 `--evaluation-only`，并继续使用生产默认 `forwardTopK=100`、`reverseTopK=300`；构建器会额外验证所有受支持空间单元均有完整 52 周正向桶、全部公共鸟种均进入反向热点索引。
+
+## Development 参考范围构建
+
+“可能出现的鸟”是完整清单中的观察频率排序，不是生态学绝对存在概率。development ranking-reference 报告只用于生成交叉拟合参考范围，不能改变正式 Brier、ECE、Recall@20 或 NDCG 门槛，也不能用于解封 sealed。构建器采用 fail-closed 绑定：报告、scorer 实现、快照 SHA、split 文件 SHA、split manifest hash、参考范围契约和规范参数 SHA 任一不一致即拒绝构建。
+
+绑定参考范围的制品使用 schema v3，并且当前强制为 `testOnly + development + full + no-publish`。参考范围参数保留每个 outer fold 的加权分位数，并采用鸟种、常见度组和全局范围中的最大半宽；低支持鸟种没有足够的鸟种级参数时仍使用组或全局回退，不按概率阈值删除。
+
+为兼顾离线完整展示和制品规模，正向物化采用固定分层策略：
+
+- `province`、`city`、`district`、`point`：每个受支持空间单元、每周物化全部公共鸟种；
+- `grid_r6`、`grid_r7`：仍按冻结的 `forwardTopK=100` 物化；
+- 反向候选仍对全部公共鸟种评分，不复用正向 Top-K 截断；
+- 低支持或漂鸟候选可以保留排序分和参考范围，但不伪装成已达到正式发布要求的校准概率。
+
+Development 完整构建命令：
+
+```powershell
+node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js --source data\prediction-snapshots\zhejiang-v1-20260715.sqlite --source-is-snapshot --snapshot data\prediction-snapshots\zhejiang-v1-20260715.sqlite --output data\prediction-models\zhejiang-v1-20260715-development-ranking-reference-v1.sqlite --model-version zhejiang-v1-20260715-development-ranking-reference-v1 --spatial-split-manifest docs\zhejiang-v1-20260715-spatial-splits.json --spatial-panel development --ranking-reference-report data\prediction-models\development-cache\zhejiang-v1-20260715-ranking-reference-v4-w4.json --workers 4 --test-only --no-publish --confirm-coordinate-system bd09
+```
+
+该命令不会修改默认离线模型，也绝对不会打开 sealed。由于参考范围运行时会改变 scorer 实现哈希，必须先基于同一严格 development cache 重新生成 workers=4/1 报告并比较确定性投影，旧 scorer 哈希的报告不能复用。
 
 ## 天气与 challenger
 
