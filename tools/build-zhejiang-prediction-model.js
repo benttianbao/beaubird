@@ -5374,6 +5374,56 @@ function mergedHotspotBoundary(rows) {
   ];
 }
 
+function rankedHotspotComponent(componentRows) {
+  const representative = [...componentRows].sort(
+    (left, right) => Number(right.rank_score) - Number(left.rank_score) ||
+      left.space_unit_id.localeCompare(right.space_unit_id) ||
+      Number(left.season_start_day) - Number(right.season_start_day) ||
+      Number(left.season_end_day) - Number(right.season_end_day)
+  )[0];
+  return { componentRows, representative, window: mergedSeasonWindow(componentRows) };
+}
+
+function hotspotComponentIdentity(component) {
+  return [
+    component.representative.space_unit_id,
+    component.representative.temporal_granularity,
+    component.window.startDay,
+    component.window.endDay
+  ].join("\0");
+}
+
+function collapseHotspotIdentityCollisions(components) {
+  let current = components.map((component) => rankedHotspotComponent(component.componentRows));
+  let mergedCollisions = 0;
+  while (true) {
+    const byIdentity = new Map();
+    let collisionsThisPass = 0;
+    for (const component of current) {
+      const identity = hotspotComponentIdentity(component);
+      const existing = byIdentity.get(identity);
+      if (!existing) {
+        byIdentity.set(identity, component);
+        continue;
+      }
+      existing.componentRows.push(...component.componentRows);
+      collisionsThisPass += 1;
+      mergedCollisions += 1;
+    }
+    current = [...byIdentity.values()].map((component) =>
+      rankedHotspotComponent(component.componentRows)
+    );
+    if (!collisionsThisPass) break;
+  }
+  current.sort(
+    (left, right) => Number(right.representative.rank_score) - Number(left.representative.rank_score) ||
+      left.representative.space_unit_id.localeCompare(right.representative.space_unit_id) ||
+      left.window.startDay - right.window.startDay ||
+      left.window.endDay - right.window.endDay
+  );
+  return { components: current, mergedCollisions };
+}
+
 function buildReverseHotspots(artifact, options) {
   const insertFinal = artifact.prepare(
     `INSERT INTO reverse_hotspots
@@ -5385,6 +5435,7 @@ function buildReverseHotspots(artifact, options) {
   );
   let inserted = 0;
   let mergedComponents = 0;
+  let deduplicatedComponents = 0;
   const flushTaxon = (rows) => {
     if (!rows.length) return;
     const parents = rows.map((_, index) => index);
@@ -5405,6 +5456,15 @@ function buildReverseHotspots(artifact, options) {
       if (!byUnit.has(row.space_unit_id)) byUnit.set(row.space_unit_id, []);
       byUnit.get(row.space_unit_id).push(index);
     });
+    for (const indices of byUnit.values()) {
+      for (let leftIndex = 0; leftIndex < indices.length; leftIndex += 1) {
+        for (let rightIndex = leftIndex + 1; rightIndex < indices.length; rightIndex += 1) {
+          const left = indices[leftIndex];
+          const right = indices[rightIndex];
+          if (windowsOverlapOrTouch(rows[left], rows[right])) union(left, right);
+        }
+      }
+    }
     rows.forEach((row, index) => {
       if (!["grid_r6", "grid_r7"].includes(row.level)) return;
       for (const neighborId of neighboringGridCellIds(row.space_unit_id)) {
@@ -5420,15 +5480,11 @@ function buildReverseHotspots(artifact, options) {
       if (!components.has(root)) components.set(root, []);
       components.get(root).push(row);
     });
-    const ranked = [...components.values()]
-      .map((componentRows) => {
-        const representative = [...componentRows].sort(
-          (left, right) => Number(right.rank_score) - Number(left.rank_score) ||
-            left.space_unit_id.localeCompare(right.space_unit_id)
-        )[0];
-        return { componentRows, representative, window: mergedSeasonWindow(componentRows) };
-      })
-      .sort((left, right) => Number(right.representative.rank_score) - Number(left.representative.rank_score));
+    const collapsed = collapseHotspotIdentityCollisions(
+      [...components.values()].map((componentRows) => ({ componentRows }))
+    );
+    deduplicatedComponents += collapsed.mergedCollisions;
+    const ranked = collapsed.components;
     for (const component of ranked.slice(0, options.reverseTopK)) {
       const row = component.representative;
       const memberIds = [...new Set(component.componentRows.map((item) => item.space_unit_id))].sort();
@@ -5475,7 +5531,7 @@ function buildReverseHotspots(artifact, options) {
   }
   flushTaxon(rows);
   artifact.exec("DROP TABLE reverse_candidates");
-  return { insertedRows: inserted, mergedComponents };
+  return { insertedRows: inserted, mergedComponents, deduplicatedComponents };
 }
 
 function dropTrainingTables(artifact) {
@@ -6416,6 +6472,7 @@ module.exports = {
   insertSpaceUnits,
   insertTaxa,
   insertTrainingRows,
+  buildReverseHotspots,
   materializeLocationPredictions,
   parseCliArguments,
   predictionImplementationSha256,

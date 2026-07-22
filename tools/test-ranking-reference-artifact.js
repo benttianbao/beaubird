@@ -18,6 +18,7 @@ const {
 } = require("../server/prediction/ranking-reference-runtime");
 const { PredictionError, PredictionModel, SCHEMA_VERSION } = require("../server/prediction/model");
 const {
+  buildReverseHotspots,
   createArtifactSchema,
   materializeLocationPredictions
 } = require("./build-zhejiang-prediction-model");
@@ -166,6 +167,36 @@ test("参考范围构建在完整层级保留全部公共鸟种而不受 forward
       "SELECT COUNT(DISTINCT taxon_id) AS count FROM location_predictions WHERE season_bucket = 1"
     ).get().count,
     2
+  );
+  database.close();
+});
+
+test("反向热点合并同一空间单元的重复时间组件且不触发唯一键冲突", () => {
+  const path = fixturePath("reverse-hotspot-collision.sqlite");
+  createFixture(path);
+  const database = new DatabaseSync(path);
+  const insert = database.prepare(
+    `INSERT INTO reverse_candidates
+       (taxon_id, space_unit_id, temporal_granularity, season_start_day, season_end_day,
+        peak_day, rank_score, probability, interval_lower, interval_upper,
+        probability_level, effective_checklists, observer_count, support_years_json, confidence)
+     VALUES ('bird-a', 'province:zhejiang', 'week', 1, 14, 7, 0.4, 0.5, 0.4, 0.6,
+             'medium', 10, 5, '[2025,2026]', 'medium')`
+  );
+  insert.run();
+  insert.run();
+  const result = buildReverseHotspots(database, { reverseTopK: 300 });
+  assert.equal(result.insertedRows, 1);
+  assert.equal(
+    database.prepare("SELECT COUNT(*) AS count FROM reverse_hotspots").get().count,
+    1
+  );
+  assert.deepEqual(
+    JSON.parse(
+      database.prepare("SELECT member_space_unit_ids_json FROM reverse_hotspots").get()
+        .member_space_unit_ids_json
+    ),
+    ["province:zhejiang"]
   );
   database.close();
 });
