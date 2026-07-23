@@ -20,13 +20,17 @@ const { DatabaseSync } = require("node:sqlite");
 const { canonicalJson } = require("./spatial-splits");
 const { LOCATION_NORMALIZATION_VERSION } = require("./location-normalization");
 const {
+  HABITAT_CLUSTERS,
+  HABITAT_FEATURE_CONTRACT
+} = require("./habitat-features");
+const {
   FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1,
   buildAdminExposureCapCandidates
 } = require("./spatial-transfer");
 
-const SPATIAL_OOF_CACHE_SCHEMA_VERSION = 3;
+const SPATIAL_OOF_CACHE_SCHEMA_VERSION = 4;
 const SPATIAL_OOF_CACHE_KIND =
-  "zhejiang_development_strict_nested_spatial_oof_sufficient_statistics_location_normalized_v3";
+  "zhejiang_development_strict_nested_spatial_oof_sufficient_statistics_habitat_v4";
 const SPATIAL_OOF_CACHE_PANEL = "development";
 const DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY =
   "distinct_known_observer_group_key_outside_all_sealed_r6_buffers";
@@ -39,6 +43,7 @@ const SPATIAL_OOF_CACHE_DEEPEST_LEVELS = Object.freeze([
   "province",
   "city",
   "district",
+  "habitat",
   "grid_r6",
   "grid_r7",
   "point"
@@ -46,6 +51,7 @@ const SPATIAL_OOF_CACHE_DEEPEST_LEVELS = Object.freeze([
 const SPATIAL_OOF_CACHE_GENERATION_FILES = Object.freeze([
   "tools/build-zhejiang-prediction-model.js",
   "server/prediction/geo.js",
+  "server/prediction/habitat-features.js",
   "server/prediction/location-normalization.js",
   "server/prediction/math.js",
   "server/prediction/model.js",
@@ -84,6 +90,7 @@ const EVIDENCE_OPTIONS_KEYS = Object.freeze([
   "captureAdminEvidence",
   "coordinateQcEvaluationScope",
   "dataCutoffDate",
+  "habitatFeatures",
   "holdoutEvaluation",
   "includeFlaggedCleanReports",
   "levels",
@@ -140,11 +147,28 @@ const UNIT_LEVEL_KEYS = Object.freeze([
   "district",
   "grid_r6",
   "grid_r7",
+  "habitat",
   "point",
   "province"
 ]);
 const UNIT_THRESHOLD_KEYS = Object.freeze(["checklists", "observers"]);
-const PRIOR_LEVEL_KEYS = Object.freeze(["city", "district", "grid_r6", "grid_r7", "point"]);
+const PRIOR_LEVEL_KEYS = Object.freeze(["city", "district", "grid_r6", "grid_r7", "habitat", "point"]);
+const HABITAT_FEATURE_METADATA_KEYS = Object.freeze([
+  "cellCount",
+  "clusterCounts",
+  "contractId",
+  "featureSetSha256",
+  "fileSha256",
+  "generationImplementationSha256",
+  "meanCoverage",
+  "minimumCoverage",
+  "snapshotSha256",
+  "sourceDataset",
+  "sourceDatasetVersion",
+  "sourceDatasetYear",
+  "sourceLicense",
+  "tileManifestSha256"
+]);
 const PREVALENCE_GROUP_KEYS = Object.freeze([
   "group_30_79",
   "group_80_199",
@@ -553,6 +577,92 @@ function normalizeQualityThresholds(value) {
   return normalized;
 }
 
+function normalizeHabitatFeatures(value) {
+  assertExactKeys(
+    value,
+    HABITAT_FEATURE_METADATA_KEYS,
+    "SPATIAL_OOF_CACHE_PRIVACY_VIOLATION",
+    "evidenceOptions.habitatFeatures"
+  );
+  if (
+    value.contractId !== HABITAT_FEATURE_CONTRACT.id ||
+    value.sourceDataset !== HABITAT_FEATURE_CONTRACT.sourceDataset ||
+    Number(value.sourceDatasetYear) !== HABITAT_FEATURE_CONTRACT.sourceDatasetYear ||
+    value.sourceDatasetVersion !== HABITAT_FEATURE_CONTRACT.sourceDatasetVersion ||
+    value.sourceLicense !== HABITAT_FEATURE_CONTRACT.sourceLicense
+  ) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_VALUE_INVALID",
+      "evidenceOptions.habitatFeatures 必须匹配冻结 WorldCover 生境契约。"
+    );
+  }
+  assertExactKeys(
+    value.clusterCounts,
+    [...HABITAT_CLUSTERS].sort(),
+    "SPATIAL_OOF_CACHE_PRIVACY_VIOLATION",
+    "evidenceOptions.habitatFeatures.clusterCounts"
+  );
+  const cellCount = finiteInteger(
+    value.cellCount,
+    "evidenceOptions.habitatFeatures.cellCount",
+    { minimum: 1 }
+  );
+  const clusterCounts = Object.fromEntries([...HABITAT_CLUSTERS].sort().map((cluster) => [
+    cluster,
+    finiteInteger(
+      value.clusterCounts[cluster],
+      `evidenceOptions.habitatFeatures.clusterCounts.${cluster}`,
+      { minimum: 0 }
+    )
+  ]));
+  const clusterCellCount = Object.values(clusterCounts).reduce((sum, count) => sum + count, 0);
+  if (clusterCellCount !== cellCount) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_VALUE_INVALID",
+      "evidenceOptions.habitatFeatures.clusterCounts 必须与 cellCount 守恒。"
+    );
+  }
+  return {
+    cellCount,
+    clusterCounts,
+    contractId: HABITAT_FEATURE_CONTRACT.id,
+    featureSetSha256: normalizeSha256(
+      value.featureSetSha256,
+      "evidenceOptions.habitatFeatures.featureSetSha256"
+    ),
+    fileSha256: normalizeSha256(
+      value.fileSha256,
+      "evidenceOptions.habitatFeatures.fileSha256"
+    ),
+    generationImplementationSha256: normalizeSha256(
+      value.generationImplementationSha256,
+      "evidenceOptions.habitatFeatures.generationImplementationSha256"
+    ),
+    meanCoverage: finiteNumber(
+      value.meanCoverage,
+      "evidenceOptions.habitatFeatures.meanCoverage",
+      { minimum: HABITAT_FEATURE_CONTRACT.minimumCellCoverage, maximum: 1 }
+    ),
+    minimumCoverage: finiteNumber(
+      value.minimumCoverage,
+      "evidenceOptions.habitatFeatures.minimumCoverage",
+      { minimum: HABITAT_FEATURE_CONTRACT.minimumCellCoverage, maximum: 1 }
+    ),
+    snapshotSha256: normalizeSha256(
+      value.snapshotSha256,
+      "evidenceOptions.habitatFeatures.snapshotSha256"
+    ),
+    sourceDataset: HABITAT_FEATURE_CONTRACT.sourceDataset,
+    sourceDatasetVersion: HABITAT_FEATURE_CONTRACT.sourceDatasetVersion,
+    sourceDatasetYear: HABITAT_FEATURE_CONTRACT.sourceDatasetYear,
+    sourceLicense: HABITAT_FEATURE_CONTRACT.sourceLicense,
+    tileManifestSha256: normalizeSha256(
+      value.tileManifestSha256,
+      "evidenceOptions.habitatFeatures.tileManifestSha256"
+    )
+  };
+}
+
 function normalizeEvidenceOptions(value) {
   assertExactKeys(value, EVIDENCE_OPTIONS_KEYS, "SPATIAL_OOF_CACHE_PRIVACY_VIOLATION", "evidenceOptions");
   for (const key of ["applyOnlyWithoutSupportedLocalUnit", "captureAdminEvidence", "includeFlaggedCleanReports"]) {
@@ -629,6 +739,7 @@ function normalizeEvidenceOptions(value) {
     captureAdminEvidence: true,
     coordinateQcEvaluationScope: EVIDENCE_POLICY_VALUES.coordinateQcEvaluationScope,
     dataCutoffDate: String(value.dataCutoffDate),
+    habitatFeatures: normalizeHabitatFeatures(value.habitatFeatures),
     holdoutEvaluation,
     includeFlaggedCleanReports: value.includeFlaggedCleanReports,
     levels: ["province", "city", "district"],
@@ -1011,7 +1122,7 @@ function createCacheSchema(database) {
       city_exposure REAL NOT NULL CHECK(city_exposure >= 0),
       district_exposure REAL NOT NULL CHECK(district_exposure >= 0),
       has_supported_local_unit INTEGER NOT NULL CHECK(has_supported_local_unit IN (0, 1)),
-      deepest_level TEXT NOT NULL CHECK(deepest_level IN ('province','city','district','grid_r6','grid_r7','point')),
+      deepest_level TEXT NOT NULL CHECK(deepest_level IN ('province','city','district','habitat','grid_r6','grid_r7','point')),
       PRIMARY KEY (fold_id, context_index),
       FOREIGN KEY (fold_id) REFERENCES folds(fold_id)
     ) WITHOUT ROWID;
@@ -1024,7 +1135,7 @@ function createCacheSchema(database) {
       city_exposure REAL NOT NULL CHECK(city_exposure >= 0),
       district_exposure REAL NOT NULL CHECK(district_exposure >= 0),
       has_supported_local_unit INTEGER NOT NULL CHECK(has_supported_local_unit IN (0, 1)),
-      deepest_level TEXT NOT NULL CHECK(deepest_level IN ('province','city','district','grid_r6','grid_r7','point')),
+      deepest_level TEXT NOT NULL CHECK(deepest_level IN ('province','city','district','habitat','grid_r6','grid_r7','point')),
       PRIMARY KEY (outer_fold_id, inner_fold_id, context_index),
       FOREIGN KEY (outer_fold_id, inner_fold_id) REFERENCES inner_folds(outer_fold_id, inner_fold_id)
     ) WITHOUT ROWID;
@@ -1762,11 +1873,21 @@ function validateMetadataShape(metadata) {
     normalizeQualityThresholds(metadata.qualityThresholds),
     "metadata.qualityThresholds"
   );
+  const normalizedEvidenceOptions = normalizeEvidenceOptions(metadata.evidenceOptions);
   assertCanonicalNormalization(
     metadata.evidenceOptions,
-    normalizeEvidenceOptions(metadata.evidenceOptions),
+    normalizedEvidenceOptions,
     "metadata.evidenceOptions"
   );
+  if (
+    normalizedEvidenceOptions.habitatFeatures.snapshotSha256 !==
+    String(metadata.sourceSnapshotSha256).toLowerCase()
+  ) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_METADATA_INVALID",
+      "生境特征绑定的快照与 OOF 缓存源快照不一致。"
+    );
+  }
   assertCanonicalNormalization(
     metadata.privacyContract,
     normalizePrivacyContract(metadata.privacyContract),

@@ -13,6 +13,8 @@ const {
 const {
   DEFAULT_CALIBRATOR_FAMILIES,
   SPATIAL_CALIBRATION_GUARD,
+  SPATIAL_ERROR_AUDIT_CONTRACT,
+  buildSpatialErrorAudit,
   evaluateCandidateRows,
   probabilityFromAdminEvidence,
   baselineProbabilityFromAdminEvidence,
@@ -332,7 +334,7 @@ test("逐鸟 25 组 cap 使用四折选择一折验证并能区分相反空间�
   const cache = makeCache();
   const before = structuredClone(cache);
   const report = await scoreSpatialOofCandidates(cache, { workers: 2, generatedAt: "fixed" });
-  assert.equal(report.schemaVersion, 5);
+  assert.equal(report.schemaVersion, 6);
   assert.equal(report.diagnosticOnly, true);
   assert.equal(report.freezeEligible, false);
   assert.equal(report.sealedPanelViewed, false);
@@ -518,6 +520,72 @@ test("正式空间门仍拒绝 maximumSpeciesEce 超过 0.05", () => {
     }
   });
   assert.deepEqual(failures, ["spatial.species_calibration.maximumEce"]);
+});
+
+test("逐鸟空间误差审计识别跨折方向冲突且不暴露地点身份", () => {
+  const makeAuditEntry = ({ foldId, taxonId, probability, positives, total = 100 }) => ({
+    foldId,
+    row: {
+      contextIndex: Number(foldId),
+      taxonId,
+      positiveCount: 300,
+      actualPositive: positives,
+      total,
+      rawProbability: probability,
+      baselineProbability: 0.1,
+      deepestLevel: "district"
+    },
+    probability
+  });
+  const entries = [
+    makeAuditEntry({ foldId: "1", taxonId: "4866", probability: 0.6, positives: 60, total: 200 }),
+    makeAuditEntry({ foldId: "2", taxonId: "4866", probability: 0.3, positives: 50 }),
+    makeAuditEntry({ foldId: "1", taxonId: "steady-over", probability: 0.4, positives: 20 }),
+    makeAuditEntry({ foldId: "2", taxonId: "steady-over", probability: 0.5, positives: 30 }),
+    makeAuditEntry({ foldId: "1", taxonId: "within-gate", probability: 0.2, positives: 19 }),
+    makeAuditEntry({ foldId: "2", taxonId: "within-gate", probability: 0.3, positives: 29 })
+  ];
+  const metrics = evaluateCandidateRows(entries);
+  const audit = buildSpatialErrorAudit(entries);
+  assert.deepEqual(audit.contract, SPATIAL_ERROR_AUDIT_CONTRACT);
+  assert.equal(audit.maximumSpeciesEce, 0.05);
+  assert.equal(audit.auditedScopeCount, 3);
+  assert.equal(audit.overThresholdCount, 2);
+  assert.equal(audit.underOrAtThresholdCount, 1);
+  assert.equal(audit.worstTaxonId, metrics.calibrationEce.species.worstScopeId);
+  assert.equal(audit.maximumObservedEce, metrics.calibrationEce.species.maximumEce);
+  assert.deepEqual(audit.classificationCounts, {
+    consistent_overprediction: 1,
+    mixed_by_spatial_fold: 1
+  });
+  const mixed = audit.species.find((species) => species.taxonId === "4866");
+  assert.equal(mixed.classification, "mixed_by_spatial_fold");
+  assert.equal(mixed.recommendedNextStep, "add_stable_spatial_habitat_features");
+  assert.deepEqual(mixed.folds.map((fold) => fold.direction), ["overprediction", "underprediction"]);
+  assert.equal(mixed.bins.length, 2);
+  const steady = audit.species.find((species) => species.taxonId === "steady-over");
+  assert.equal(steady.classification, "consistent_overprediction");
+  assert.equal(steady.recommendedNextStep, "regularized_monotone_calibration");
+  assert.deepEqual(buildSpatialErrorAudit([...entries].reverse()), audit);
+  const auditKeys = [];
+  const collectKeys = (value) => {
+    if (Array.isArray(value)) {
+      for (const item of value) collectKeys(item);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    for (const [key, item] of Object.entries(value)) {
+      auditKeys.push(key);
+      collectKeys(item);
+    }
+  };
+  collectKeys(audit);
+  assert.equal(
+    auditKeys.some((key) =>
+      /report_id|observer|longitude|latitude|location|h3|district_id|city_id/i.test(key)
+    ),
+    false
+  );
 });
 
 test("Recall@20 从逐 context 新概率重新排序而不是复用摘要", () => {

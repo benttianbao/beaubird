@@ -17,6 +17,12 @@ const {
 const { betaInterval, fitBetaCalibration, regularizedIncompleteBeta } = require("../server/prediction/math");
 const { PredictionError, PredictionModel } = require("../server/prediction/model");
 const {
+  HABITAT_FEATURE_CONTRACT,
+  HABITAT_FEATURE_KIND,
+  HABITAT_FEATURE_SCHEMA_VERSION,
+  validateHabitatFeatureSet
+} = require("../server/prediction/habitat-features");
+const {
   DEFAULT_OPTIONS,
   PredictionBuildError,
   aggregateTrainingStatistics,
@@ -359,7 +365,7 @@ test("runtime applies frozen transfer caps and spatial calibration only to novel
     quality_gate: { passed: true, internalBuild: true },
     test_only: false,
     temporal_bandwidth_days: 14,
-    prior_strengths: { city: 24, district: 18, grid_r6: 14, grid_r7: 10, point: 8 },
+    prior_strengths: { city: 24, district: 18, habitat: 14, grid_r6: 14, grid_r7: 10, point: 8 },
     novel_grid_admin_exposure_caps_by_prevalence: {
       species_200_plus: { city: 100, district: 10 }
     },
@@ -381,7 +387,8 @@ test("runtime applies frozen transfer caps and spatial calibration only to novel
   insertUnit.run("province:zhejiang", "province", "zhejiang", "浙江省", null, 1000, 30);
   insertUnit.run("city:test", "city", "test", "测试市", "province:zhejiang", 1000, 30);
   insertUnit.run("district:test", "district", "test", "测试区", "city:test", 1000, 30);
-  insertUnit.run("grid_r6:test", "grid_r6", "test", "测试网格", "district:test", 50, 12);
+  insertUnit.run("habitat:test", "habitat", "forest", "森林", "district:test", 30, 10);
+  insertUnit.run("grid_r6:test", "grid_r6", "test", "测试网格", "habitat:test", 50, 12);
   const insertExposure = database.prepare(`
     INSERT INTO checklist_exposure
       (space_unit_id, season_week, effective_checklists, raw_checklists, observer_count, support_years_json)
@@ -396,6 +403,7 @@ test("runtime applies frozen transfer caps and spatial calibration only to novel
     ["province:zhejiang", 1000, 100],
     ["city:test", 1000, 800],
     ["district:test", 1000, 800],
+    ["habitat:test", 30, 15],
     ["grid_r6:test", 50, 20]
   ]) {
     insertExposure.run(unitId, exposure, exposure);
@@ -403,9 +411,12 @@ test("runtime applies frozen transfer caps and spatial calibration only to novel
   }
   const model = new PredictionModel({ database, builderEvaluation: true });
   const fallback = model.scoreUnitTaxonAtWeek("district:test", "common-a", 26);
+  const habitat = model.scoreUnitTaxonAtWeek("habitat:test", "common-a", 26);
   const local = model.scoreUnitTaxonAtWeek("grid_r6:test", "common-a", 26);
   assert.equal(fallback.effectiveChecklists, 10);
   assert.ok(fallback.probability < fallback.rawProbability);
+  assert.equal(habitat.effectiveChecklists, 30);
+  assert.equal(habitat.probability, habitat.rawProbability);
   assert.equal(local.effectiveChecklists, 50);
   assert.equal(local.probability, local.rawProbability);
   model.close();
@@ -809,6 +820,128 @@ test("重复 point_id 在训练前合并并守恒报告、观察、观察者、�
   source.close();
 });
 
+test("district×habitat 回退层完整覆盖报告并保持报告与鸟种证据守恒", () => {
+  const directory = testDirectory("habitat-fallback");
+  const sourcePath = join(directory, "source.sqlite");
+  createSourceDatabase(sourcePath, {
+    reportCount: 24,
+    yearSpan: 3,
+    observerModulo: 24,
+    multiGrid: true
+  });
+  const source = new DatabaseSync(sourcePath);
+  const quality = inspectSnapshotQuality(source, {
+    minimumNormalReports: 1,
+    minimumCompleteCoverage: 1,
+    minimumCoordinateCoverage: 1,
+    minimumDateCoverage: 1,
+    coordinateSystemConfirmed: true
+  });
+  const h3Indexes = [...new Set(source.prepare(
+    "SELECT longitude, latitude FROM reports ORDER BY report_id"
+  ).all().map((row) => {
+    const coordinate = bd09ToWgs84(row.longitude, row.latitude);
+    return gridCell(coordinate.longitude, coordinate.latitude, "grid_r6").h3Index;
+  }))].sort();
+  const emptyFractions = () => ({
+    "10": 0,
+    "20": 0,
+    "30": 0,
+    "40": 0,
+    "50": 0,
+    "60": 0,
+    "70": 0,
+    "80": 0,
+    "90": 0,
+    "95": 0,
+    "100": 0
+  });
+  const habitatFeatureSet = validateHabitatFeatureSet({
+    schemaVersion: HABITAT_FEATURE_SCHEMA_VERSION,
+    kind: HABITAT_FEATURE_KIND,
+    contract: HABITAT_FEATURE_CONTRACT,
+    snapshotSha256: "a".repeat(64),
+    tileManifestSha256: "b".repeat(64),
+    generationImplementationSha256: "c".repeat(64),
+    cells: h3Indexes.map((h3Index, index) => {
+      const classFractions = emptyFractions();
+      if (index % 2 === 0) classFractions["10"] = 1;
+      else classFractions["80"] = 1;
+      return { h3Index, coverage: 1, classFractions };
+    })
+  });
+  const artifact = new DatabaseSync(":memory:");
+  createArtifactSchema(artifact);
+  const options = {
+    ...DEFAULT_OPTIONS,
+    dataCutoffDate: quality.report.dataCutoffDate,
+    habitatFeatureSet,
+    unitThresholds: {
+      ...DEFAULT_OPTIONS.unitThresholds,
+      habitat: { checklists: 1, observers: 1 }
+    }
+  };
+  const training = insertTrainingRows(
+    source,
+    artifact,
+    quality.pointStats,
+    quality.locationNormalization,
+    quality.report,
+    options
+  );
+  const sourceReportCount = Number(source.prepare("SELECT COUNT(*) count FROM reports").get().count);
+  const sourceObservationCount = Number(source.prepare("SELECT COUNT(*) count FROM observations").get().count);
+  assert.equal(training.stats.insertedReports, sourceReportCount);
+  assert.equal(training.stats.duplicateReports, 0);
+  assert.equal(training.stats.habitat.assignedReports, sourceReportCount);
+  assert.equal(training.stats.habitat.coverage, 1);
+  assert.equal(training.stats.habitat.distinctGridR6Count, h3Indexes.length);
+  assert.equal(
+    artifact.prepare("SELECT COUNT(*) count FROM training_reports WHERE habitat_unit IS NULL").get().count,
+    0
+  );
+  assert.equal(
+    artifact.prepare("SELECT COUNT(*) count FROM training_detections").get().count,
+    sourceObservationCount
+  );
+
+  const occurrence = analyzeOccurrenceEvents(artifact, options);
+  assert.equal(occurrence.analyzedDetections, sourceObservationCount);
+  const summaries = aggregateUnitSummaries(artifact, options);
+  insertSpaceUnits(artifact, training.registry, summaries);
+  insertTaxa(artifact);
+  aggregateTrainingStatistics(artifact);
+  assert.equal(
+    artifact.prepare(
+      "SELECT COUNT(*) count FROM space_units WHERE level='grid_r6' AND parent_id NOT IN (SELECT id FROM space_units WHERE level='habitat')"
+    ).get().count,
+    0
+  );
+  assert.equal(
+    artifact.prepare(
+      "SELECT COUNT(*) count FROM space_units WHERE level='habitat' AND parent_id NOT IN (SELECT id FROM space_units WHERE level='district')"
+    ).get().count,
+    0
+  );
+  assert.equal(
+    artifact.prepare(
+      "SELECT SUM(checklist_count) count FROM space_units WHERE level='habitat'"
+    ).get().count,
+    sourceReportCount
+  );
+  assert.equal(
+    artifact.prepare(
+      `SELECT SUM(raw_detections) count
+       FROM taxon_detection
+       JOIN space_units ON space_units.id = taxon_detection.space_unit_id
+       WHERE space_units.level='habitat'`
+    ).get().count,
+    sourceObservationCount
+  );
+  artifact.close();
+  source.close();
+});
+
 test("production thresholds cannot be relaxed and test-only artifacts cannot publish", async () => {
   const directory = testDirectory("test-only-safety");
   const base = {
@@ -820,6 +953,17 @@ test("production thresholds cannot be relaxed and test-only artifacts cannot pub
   await assert.rejects(
     () => buildPredictionArtifact({ ...base, pointerPath: null, minimumNormalReports: 1 }),
     (error) => error instanceof PredictionBuildError && error.code === "UNSAFE_RELEASE_THRESHOLDS"
+  );
+  await assert.rejects(
+    () => buildPredictionArtifact({
+      ...base,
+      habitatFeaturesPath: join(directory, "habitat.json"),
+      spatialSplitManifestPath: join(directory, "split.json"),
+      spatialEvaluationPanel: "development"
+    }),
+    (error) =>
+      error instanceof PredictionBuildError &&
+      error.code === "HABITAT_CHALLENGER_BUILD_FORBIDDEN"
   );
   await assert.rejects(
     () => buildPredictionArtifact({
@@ -1018,11 +1162,11 @@ test("end-to-end safe public artifact supports location and species queries", as
   const priorMatrix = JSON.parse(
     artifact.prepare("SELECT value FROM manifest WHERE key='prior_strengths_by_prevalence'").get().value
   );
-  for (const level of ["city", "district", "grid_r6", "grid_r7", "point"]) {
+  for (const level of ["city", "district", "habitat", "grid_r6", "grid_r7", "point"]) {
     assert.ok(Number(priorMatrix[level].group_30_79) > 0);
     assert.ok(Number(priorMatrix[level].species_200_plus) > 0);
   }
-  assert.equal(result.temporal.priorTuning.diagnostics.length, 20);
+  assert.equal(result.temporal.priorTuning.diagnostics.length, 24);
   assert.ok(result.temporal.priorTuning.tuningYears.every((year) => year < result.temporal.finalHoldoutYear));
   assert.ok(
     result.temporal.priorTuning.diagnostics

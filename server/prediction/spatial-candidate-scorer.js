@@ -23,8 +23,9 @@ const {
   candidateSetSha256
 } = require("./spatial-oof-cache");
 
-const SPATIAL_CANDIDATE_SCORER_SCHEMA_VERSION = 5;
+const SPATIAL_CANDIDATE_SCORER_SCHEMA_VERSION = 6;
 const SPATIAL_CANDIDATE_SCORER_FILES = Object.freeze([
+  "server/prediction/habitat-features.js",
   "server/prediction/math.js",
   "server/prediction/model.js",
   "server/prediction/ranking-reference.js",
@@ -54,6 +55,15 @@ const ROBUST_SCOPE_SELECTION_POLICY = Object.freeze({
   strategy: "strict_nested_every_fold_guard_minimax_ece_v2",
   requireEveryFoldGuard: true,
   requireWorstFoldEceNonDegradation: true
+});
+const SPATIAL_ERROR_AUDIT_CONTRACT = Object.freeze({
+  id: "zhejiang_spatial_species_error_audit_v1",
+  maximumSpeciesEce: PRODUCTION_SPATIAL_QUALITY_THRESHOLDS.maximumSpeciesEce,
+  minimumMaterialSignedBias: 0.01,
+  probabilityBinCount: 10,
+  scopeEligibility: "outer_training_positive_count_200_plus",
+  directionDefinition: "predicted_rate_minus_observed_rate",
+  privacy: "anonymous_fold_and_public_taxon_id_only_no_location_identity"
 });
 const NESTED_SCOPE_ADAPTIVE_STRATEGY_ID = "strict_nested_scope_adaptive_fixed_v2";
 const DEFAULT_CALIBRATOR_FAMILIES = Object.freeze([
@@ -529,6 +539,182 @@ function summarizeScopeBins(scopeBins) {
     maximumEce: scopes[0]?.ece ?? null,
     worstScopeId: scopes[0]?.scopeId ?? null,
     scopes
+  };
+}
+
+function spatialAuditDirection(signedBias) {
+  const minimum = SPATIAL_ERROR_AUDIT_CONTRACT.minimumMaterialSignedBias;
+  if (signedBias > minimum) return "overprediction";
+  if (signedBias < -minimum) return "underprediction";
+  return "near_calibrated";
+}
+
+function summarizeSpatialAuditAccumulator(accumulator, pooledTotal = accumulator.total) {
+  if (!accumulator || accumulator.total <= 0) return null;
+  const predictedRate = accumulator.predicted / accumulator.total;
+  const observedRate = accumulator.positives / accumulator.total;
+  const signedBias = predictedRate - observedRate;
+  const bins = accumulator.bins.map((bin, index) => {
+    if (bin.total <= 0) return null;
+    const binPredictedRate = bin.predicted / bin.total;
+    const binObservedRate = bin.positives / bin.total;
+    const binSignedBias = binPredictedRate - binObservedRate;
+    return {
+      index,
+      lowerBound: index / 10,
+      upperBound: (index + 1) / 10,
+      evaluatedWeight: bin.total,
+      weightShare: bin.total / accumulator.total,
+      predictedRate: binPredictedRate,
+      observedRate: binObservedRate,
+      signedBias: binSignedBias,
+      absoluteGap: Math.abs(binSignedBias),
+      eceContribution: Math.abs(bin.predicted - bin.positives) / pooledTotal,
+      direction: spatialAuditDirection(binSignedBias)
+    };
+  }).filter(Boolean);
+  return {
+    rowCount: accumulator.rowCount,
+    evaluatedWeight: accumulator.total,
+    predictedRate,
+    observedRate,
+    signedBias,
+    absoluteBias: Math.abs(signedBias),
+    ece: eceFromBins(accumulator.bins),
+    direction: spatialAuditDirection(signedBias),
+    populatedBinCount: bins.length,
+    bins
+  };
+}
+
+function spatialAuditClassification(summary, folds) {
+  const foldDirections = new Set(folds
+    .map((fold) => fold.direction)
+    .filter((direction) => direction !== "near_calibrated"));
+  const binDirections = new Set(summary.bins
+    .map((bin) => bin.direction)
+    .filter((direction) => direction !== "near_calibrated"));
+  if (foldDirections.has("overprediction") && foldDirections.has("underprediction")) {
+    return {
+      classification: "mixed_by_spatial_fold",
+      recommendedNextStep: "add_stable_spatial_habitat_features"
+    };
+  }
+  if (binDirections.has("overprediction") && binDirections.has("underprediction")) {
+    return {
+      classification: "mixed_by_probability_bin",
+      recommendedNextStep: "add_stable_spatial_habitat_features"
+    };
+  }
+  if (foldDirections.size === 1 && foldDirections.has("overprediction")) {
+    return {
+      classification: "consistent_overprediction",
+      recommendedNextStep: "regularized_monotone_calibration"
+    };
+  }
+  if (foldDirections.size === 1 && foldDirections.has("underprediction")) {
+    return {
+      classification: "consistent_underprediction",
+      recommendedNextStep: "regularized_monotone_calibration"
+    };
+  }
+  return {
+    classification: "diffuse_miscalibration",
+    recommendedNextStep: "inspect_fold_support_then_add_spatial_features"
+  };
+}
+
+function buildSpatialErrorAudit(entries, {
+  maximumSpeciesEce = SPATIAL_ERROR_AUDIT_CONTRACT.maximumSpeciesEce
+} = {}) {
+  const byTaxon = new Map();
+  for (const entry of entries || []) {
+    const row = entry.row || entry;
+    if (Number(row.positiveCount) < 200) continue;
+    const total = Number(row.total);
+    const positives = Number(row.actualPositive);
+    const probability = Number(entry.probability ?? row.probability ?? row.rawProbability);
+    if (
+      !Number.isFinite(total) || total <= 0 ||
+      !Number.isFinite(positives) || positives < 0 || positives > total ||
+      !Number.isFinite(probability) || probability < 0 || probability > 1
+    ) {
+      throw new SpatialCandidateScorerError(
+        "SPATIAL_ERROR_AUDIT_ROW_INVALID",
+        "空间逐鸟误差审计遇到非法 OOF 行。"
+      );
+    }
+    const taxonId = String(row.taxonId);
+    const foldId = String(entry.foldId ?? row.foldId);
+    if (!byTaxon.has(taxonId)) {
+      byTaxon.set(taxonId, {
+        taxonId,
+        rowCount: 0,
+        total: 0,
+        positives: 0,
+        predicted: 0,
+        bins: emptyEceBins(),
+        folds: new Map()
+      });
+    }
+    const taxon = byTaxon.get(taxonId);
+    if (!taxon.folds.has(foldId)) {
+      taxon.folds.set(foldId, {
+        foldId,
+        rowCount: 0,
+        total: 0,
+        positives: 0,
+        predicted: 0,
+        bins: emptyEceBins()
+      });
+    }
+    for (const accumulator of [taxon, taxon.folds.get(foldId)]) {
+      accumulator.rowCount += 1;
+      accumulator.total += total;
+      accumulator.positives += positives;
+      accumulator.predicted += probability * total;
+      addEceObservation(accumulator.bins, probability, positives, total);
+    }
+  }
+  const allSpecies = [...byTaxon.values()].map((taxon) => {
+    const summary = summarizeSpatialAuditAccumulator(taxon);
+    const folds = [...taxon.folds.values()]
+      .sort((left, right) => left.foldId.localeCompare(right.foldId))
+      .map((fold) => ({
+        foldId: fold.foldId,
+        ...summarizeSpatialAuditAccumulator(fold, taxon.total),
+        bins: undefined
+      }));
+    const dominantBin = [...summary.bins]
+      .sort((left, right) =>
+        right.eceContribution - left.eceContribution ||
+        left.index - right.index
+      )[0] || null;
+    return {
+      taxonId: taxon.taxonId,
+      ...summary,
+      bins: summary.bins,
+      folds,
+      dominantBin,
+      ...spatialAuditClassification(summary, folds)
+    };
+  }).sort((left, right) => right.ece - left.ece || left.taxonId.localeCompare(right.taxonId));
+  const overThreshold = allSpecies.filter((species) => species.ece > maximumSpeciesEce);
+  const classificationCounts = {};
+  for (const species of overThreshold) {
+    classificationCounts[species.classification] =
+      (classificationCounts[species.classification] || 0) + 1;
+  }
+  return {
+    contract: SPATIAL_ERROR_AUDIT_CONTRACT,
+    maximumSpeciesEce,
+    auditedScopeCount: allSpecies.length,
+    overThresholdCount: overThreshold.length,
+    underOrAtThresholdCount: allSpecies.length - overThreshold.length,
+    worstTaxonId: allSpecies[0]?.taxonId ?? null,
+    maximumObservedEce: allSpecies[0]?.ece ?? null,
+    classificationCounts: Object.fromEntries(Object.entries(classificationCounts).sort()),
+    species: overThreshold
   };
 }
 
@@ -1938,6 +2124,7 @@ function buildNestedScopeAdaptiveSelection({ cache, capPlans, baseCaps, families
     .filter((scope) => scope.accepted && scope.fit?.fitted)
     .map((scope) => ({ scope: scope.scope, family: scope.familyId, fit: scope.fit }));
   const metrics = evaluateCandidateRows(heldoutEntries);
+  const spatialErrorAudit = buildSpatialErrorAudit(heldoutEntries);
   const rankingReference = evaluateRankingReference(heldoutEntries);
   const productionRecord = {
     trainingFoldIds: foldIds,
@@ -1961,6 +2148,7 @@ function buildNestedScopeAdaptiveSelection({ cache, capPlans, baseCaps, families
     metrics,
     compactMetrics: compactMetrics(metrics),
     failures: spatialQualityFailures(metrics),
+    spatialErrorAudit,
     rankingReference,
     productionCalibrators
   };
@@ -2072,6 +2260,7 @@ async function scoreSpatialOofCandidates(cache, {
       folds: crossFittedSelection.folds,
       production: crossFittedSelection.production
     },
+    spatialErrorAudit: crossFittedSelection.spatialErrorAudit,
     rankingReference: crossFittedSelection.rankingReference,
     calibratorFamilies: familyResults.map((result) => ({
       family: result.family,
@@ -2113,8 +2302,10 @@ module.exports = {
   SPATIAL_CALIBRATION_GUARD,
   SPATIAL_CANDIDATE_SCORER_FILES,
   SPATIAL_CANDIDATE_SCORER_SCHEMA_VERSION,
+  SPATIAL_ERROR_AUDIT_CONTRACT,
   SpatialCandidateScorerError,
   baselineProbabilityFromAdminEvidence,
+  buildSpatialErrorAudit,
   candidateCapsForRow,
   compactMetrics,
   evaluateCandidateRows,

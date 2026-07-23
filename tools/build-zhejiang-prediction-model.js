@@ -31,6 +31,11 @@ const {
   stableHash,
   weekCenterDay
 } = require("../server/prediction/geo");
+const {
+  HABITAT_FEATURE_CONTRACT,
+  habitatManifestSummary,
+  loadHabitatFeatureSet
+} = require("../server/prediction/habitat-features");
 const { betaInterval, betaQuantile, calibrateProbability, fitBetaCalibration } = require("../server/prediction/math");
 const {
   DEFAULT_PRIOR_STRENGTHS,
@@ -108,6 +113,7 @@ const RANKING_REFERENCE_COMPLETE_FORWARD_LEVELS = Object.freeze([
 const PREDICTION_IMPLEMENTATION_FILES = Object.freeze([
   "tools/build-zhejiang-prediction-model.js",
   "server/prediction/geo.js",
+  "server/prediction/habitat-features.js",
   "server/prediction/location-normalization.js",
   "server/prediction/math.js",
   "server/prediction/model.js",
@@ -164,11 +170,14 @@ const DEFAULT_OPTIONS = Object.freeze({
     province: { checklists: 1, observers: 1 },
     city: { checklists: 10, observers: 3 },
     district: { checklists: 10, observers: 3 },
+    habitat: { checklists: 20, observers: 5 },
     grid_r6: { checklists: 20, observers: 5 },
     grid_r7: { checklists: 30, observers: 10 },
     point: { checklists: 50, observers: 15 }
   },
-  priorStrengths: DEFAULT_PRIOR_STRENGTHS
+  priorStrengths: Object.freeze({
+    ...DEFAULT_PRIOR_STRENGTHS
+  })
 });
 
 const REQUIRED_REPORT_COLUMNS = [
@@ -274,6 +283,10 @@ function validateBuildSafetyOptions(options) {
     finite(`unitThresholds.${level}.checklists`, threshold?.checklists);
     finite(`unitThresholds.${level}.observers`, threshold?.observers);
   }
+  for (const [level, strength] of Object.entries(options.priorStrengths || {})) {
+    finite(`priorStrengths.${level}`, strength);
+    if (Number(strength) <= 0) failures.push(`priorStrengths.${level}.non_positive`);
+  }
   if (!Array.isArray(options.priorStrengthMultipliers) || !options.priorStrengthMultipliers.length) {
     failures.push("priorStrengthMultipliers.empty");
   } else {
@@ -295,6 +308,7 @@ function validateBuildSafetyOptions(options) {
     if (options.materializationProfile !== "evaluation-only") {
       cacheFailures.push("materializationProfile.evaluation_only_required");
     }
+    if (!options.habitatFeaturesPath) cacheFailures.push("habitatFeaturesPath.required");
     if (!options.spatialSplitManifestPath) cacheFailures.push("spatialSplitManifestPath.required");
     if (options.spatialEvaluationPanel !== "development") {
       cacheFailures.push("spatialEvaluationPanel.explicit_development_required");
@@ -380,6 +394,31 @@ function validateBuildSafetyOptions(options) {
         "RANKING_REFERENCE_BUILD_FORBIDDEN",
         "参考范围参数当前只允许显式 development、testOnly、no-publish 的完整物化构建。",
         { failures: referenceFailures }
+      );
+    }
+  }
+  if (options.habitatFeaturesPath !== undefined) {
+    const habitatFailures = [];
+    if (
+      typeof options.habitatFeaturesPath !== "string" ||
+      !options.habitatFeaturesPath.trim()
+    ) habitatFailures.push("habitatFeaturesPath.invalid");
+    if (options.testOnly !== true) habitatFailures.push("testOnly.required");
+    if (options.pointerPath) habitatFailures.push("pointerPath.forbidden");
+    if (!options.spatialSplitManifestPath) habitatFailures.push("spatialSplitManifestPath.required");
+    if (options.spatialEvaluationPanel !== "development") {
+      habitatFailures.push("spatialEvaluationPanel.explicit_development_required");
+    }
+    if (options.spatialParametersPath) habitatFailures.push("spatialParametersPath.forbidden");
+    if (options.sealedEvaluationReceiptPath) habitatFailures.push("sealedEvaluationReceiptPath.forbidden");
+    if (options.sealedSpatialPanelConfirmation) {
+      habitatFailures.push("sealedSpatialPanelConfirmation.forbidden");
+    }
+    if (habitatFailures.length) {
+      throw new PredictionBuildError(
+        "HABITAT_CHALLENGER_BUILD_FORBIDDEN",
+        "生境特征 challenger 只允许显式 development、testOnly、no-publish 构建。",
+        { failures: habitatFailures }
       );
     }
   }
@@ -1103,6 +1142,7 @@ function createArtifactSchema(database) {
       province_unit TEXT NOT NULL,
       city_unit TEXT,
       district_unit TEXT,
+      habitat_unit TEXT,
       grid_r6_unit TEXT,
       grid_r7_unit TEXT,
       point_unit TEXT
@@ -1515,6 +1555,30 @@ function registerAdministrativeUnits(registry, cityName, districtName) {
   return { provinceId, cityId, districtId };
 }
 
+function registerHabitatUnit(registry, parentId, habitatCluster, cityName, districtName) {
+  if (!parentId || !habitatCluster) return null;
+  const names = {
+    water_wetland: "水体湿地",
+    urban: "城镇建成区",
+    forest: "森林",
+    cropland: "农田",
+    open: "开阔地",
+    mixed: "混合生境"
+  };
+  const id = `habitat:${stableHash(`${parentId}\u0000${habitatCluster}`).slice(0, 32)}`;
+  registry.register({
+    id,
+    level: "habitat",
+    code: habitatCluster,
+    name: names[habitatCluster] || habitatCluster,
+    parentId,
+    cityName: String(cityName || ""),
+    districtName: String(districtName || ""),
+    boundary: null
+  });
+  return id;
+}
+
 function registerGridUnit(registry, cell, parentId, cityName, districtName) {
   registry.register({
     id: cell.id,
@@ -1542,8 +1606,8 @@ function insertTrainingRows(source, artifact, pointStats, locationNormalization,
     `INSERT INTO training_reports
        (report_id, report_kind, observer_hash, observer_known, group_key, report_date, report_year, season_week,
         base_weight, weight, is_recent, province_unit, city_unit, district_unit,
-        grid_r6_unit, grid_r7_unit, point_unit)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        habitat_unit, grid_r6_unit, grid_r7_unit, point_unit)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const insertDetection = artifact.prepare(
     "INSERT OR IGNORE INTO training_detections(report_id, taxon_id) VALUES (?, ?)"
@@ -1563,6 +1627,9 @@ function insertTrainingRows(source, artifact, pointStats, locationNormalization,
   let duplicateReports = 0;
   let excludedInvalidDetections = 0;
   let knownObserverReports = 0;
+  let habitatAssignedReports = 0;
+  const habitatClusters = new Map();
+  const habitatGridCells = new Set();
   const cutoff = new Date(`${quality.dataCutoffDate}T00:00:00Z`);
   const localCutoff = new Date(cutoff);
   localCutoff.setUTCFullYear(localCutoff.getUTCFullYear() - options.localHistoryYears);
@@ -1581,11 +1648,38 @@ function insertTrainingRows(source, artifact, pointStats, locationNormalization,
     }
     let r6 = null;
     let r7 = null;
+    let habitatUnitId = null;
+    let habitatCluster = null;
     let pointUnitId = null;
     if (spatialUsable) {
       r6 = gridCell(coordinate.longitude, coordinate.latitude, "grid_r6");
       r7 = gridCell(coordinate.longitude, coordinate.latitude, "grid_r7");
-      registerGridUnit(registry, r6, admin.districtId || admin.cityId || admin.provinceId, current.city_name, current.district_name);
+      if (options.habitatFeatureSet) {
+        const habitat = options.habitatFeatureSet.cellsByH3.get(r6.h3Index);
+        if (!habitat) {
+          throw new PredictionBuildError(
+            "HABITAT_FEATURE_COVERAGE_INCOMPLETE",
+            "生境 challenger 缺少训练报告所在的 H3 r6 特征。",
+            { h3Index: r6.h3Index }
+          );
+        }
+        habitatCluster = habitat.habitatCluster;
+        habitatUnitId = registerHabitatUnit(
+          registry,
+          admin.districtId || admin.cityId || admin.provinceId,
+          habitatCluster,
+          current.city_name,
+          current.district_name
+        );
+        registry.includeCoordinate(habitatUnitId, coordinate.longitude, coordinate.latitude);
+      }
+      registerGridUnit(
+        registry,
+        r6,
+        habitatUnitId || admin.districtId || admin.cityId || admin.provinceId,
+        current.city_name,
+        current.district_name
+      );
       registerGridUnit(registry, r7, r6.id, current.city_name, current.district_name);
       if (current.point_id) {
         const sourcePointId = String(current.point_id).trim();
@@ -1637,6 +1731,11 @@ function insertTrainingRows(source, artifact, pointStats, locationNormalization,
     }
     seenDuplicates.add(duplicateKey);
     if (observer.known) knownObserverReports += 1;
+    if (habitatUnitId) {
+      habitatAssignedReports += 1;
+      habitatClusters.set(habitatCluster, (habitatClusters.get(habitatCluster) || 0) + 1);
+      habitatGridCells.add(r6.h3Index);
+    }
     const reportDate = new Date(`${dateText}T00:00:00Z`);
     const ageYears = Math.max(0, (cutoff - reportDate) / (365.2425 * 86400000));
     const baseWeight = 2 ** (-ageYears / options.recencyHalfLifeYears);
@@ -1659,6 +1758,7 @@ function insertTrainingRows(source, artifact, pointStats, locationNormalization,
       admin.provinceId,
       admin.cityId,
       admin.districtId,
+      habitatUnitId,
       r6?.id || null,
       r7?.id || null,
       pointUnitId
@@ -1731,7 +1831,15 @@ function insertTrainingRows(source, artifact, pointStats, locationNormalization,
       duplicateReports,
       excludedInvalidDetections,
       knownObserverReports,
-      knownObserverCoverage: insertedReports ? knownObserverReports / insertedReports : 0
+      knownObserverCoverage: insertedReports ? knownObserverReports / insertedReports : 0,
+      habitat: options.habitatFeatureSet
+        ? {
+            assignedReports: habitatAssignedReports,
+            coverage: insertedReports ? habitatAssignedReports / insertedReports : 0,
+            distinctGridR6Count: habitatGridCells.size,
+            clusterReportCounts: Object.fromEntries([...habitatClusters].sort())
+          }
+        : null
     }
   };
 }
@@ -1888,6 +1996,7 @@ const LEVEL_COLUMNS = Object.freeze({
   province: "province_unit",
   city: "city_unit",
   district: "district_unit",
+  habitat: "habitat_unit",
   grid_r6: "grid_r6_unit",
   grid_r7: "grid_r7_unit",
   point: "point_unit"
@@ -1940,7 +2049,7 @@ function insertSpaceUnits(artifact, registry, summaries) {
   const lookup = artifact.prepare(
     "INSERT INTO location_lookup(lookup_type, lookup_key, space_unit_id) VALUES (?, ?, ?)"
   );
-  const order = { province: 0, city: 1, district: 2, grid_r6: 3, grid_r7: 4, point: 5 };
+  const order = { province: 0, city: 1, district: 2, habitat: 3, grid_r6: 4, grid_r7: 5, point: 6 };
   const units = [...registry.units.values()].sort(
     (left, right) => order[left.level] - order[right.level] || left.id.localeCompare(right.id)
   );
@@ -2271,6 +2380,7 @@ const HOLDOUT_LEVEL_COLUMNS = Object.freeze({
   province: "province_unit",
   city: "city_unit",
   district: "district_unit",
+  habitat: "habitat_unit",
   grid_r6: "grid_r6_unit",
   grid_r7: "grid_r7_unit",
   point: "point_unit"
@@ -2473,6 +2583,7 @@ function holdoutContextKey(row) {
     row.province_unit || "",
     row.city_unit || "",
     row.district_unit || "",
+    row.habitat_unit || "",
     row.grid_r6_unit || "",
     row.grid_r7_unit || "",
     row.point_unit || "",
@@ -2501,7 +2612,7 @@ function evaluationProbability({
     return smoothedCache.get(cacheKey);
   };
   const adminExposureCapsByPrevalence = options.novelGridAdminExposureCapsByPrevalence || null;
-  const hasSupportedLocalUnit = ["grid_r6", "grid_r7", "point"].some((level) => {
+  const hasSupportedLocalUnit = ["habitat", "grid_r6", "grid_r7", "point"].some((level) => {
     const unitId = context[HOLDOUT_LEVEL_COLUMNS[level]];
     const support = unitId ? supports.get(unitId) : null;
     const threshold = options.unitThresholds[level] || { checklists: 1, observers: 1 };
@@ -2678,14 +2789,15 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
   const contextSampleModulo = Math.max(1, Number(evaluationOptions.contextSampleModulo) || 1);
   const validationRows = artifact
     .prepare(
-      `SELECT reports.province_unit, reports.city_unit, reports.district_unit, reports.grid_r6_unit,
+      `SELECT reports.province_unit, reports.city_unit, reports.district_unit, reports.habitat_unit,
+              reports.grid_r6_unit,
               reports.grid_r7_unit, reports.point_unit,
               reports.season_week, SUM(selected.evaluation_weight) AS exposure
        FROM training_reports reports
        JOIN evaluation_validation_reports selected USING (report_id)
-       GROUP BY reports.province_unit, reports.city_unit, reports.district_unit,
+       GROUP BY reports.province_unit, reports.city_unit, reports.district_unit, reports.habitat_unit,
                  reports.grid_r6_unit, reports.grid_r7_unit, reports.point_unit, reports.season_week
-       ORDER BY reports.province_unit, reports.city_unit, reports.district_unit,
+       ORDER BY reports.province_unit, reports.city_unit, reports.district_unit, reports.habitat_unit,
                 reports.grid_r6_unit, reports.grid_r7_unit, reports.point_unit, reports.season_week`
     )
     .all();
@@ -2701,6 +2813,7 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
       province_unit: row.province_unit,
       city_unit: row.city_unit,
       district_unit: row.district_unit,
+      habitat_unit: row.habitat_unit,
       grid_r6_unit: row.grid_r6_unit,
       grid_r7_unit: row.grid_r7_unit,
       point_unit: row.point_unit,
@@ -2731,17 +2844,18 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
 
   for (const row of artifact
     .prepare(
-      `SELECT reports.province_unit, reports.city_unit, reports.district_unit, reports.grid_r6_unit,
+      `SELECT reports.province_unit, reports.city_unit, reports.district_unit, reports.habitat_unit,
+              reports.grid_r6_unit,
               reports.grid_r7_unit, reports.point_unit,
               reports.season_week, detections.taxon_id,
               SUM(selected.evaluation_weight) AS positives
        FROM training_reports reports
        JOIN evaluation_validation_reports selected USING (report_id)
        JOIN training_detections detections USING (report_id)
-       GROUP BY reports.province_unit, reports.city_unit, reports.district_unit,
+       GROUP BY reports.province_unit, reports.city_unit, reports.district_unit, reports.habitat_unit,
                  reports.grid_r6_unit, reports.grid_r7_unit, reports.point_unit,
                  reports.season_week, detections.taxon_id
-       ORDER BY reports.province_unit, reports.city_unit, reports.district_unit,
+       ORDER BY reports.province_unit, reports.city_unit, reports.district_unit, reports.habitat_unit,
                 reports.grid_r6_unit, reports.grid_r7_unit, reports.point_unit,
                 reports.season_week, detections.taxon_id`
     )
@@ -4034,6 +4148,7 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
         captureAdminEvidence: true,
         levels: ["province", "city", "district"],
         applyOnlyWithoutSupportedLocalUnit: true,
+        habitatFeatures: habitatManifestSummary(options.habitatFeatureSet),
         trainingDataContract: TRAINING_DATA_CONTRACT,
         releaseEvaluationOccurrencePolicy: RELEASE_EVALUATION_OCCURRENCE_POLICY,
         temporalEvaluationWeightingPolicy: TEMPORAL_EVALUATION_WEIGHTING_POLICY,
@@ -4731,7 +4846,7 @@ function clonePriorStrengthMatrix(matrix) {
 
 function initialPriorStrengthMatrix(options) {
   const matrix = {};
-  for (const level of Object.keys(DEFAULT_PRIOR_STRENGTHS)) {
+  for (const level of Object.keys(DEFAULT_OPTIONS.priorStrengths)) {
     matrix[level] = {};
     for (const group of PREVALENCE_GROUPS) {
       matrix[level][group] = resolvePriorStrength(
@@ -4757,7 +4872,7 @@ function tunePriorStrengthMatrix(
   const maximumFolds = Math.max(1, Number(options.holdoutEvaluation.priorTuningMaximumFolds) || 2);
   const tuningYears = calibrationYears.slice(-maximumFolds);
   if (!tuningYears.length) return { matrix, diagnostics, tuningYears };
-  for (const level of Object.keys(DEFAULT_PRIOR_STRENGTHS)) {
+  for (const level of Object.keys(DEFAULT_OPTIONS.priorStrengths)) {
     const candidates = [...new Set(options.priorStrengthMultipliers
       .map((multiplier) => Number(options.priorStrengths[level]) * Number(multiplier))
       .filter((value) => Number.isFinite(value) && value > 0))]
@@ -5777,6 +5892,36 @@ async function buildPredictionArtifact(options = {}) {
   if (existsSync(outputPath)) {
     throw new PredictionBuildError("OUTPUT_EXISTS", `模型输出已存在：${outputPath}`);
   }
+  if (resolvedOptions.habitatFeaturesPath !== undefined) {
+    const normalizePath = (path) => {
+      const absolute = resolve(path);
+      return process.platform === "win32" ? absolute.toLowerCase() : absolute;
+    };
+    const habitatFeaturesPath = resolve(resolvedOptions.habitatFeaturesPath);
+    const reportPath = resolvedOptions.reportPath || `${outputPath}.report.json`;
+    const reservedPaths = [
+      outputPath,
+      `${outputPath}.sha256`,
+      `${outputPath}.building-${process.pid}`,
+      reportPath,
+      `${reportPath}.sha256`,
+      resolvedOptions.sourcePath,
+      resolvedOptions.snapshotPath,
+      resolvedOptions.spatialSplitManifestPath,
+      resolvedOptions.spatialParametersPath,
+      resolvedOptions.sealedEvaluationReceiptPath,
+      resolvedOptions.rankingReferenceReportPath,
+      resolvedOptions.writeSpatialOofCachePath,
+      resolvedOptions.pointerPath
+    ].filter(Boolean).map(normalizePath);
+    if (reservedPaths.includes(normalizePath(habitatFeaturesPath))) {
+      throw new PredictionBuildError(
+        "HABITAT_FEATURE_PATH_CONFLICT",
+        "生境特征输入不得与快照、split、缓存、模型、报告或发布指针共用路径。"
+      );
+    }
+    resolvedOptions.habitatFeaturesPath = habitatFeaturesPath;
+  }
   if (resolvedOptions.rankingReferenceReportPath !== undefined) {
     const rankingReportPath = resolve(resolvedOptions.rankingReferenceReportPath);
     const normalizedRankingPath = process.platform === "win32"
@@ -5839,6 +5984,18 @@ async function buildPredictionArtifact(options = {}) {
     ? { snapshotPath: resolve(resolvedOptions.sourcePath), sha256: sha256File(resolvedOptions.sourcePath) }
     : await createTrainingSnapshot(resolvedOptions);
   resolvedOptions.sourceSnapshotSha256 = snapshot.sha256;
+  if (resolvedOptions.habitatFeaturesPath !== undefined) {
+    resolvedOptions.habitatFeatureSet = loadHabitatFeatureSet(
+      resolvedOptions.habitatFeaturesPath,
+      { expectedSnapshotSha256: snapshot.sha256 }
+    );
+    emitProgress(resolvedOptions, "habitat_features_ready", {
+      contractId: HABITAT_FEATURE_CONTRACT.id,
+      fileSha256: resolvedOptions.habitatFeatureSet.fileSha256,
+      featureSetSha256: resolvedOptions.habitatFeatureSet.featureSetSha256,
+      cellCount: resolvedOptions.habitatFeatureSet.summary.cellCount
+    });
+  }
   if (resolvedOptions.spatialSplitManifestPath) {
     resolvedOptions.verifiedSpatialSplit = verifySpatialSplitManifest({
       manifestPath: resolvedOptions.spatialSplitManifestPath,
@@ -6007,6 +6164,7 @@ async function buildPredictionArtifact(options = {}) {
       duplicateReportsRemoved: training.stats.duplicateReports,
       observerIdCoverage: training.stats.knownObserverCoverage,
       excludedInvalidDetections: training.stats.excludedInvalidDetections,
+      habitat: training.stats.habitat,
       storedRedDetectionsExcluded: sourceContract.storedRedCount,
       storedOutsideTypeDetectionsExcluded: sourceContract.storedOutsideCount,
       sourceGeneration: sourceContract.sourceGeneration,
@@ -6032,7 +6190,12 @@ async function buildPredictionArtifact(options = {}) {
       summary: normalizationReport.summary
     });
     manifestSet(artifact, "source_contract", sourceContract);
-    manifestSet(artifact, "input_features", ["calendar_date", "location"]);
+    const inputFeatures = resolvedOptions.habitatFeatureSet
+      ? ["calendar_date", "location", HABITAT_FEATURE_CONTRACT.id]
+      : ["calendar_date", "location"];
+    const habitatFeatures = habitatManifestSummary(resolvedOptions.habitatFeatureSet);
+    manifestSet(artifact, "input_features", inputFeatures);
+    manifestSet(artifact, "habitat_features", habitatFeatures);
     manifestSet(artifact, "weather_features", {
       championIncluded: false,
       reason: "首版避免未来实际天气不可得造成训练-服务偏移；历史天气仅作后续 challenger 可行性分析。"
@@ -6223,7 +6386,8 @@ async function buildPredictionArtifact(options = {}) {
         schemaVersion: artifactSchemaVersion,
         releaseEligible: releaseQuality.passed,
         probabilityDefinition: PROBABILITY_DEFINITION,
-        inputFeatures: ["calendar_date", "location"],
+        inputFeatures,
+        habitatFeatures,
         weatherIncluded: false
       },
       source: {
@@ -6249,6 +6413,7 @@ async function buildPredictionArtifact(options = {}) {
       rankingReference: resolvedOptions.rankingReferenceBinding
         ? rankingReferenceManifestSummary(resolvedOptions.rankingReferenceBinding)
         : null,
+      habitatFeatures,
       hyperparameters: {
         recencyHalfLifeYears: resolvedOptions.recencyHalfLifeYears,
         localHistoryYears: resolvedOptions.localHistoryYears,
@@ -6325,6 +6490,7 @@ async function buildPredictionArtifact(options = {}) {
       rankingReference: resolvedOptions.rankingReferenceBinding
         ? rankingReferenceManifestSummary(resolvedOptions.rankingReferenceBinding)
         : null,
+      habitatFeatures,
       published
     };
   } catch (error) {
@@ -6366,6 +6532,7 @@ function parseCliArguments(argv) {
     else if (argument === "--spatial-split-manifest") options.spatialSplitManifestPath = value();
     else if (argument === "--spatial-panel") options.spatialEvaluationPanel = value();
     else if (argument === "--spatial-parameters") options.spatialParametersPath = value();
+    else if (argument === "--habitat-features") options.habitatFeaturesPath = value();
     else if (argument === "--sealed-evaluation-receipt") options.sealedEvaluationReceiptPath = value();
     else if (argument === "--confirm-open-sealed-spatial-panel") options.sealedSpatialPanelConfirmation = value();
     else if (argument === "--write-spatial-oof-cache") options.writeSpatialOofCachePath = value();
@@ -6403,6 +6570,7 @@ function usage() {
     --output data/prediction-models/zhejiang-YYYYMMDD.sqlite \\
     --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json \\
     --spatial-panel development \\
+    --habitat-features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-v1.json \\
     --ranking-reference-report data/prediction-models/development-cache/zhejiang-ranking-reference-v3-w4.json \\
     --workers 4 \\
     --test-only \\
@@ -6459,6 +6627,7 @@ function cliResultSummary(result) {
     forwardRows: result.forward?.insertedRows ?? null,
     reverseRows: result.reverse?.insertedRows ?? null,
     rankingReference: result.rankingReference || null,
+    habitatFeatures: result.habitatFeatures || null,
     validation: result.validation,
     published: result.published
   };

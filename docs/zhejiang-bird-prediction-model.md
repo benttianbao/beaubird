@@ -395,6 +395,27 @@ node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js --source
 
 最终 development 仍为 **no-go**：时间最大逐鸟 ECE `0.114921`、空间最大逐鸟 ECE `0.122042`，均超过固定门槛 `0.05`；时间、空间、观察者总体 Brier Skill 分别为 `+10.9083%`、`+5.01531%`、`+16.0836%`，总体 ECE 和 Recall@20 均合格，但不能抵消逐鸟校准失败。停止在 development，不得打开 sealed。
 
+#### 2026-07-23 逐鸟空间误差审计与生境 challenger
+
+在 strict cache v5 上增加只读的逐鸟空间误差审计后，workers=4 报告 `data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-audit-v1-w4.json` 的 SHA-256 为 `bb2e338a3c18920f3014411b4d3ca87921980a3b2828ea6d03ebc2f72dfa1528`。固定 `maximumSpeciesEce=0.05` 下有 28 个逐鸟作用域超限，28 个全部被归类为 `mixed_by_spatial_fold`：同一鸟种在不同外层空间折中既有高估又有低估。白头鹎 `taxon_id=4866` 仍最差，审计 ECE 为 `0.12259799938175632`。这说明继续做全局概率缩放或增加同类校准参数不能解释主要误差，下一步优先补充训练和服务时都稳定可得的空间生境信息；天气实况仍不是首选。
+
+首个预登记生境 challenger 使用 ESA WorldCover 2021 v200，不直接修改原始快照。固定契约为 `zhejiang_esa_worldcover_h3_r6_v1`：
+
+- 只接受官方 3×3 度、36,000×36,000 像元、EPSG:4326 的 Map COG；逐 tile 校验文件 SHA、像元尺度、tiepoint、CRS 和文件名边界。
+- 每个快照 H3 r6 采用固定 10×10 源像元步长、偏移 4 的像元中心系统抽样；有效分类覆盖率至少 90%，11 类占比必须守恒为 1。
+- 只派生六个粗粒度类别：`water_wetland`、`urban`、`forest`、`cropland`、`open`、`mixed`。阈值和优先顺序写入不可变 contract，不从鸟种标签拟合。
+- 建模层级为 `district → habitat → grid_r6 → grid_r7 → point`。habitat 单元是同一市/区县内的粗粒度回退层，不跨区县共享；报告、观察者、支持年份和鸟种证据按原清单逐份汇总，不复制或删除训练记录。
+- 生境特征文件同时绑定固定快照 SHA、官方 tile manifest SHA、生成器实现 SHA 和规范化 feature-set SHA。模型 manifest/报告保存安全摘要；精确 H3 只存在于私有构建输入。
+- 生境 challenger 强制 `development + testOnly + no-publish`，禁止 spatial parameters、sealed receipt 和 sealed 解封参数；任何正式或发布构建都会 fail closed。
+
+地点/层级身份已经变化，strict cache v5 不得复用。下一份 habitat cache 使用内部 schema 4、kind `zhejiang_development_strict_nested_spatial_oof_sufficient_statistics_habitat_v4`，文件名应另起 v6 路径。缓存仍只允许匿名 outer/inner 折、本折稠密 context 序号、公共 `taxon_id`、汇总概率与行政层充分统计；`deepest_level='habitat'` 只是层级枚举，不得保存 habitat ID、H3、坐标、地点名、报告 ID或观察者。缓存 metadata 额外保存不含空间身份的生境契约、特征/生成器/tile/snapshot SHA 和六类单元数量，5 outer×4 inner、门槛及隐私白名单均不减少。
+
+固定快照只读扫描得到 2,345 个 H3 r6，需要四个官方 tile：`N27E117`、`N27E120`、`N30E117`、`N30E120`。生成命令为单行：
+
+`node tools/build-zhejiang-habitat-features.js --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --expected-snapshot-sha256 92602be9b9c3aeb3d7c6cf966c459710a5a9bf6bc078e604a3805ab05fc0b16a --tiles data/prediction-features/worldcover-2021-v200 --output data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-v1.json`
+
+当前环境访问 ESA 官方 S3 时在 TLS 握手阶段被中断，PowerShell、curl 和 Python/OpenSSL 均未下载到文件；因此尚未生成真实特征、v6 cache 或新 development 结果，也没有用镜像或伪造分类替代。四个官方 TIFF 到位后，先生成/校验特征，再用全新路径执行唯一一次严格 cache 构建、workers=4/1 确定性评分和完整 development 复验。任何门槛失败仍立即 no-go；即使全部通过也必须先冻结代码与参数并在首次 sealed 前暂停。
+
 ## 天气与 challenger
 
 浙江历史天气可以从 CMA、ERA5-Land 或 NASA POWER 等来源补充，但首版 champion 不纳入天气。原因是查询未来十二个月季节窗口时无法获得未来实况天气，直接用历史实况训练会造成训练—服务偏移。后续天气模型只能作为独立 challenger，并使用查询时真实可得的气候常态、预报或滞后特征。

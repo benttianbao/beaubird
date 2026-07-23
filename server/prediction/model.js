@@ -50,6 +50,7 @@ const REQUIRED_RUNTIME_TABLES = Object.freeze([
 const DEFAULT_PRIOR_STRENGTHS = Object.freeze({
   city: 24,
   district: 18,
+  habitat: 14,
   grid_r6: 14,
   grid_r7: 10,
   point: 8
@@ -672,7 +673,7 @@ class PredictionModel {
     const adminExposureCapsByPrevalence =
       this.manifestMap.get("novel_grid_admin_exposure_caps_by_prevalence") || null;
     const hasSupportedLocalUnit = fullPath.some(
-      (unit) => unit.supported && ["grid_r6", "grid_r7", "point"].includes(unit.level)
+      (unit) => unit.supported && ["habitat", "grid_r6", "grid_r7", "point"].includes(unit.level)
     );
     const applyNovelGridTransfer = Boolean(adminExposureCapsByPrevalence && !hasSupportedLocalUnit);
     const taxonPrevalenceGroup = prevalenceGroup(taxon.positiveCount);

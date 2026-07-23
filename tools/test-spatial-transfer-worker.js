@@ -60,6 +60,7 @@ function safeCacheBuildOptions(overrides = {}) {
     materializationProfile: "evaluation-only",
     spatialSplitManifestPath: "development-splits.json",
     spatialEvaluationPanel: "development",
+    habitatFeaturesPath: "development-habitat.json",
     writeSpatialOofCachePath: "development-oof-cache.json",
     qualityGate: { ...DEFAULT_OPTIONS.qualityGate },
     holdoutEvaluation: { ...DEFAULT_OPTIONS.holdoutEvaluation },
@@ -72,11 +73,13 @@ test("CLI 解析显式 development OOF 缓存输出", () => {
   const options = parseCliArguments([
     "--spatial-split-manifest", "development-splits.json",
     "--spatial-panel", "development",
+    "--habitat-features", "development-habitat.json",
     "--write-spatial-oof-cache", "development-oof-cache.json",
     "--evaluation-only"
   ]);
   assert.equal(options.spatialSplitManifestPath, "development-splits.json");
   assert.equal(options.spatialEvaluationPanel, "development");
+  assert.equal(options.habitatFeaturesPath, "development-habitat.json");
   assert.equal(options.writeSpatialOofCachePath, "development-oof-cache.json");
   assert.equal(options.testOnly, true);
   assert.equal(options.materializationProfile, "evaluation-only");
@@ -87,6 +90,7 @@ test("OOF 缓存安全门只接受固定分块的显式 development evaluation-o
   for (const overrides of [
     { testOnly: false },
     { materializationProfile: "full" },
+    { habitatFeaturesPath: null },
     { spatialSplitManifestPath: null },
     { spatialEvaluationPanel: "sealed-release" },
     { spatialParametersPath: "parameters.json" },

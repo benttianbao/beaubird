@@ -32,6 +32,7 @@ const {
 const { FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1 } = require("../server/prediction/spatial-transfer");
 const { prevalenceGroup } = require("../server/prediction/model");
 const { LOCATION_NORMALIZATION_VERSION } = require("../server/prediction/location-normalization");
+const { HABITAT_FEATURE_CONTRACT } = require("../server/prediction/habitat-features");
 
 const SNAPSHOT_SHA = "a".repeat(64);
 const SPLIT_SHA = "b".repeat(64);
@@ -129,7 +130,7 @@ function fixtureFolds() {
     { taxonId: "group-c", positiveCount: 50 }
   ];
   const priorStrengthsByPrevalence = Object.fromEntries(
-    ["city", "district", "grid_r6", "grid_r7", "point"].map((level, levelIndex) => [
+    ["city", "district", "habitat", "grid_r6", "grid_r7", "point"].map((level, levelIndex) => [
       level,
       Object.fromEntries(
         ["rare_under_30", "group_30_79", "group_80_199", "species_200_plus"]
@@ -206,6 +207,29 @@ function fixtureEvidenceOptions() {
     captureAdminEvidence: true,
     coordinateQcEvaluationScope: "fixed_snapshot_coordinate_qc_target_independent_not_refit_per_fold",
     dataCutoffDate: "2026-07-15",
+    habitatFeatures: {
+      cellCount: 6,
+      clusterCounts: {
+        cropland: 1,
+        forest: 1,
+        mixed: 1,
+        open: 1,
+        urban: 1,
+        water_wetland: 1
+      },
+      contractId: HABITAT_FEATURE_CONTRACT.id,
+      featureSetSha256: "1".repeat(64),
+      fileSha256: "2".repeat(64),
+      generationImplementationSha256: "4".repeat(64),
+      meanCoverage: 0.98,
+      minimumCoverage: 0.91,
+      snapshotSha256: SNAPSHOT_SHA,
+      sourceDataset: HABITAT_FEATURE_CONTRACT.sourceDataset,
+      sourceDatasetVersion: HABITAT_FEATURE_CONTRACT.sourceDatasetVersion,
+      sourceDatasetYear: HABITAT_FEATURE_CONTRACT.sourceDatasetYear,
+      sourceLicense: HABITAT_FEATURE_CONTRACT.sourceLicense,
+      tileManifestSha256: "3".repeat(64)
+    },
     holdoutEvaluation: {
       minimumTaxonPositives: 30,
       observerFoldCount: 3,
@@ -224,7 +248,7 @@ function fixtureEvidenceOptions() {
     outerPriorTuningContextSampleModulo: 20,
     pointDriftMeters: 2000,
     priorStrengthMultipliers: [0.5, 1, 2],
-    priorStrengths: { city: 24, district: 18, grid_r6: 14, grid_r7: 10, point: 8 },
+    priorStrengths: { city: 24, district: 18, habitat: 14, grid_r6: 14, grid_r7: 10, point: 8 },
     priorTuningContextSampleModulo: 10,
     recencyHalfLifeYears: 3,
     releaseEvaluationOccurrencePolicy: "raw_detections_all_taxa_without_full_data_event_filter",
@@ -234,6 +258,7 @@ function fixtureEvidenceOptions() {
       province: { checklists: 1, observers: 1 },
       city: { checklists: 10, observers: 3 },
       district: { checklists: 10, observers: 3 },
+      habitat: { checklists: 20, observers: 5 },
       grid_r6: { checklists: 20, observers: 5 },
       grid_r7: { checklists: 30, observers: 10 },
       point: { checklists: 50, observers: 15 }
@@ -296,7 +321,7 @@ test("development OOF 缓存规范化往返且不含身份或精确空间字段"
       sourceSnapshotSha256: SNAPSHOT_SHA
     });
     assert.equal(loaded.metadata.panel, "development");
-    assert.equal(loaded.metadata.schemaVersion, 3);
+    assert.equal(loaded.metadata.schemaVersion, 4);
     assert.equal(loaded.metadata.evidenceOptions.locationNormalizationVersion, LOCATION_NORMALIZATION_VERSION);
     assert.equal(loaded.metadata.evidenceOptions.locationAliasMapSha256, "e".repeat(64));
     assert.equal(loaded.metadata.evidenceOptions.locationNormalizationAuditSha256, "f".repeat(64));
@@ -380,7 +405,7 @@ test("缓存 writer 拒绝 scoreRows 隐私白名单之外的字段", () => {
   }
 });
 
-test("cache v3 拒绝 inner scoreRows 私密字段和不完整 outer×inner 折", () => {
+test("cache v4 拒绝 inner scoreRows 私密字段和不完整 outer×inner 折", () => {
   const directory = testDirectory("spatial-oof-inner-contract");
   try {
     const privatePath = join(directory, "private.sqlite");
