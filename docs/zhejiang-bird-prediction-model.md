@@ -382,6 +382,19 @@ node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js --source
 
 本轮另外增加三项 fail-closed 防护：同一个 `space_unit_id` 若对应不同层级或代码立即报 `SPACE_UNIT_ID_COLLISION`；`location_lookup` 改用严格 `INSERT`，禁止未来代码把旧查询键静默改指向其他空间单元；反向热点代表行增加覆盖全部输出字段的确定性 tie-break，并在写 SQLite 前再次断言折叠后的最终主键唯一。乱序、完全并列、相接窗口和跨年环形窗口 fixture 均得到相同投影。文档列出的建模测试集 80/80 通过，反向热点/查询键定向测试 6/6 通过。本轮没有生成 cache、评分报告或模型，没有运行 sealed，也没有修改默认离线模型；恢复构建时仍必须从新 cache v5 开始。
 
+#### 2026-07-23 cache v5 与完整 development 复验
+
+基于提交 `ba78d0ae8` 从全新路径完成 strict cache v5、workers=4/1 评分和完整 development 参考范围制品构建，全程仅使用 development 面板、`testOnly + no-publish`，没有运行 sealed，也没有修改默认离线模型。
+
+- strict cache v5：`data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v5.sqlite`，SHA-256 `302115258794f86d6472d278f042f52583cefe40874a06bb662f04758e71ca8d`；耗时 8,964.768 秒；`quick_check=ok`、freelist 为 0，5 个 outer、20 个 inner、347,436 条 outer score 和 1,385,452 条 inner score 完整，schema 与隐私白名单通过。
+- workers=4 报告：`zhejiang-v1-20260715-ranking-reference-v5-w4.json`，SHA-256 `50648d613e2c56a87e44f514333548859249316f8f073b7c1effade65fa49f44`；workers=1 报告 SHA-256 `12b8af6bc337dc727513baf768fabc08d2144debd0d6ee7250f3f6c3ab9e3ab9`。删除 `generatedAt` 和 `scoring.workers` 后的确定性投影 SHA-256 均为 `def6f274fb83c0d025b3d7110c13147646fba316a116d63c8729a645a9c6a9d4`。
+- 参考范围诊断通过：Recall@20 delta `+4.006782pp`、NDCG@20 delta `+4.243253pp`、低概率候选保留率 100%、整体覆盖率 97.8689%、最差逐鸟覆盖率 83.0624%。该结果只说明排序和展示范围合格，不改变正式概率门。
+- 完整制品：`data/prediction-models/zhejiang-v1-20260715-development-ranking-reference-v2.sqlite`，SHA-256 `adbdcfb362878d0cd96b47941d08ad59d1e5b21514dc1059f991d770a250be69`；报告 SHA-256 `36e2d5a0fc2b0ddd0a005c1970f2301d640aa22b2187c9077ba4aeef6286f3d7`；耗时 10,556.239 秒。制品包含 12,667,668 条正向预测、176,700 条反向热点及 372 组参考范围参数；完整层级的每个受支持地点×周均恰有 589 个公共鸟种，`quick_check=ok`、freelist 为 0、外键违规为 0，且不含训练报告、观察者或精确事件私密字段。
+- 全量反向构建实际遇到 1 个最终热点身份碰撞，新归并逻辑在写入前成功处理；最终重复主键为 0，证明 2026-07-22 的故障路径已修复。
+- 岚山水库 `16431` 与 `211370` 均解析到 `point:d2eb1321b626526bee6c6a1fd9ecdef3`，规范化审计仍守恒原始 165 份报告。运行制品的地点支持清单数为 156，是因为点位层固定只统计最近五年，2020 至 2021 年窗口外的 9 份报告只参与省级长期先验，并非丢失。
+
+最终 development 仍为 **no-go**：时间最大逐鸟 ECE `0.114921`、空间最大逐鸟 ECE `0.122042`，均超过固定门槛 `0.05`；时间、空间、观察者总体 Brier Skill 分别为 `+10.9083%`、`+5.01531%`、`+16.0836%`，总体 ECE 和 Recall@20 均合格，但不能抵消逐鸟校准失败。停止在 development，不得打开 sealed。
+
 ## 天气与 challenger
 
 浙江历史天气可以从 CMA、ERA5-Land 或 NASA POWER 等来源补充，但首版 champion 不纳入天气。原因是查询未来十二个月季节窗口时无法获得未来实况天气，直接用历史实况训练会造成训练—服务偏移。后续天气模型只能作为独立 challenger，并使用查询时真实可得的气候常态、预报或滞后特征。
