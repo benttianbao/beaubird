@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "kind": "zhejiang_continuous_habitat_v7_preregistration",
+  "status": "frozen_before_long_development_build",
+  "bindings": {
+    "sourceSnapshotSha256": "92602be9b9c3aeb3d7c6cf966c459710a5a9bf6bc078e604a3805ab05fc0b16a",
+    "spatialSplitFileSha256": "7deafec542c95b1463c92fe6948831247666a22923921b22890bb24adac9accc",
+    "spatialSplitManifestHash": "400bcc27bde3bd30f03ef022b9f76175cd6093ea5afc98fcbfccb79bde234e4d",
+    "featureFileSha256": "085b134fc86124213c7abf8f0d813ef25489de1754c908ff98e384a1b189d451",
+    "featureSetSha256": "b2a3ae75832f7b5bd0830375691a8f727c7214b7cb3e149dfa1fe8236bcb99f5",
+    "featureGenerationImplementationSha256": "3a729659d8f97ec89b1bc2a4b15330ddf9fa08bdde73715eea30d29388e54c82",
+    "tileManifestSha256": "628d7cd04eb659540fa1c8e05ad091645023dd812ea96cacbad29a324291b306",
+    "tileManifestFileSha256": "16ecbc0098902fbc843427fd5f676b5e5f246f075a4ddedbf1832757716496a9",
+    "targetIndependentPreflightAuditSha256": "d12726338e374e34a1b9419028b11ab2d983e2a061ba13bf28c011f2566d704f"
+  },
+  "implementation": {
+    "predictionImplementationSha256": "80182cb706c3199658932b45d40323cc61773554952081a7bb1abc3ea721fe63",
+    "cacheGenerationImplementationSha256": "2cd5c2d3c39c40540feb2ed3d004e5cac5cc127fdbe8c25aadf4eb0c9b1ab380",
+    "cacheEvidenceContractSha256": "9d7b5d60b8c8b2e6e49e91e7aaf0c1130ef55d730df4e6373e006fd23a0e91c0",
+    "scorerImplementationSha256": "c6a4d6e255eb83c2aa9975941461b72f7477916d777e5b2a2ae81510d94f0035",
+    "kernelContractSha256": "d53bfdacc513c62511030a066468292474352d9c341ac9e609a583eb7a396c6a"
+  },
+  "sourceCardinality": {
+    "reportRows": 87107,
+    "observationRows": 1324993,
+    "distinctObservationKeys": 1324993,
+    "duplicateObservationRows": 0,
+    "orphanObservationRows": 0,
+    "publicTaxonKeys": 589
+  },
+  "featureCoverage": {
+    "contractId": "zhejiang_esa_worldcover_h3_r6_continuous_v2",
+    "featureH3R6Count": 5743,
+    "observedH3R6Count": 2345,
+    "missingObservedH3R6Count": 0,
+    "minimumCoverage": 0.9012029690299462,
+    "meanCoverage": 0.9999516886078493,
+    "modelMaterialization": "store_five_group_fractions_for_all_feature_cells",
+    "virtualHabitatSpaceUnits": false
+  },
+  "officialWorldCoverTiles": [
+    {
+      "tileId": "N24E117",
+      "fileSha256": "99cbc3abd8b76a1bcb81e1e614323506807076dad6799b0727644cbf6a4024c1"
+    },
+    {
+      "tileId": "N24E120",
+      "fileSha256": "730c11c72158595d6fcc9b0fe4a61ff2fb786e17f08a3412542ce7e4de17a3c9"
+    },
+    {
+      "tileId": "N27E117",
+      "fileSha256": "53f6bd53f1be768d7ed26654d9e8b0a1afd4d57283b6d83e4caf7508226f3dbf"
+    },
+    {
+      "tileId": "N27E120",
+      "fileSha256": "300d43375645fd177f042eb23bc6156affa78be3e63e49d55bd29c19b87c7f66"
+    },
+    {
+      "tileId": "N30E117",
+      "fileSha256": "2ecba0b373296bd1f2641503065648e80d2adc33cdea1b8d2e8247e77fa97426"
+    },
+    {
+      "tileId": "N30E120",
+      "fileSha256": "f3859c80b7bd8d61a82f0adafee02378d418a2f1bafe32d8229b84301329c814"
+    }
+  ],
+  "continuousHabitatKernel": {
+    "id": "zhejiang_worldcover_hellinger_kernel_v1",
+    "featureContractId": "zhejiang_esa_worldcover_h3_r6_continuous_v2",
+    "featureGroups": [
+      "forest",
+      "open",
+      "cropland",
+      "urban",
+      "water_wetland"
+    ],
+    "featureProjection": {
+      "forest": [
+        10
+      ],
+      "open": [
+        20,
+        30,
+        60,
+        70,
+        100
+      ],
+      "cropland": [
+        40
+      ],
+      "urban": [
+        50
+      ],
+      "water_wetland": [
+        80,
+        90,
+        95
+      ]
+    },
+    "distance": "hellinger",
+    "neighborSelection": "same_city_first_then_zhejiang_fallback",
+    "neighborCount": 24,
+    "minimumSameCityNeighbors": 8,
+    "maximumDistance": 0.35,
+    "kernelBandwidth": 0.18,
+    "evidenceExposureCap": 10,
+    "evidencePriorStrength": 30,
+    "excludeTargetCell": true,
+    "applyAsIntermediateEvidence": true,
+    "cachePolicy": "only_aggregated_exposure_detection_strength_and_neighbor_count_without_features_or_spatial_ids"
+  },
+  "targetIndependentKernelAudit": {
+    "developmentTargetCount": 12,
+    "sameCityTargetCount": 12,
+    "zhejiangFallbackTargetCount": 0,
+    "selectedNeighborCountMinimum": 8,
+    "selectedNeighborCountMedian": 24,
+    "selectedNeighborCountMaximum": 24,
+    "effectiveNeighborCountMinimum": 4.642319041040379,
+    "effectiveNeighborCountMedian": 15.511604674244849,
+    "effectiveNeighborCountMaximum": 20.342273639257865,
+    "farthestDistanceMedian": 0.2188967349040358,
+    "farthestDistanceMaximum": 0.3463961213613382,
+    "sealedLabelsRead": false,
+    "taxonOutcomesUsedForKernelSelection": false
+  },
+  "developmentEvaluation": {
+    "panel": "development",
+    "cityCount": 11,
+    "outerFoldCount": 5,
+    "innerFoldCountPerOuter": 4,
+    "expectedOuterScoreRows": 347436,
+    "expectedInnerScoreRows": 1385452,
+    "expectedTotalScoreRows": 1732888,
+    "workersSequence": [
+      4,
+      1
+    ],
+    "determinismProjectionExcludesOnly": [
+      "generatedAt",
+      "scoring.workers"
+    ]
+  },
+  "strictCache": {
+    "schemaVersion": 5,
+    "kind": "zhejiang_development_strict_nested_spatial_oof_sufficient_statistics_continuous_habitat_v5",
+    "outputPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v7.sqlite",
+    "mustNotOverwrite": [
+      "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v5.sqlite",
+      "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v6.sqlite"
+    ],
+    "privacyAllowedHabitatEvidence": [
+      "exposure",
+      "detections",
+      "strength",
+      "neighborCount"
+    ],
+    "privacyForbidden": [
+      "report_id",
+      "observer",
+      "raw_coordinate",
+      "h3",
+      "space_unit_id",
+      "neighbor_id",
+      "feature_vector",
+      "location_name"
+    ],
+    "requiredIntegrity": {
+      "quickCheck": "ok",
+      "freelistCount": 0,
+      "outerFoldCount": 5,
+      "innerFoldCount": 20
+    }
+  },
+  "candidateScoring": {
+    "schemaVersion": 7,
+    "workers4OutputPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-ranking-reference-v7-w4.json",
+    "workers1OutputPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-ranking-reference-v7-w1.json",
+    "formalProbabilityGateUnchanged": true,
+    "diagnosticOnly": true,
+    "freezeEligible": false
+  },
+  "developmentArtifact": {
+    "outputPath": "data/prediction-models/zhejiang-v1-20260715-development-continuous-habitat-v7.sqlite",
+    "testOnly": true,
+    "noPublish": true,
+    "defaultOfflineModelMustRemainUnchanged": true,
+    "sealedEvaluationReceipt": null
+  },
+  "qualityThresholds": {
+    "minimumTimeFolds": 3,
+    "minimumCalibrationFolds": 2,
+    "minimumSpatialFolds": 3,
+    "minimumObserverFolds": 3,
+    "requireFinalHoldout": true,
+    "requireSpatialHoldout": true,
+    "requireObserverHoldout": true,
+    "minimumBrierSkill": 0,
+    "maximumEce": 0.1,
+    "maximumSpeciesEce": 0.05,
+    "maximumGroupEce": 0.1,
+    "minimumRecallAt20Delta": -0.02,
+    "minimumReverseNdcgLift": 0.05
+  },
+  "stopPolicy": {
+    "anyDevelopmentFailure": "no_go_stop_without_sealed",
+    "allDevelopmentGatesPass": "freeze_code_and_parameters_then_wait_for_explicit_user_approval_before_first_sealed",
+    "sealedForbiddenDuringThisPlan": true,
+    "defaultOfflineModelOverwriteForbidden": true
+  }
+}

@@ -30,6 +30,9 @@ const {
 } = require("../server/prediction/ranking-reference");
 const { canonicalJson } = require("../server/prediction/spatial-splits");
 const { prevalenceGroup } = require("../server/prediction/model");
+const {
+  CONTINUOUS_HABITAT_KERNEL_CONTRACT
+} = require("../server/prediction/continuous-habitat");
 const { parseArguments } = require("./score-zhejiang-spatial-oof-cache");
 
 const EXPECTED_CAP_POLICY = Object.freeze({
@@ -73,7 +76,7 @@ function makeRow({
     total,
     rawProbability: 0,
     baselineProbability: 0,
-    deepestLevel: "district",
+    deepestLevel: "habitat_continuous",
     hasSupportedLocalUnit: false,
     provinceExposure,
     provinceDetections,
@@ -82,7 +85,12 @@ function makeRow({
     cityStrength: positiveCount >= 200 ? 24 : 30,
     districtExposure,
     districtDetections,
-    districtStrength: positiveCount >= 200 ? 18 : 22
+    districtStrength: positiveCount >= 200 ? 18 : 22,
+    habitatExposure: 18 + contextIndex,
+    habitatDetections:
+      (18 + contextIndex) * (high ? 0.7 : low ? 0.08 : 0.04 + (taxonIndex % 6) * 0.04),
+    habitatStrength: CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidencePriorStrength,
+    habitatNeighborCount: 12
   };
   const baseCaps = FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1[prevalenceGroup(positiveCount)];
   row.rawProbability = probabilityFromAdminEvidence(row, baseCaps);
@@ -117,7 +125,11 @@ function makeCache() {
       spatialSplitManifestHash: "c".repeat(64),
       evidenceContractSha256: "d".repeat(64),
       generationImplementationSha256: "e".repeat(64),
-      predictionImplementationSha256: "1".repeat(64)
+      predictionImplementationSha256: "1".repeat(64),
+      evidenceOptions: {
+        habitatModel: CONTINUOUS_HABITAT_KERNEL_CONTRACT.id,
+        continuousHabitatKernel: CONTINUOUS_HABITAT_KERNEL_CONTRACT
+      }
     },
     folds: Array.from({ length: 5 }, (_, foldIndex) => {
       const foldId = String(foldIndex + 1);
@@ -206,6 +218,7 @@ function assertCandidateManifest(report) {
     capPolicy: EXPECTED_CAP_POLICY,
     calibratorFamilies: DEFAULT_CALIBRATOR_FAMILIES,
     calibrationGuard: SPATIAL_CALIBRATION_GUARD,
+    continuousHabitatKernel: CONTINUOUS_HABITAT_KERNEL_CONTRACT,
     robustScopeSelectionPolicy: EXPECTED_ROBUST_SCOPE_POLICY,
     rankingReferenceContract: RANKING_REFERENCE_CONTRACT
   });
@@ -334,7 +347,7 @@ test("逐鸟 25 组 cap 使用四折选择一折验证并能区分相反空间�
   const cache = makeCache();
   const before = structuredClone(cache);
   const report = await scoreSpatialOofCandidates(cache, { workers: 2, generatedAt: "fixed" });
-  assert.equal(report.schemaVersion, 6);
+  assert.equal(report.schemaVersion, 7);
   assert.equal(report.diagnosticOnly, true);
   assert.equal(report.freezeEligible, false);
   assert.equal(report.sealedPanelViewed, false);

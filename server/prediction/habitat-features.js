@@ -9,6 +9,8 @@ const { canonicalJson } = require("./spatial-splits");
 
 const HABITAT_FEATURE_SCHEMA_VERSION = 1;
 const HABITAT_FEATURE_KIND = "zhejiang_h3_r6_habitat_features";
+const CONTINUOUS_HABITAT_FEATURE_SCHEMA_VERSION = 2;
+const CONTINUOUS_HABITAT_FEATURE_KIND = "zhejiang_h3_r6_continuous_habitat_features";
 const HABITAT_FEATURE_SET_KEYS = Object.freeze([
   "cells",
   "contract",
@@ -36,6 +38,28 @@ const HABITAT_FEATURE_CONTRACT = Object.freeze({
   privateBuildInput: true,
   cachePolicy: "derived_habitat_identity_and_exact_h3_must_not_enter_spatial_oof_cache"
 });
+const CONTINUOUS_HABITAT_FEATURE_CONTRACT = Object.freeze({
+  ...HABITAT_FEATURE_CONTRACT,
+  id: "zhejiang_esa_worldcover_h3_r6_continuous_v2",
+  extent:
+    "zhejiang_conservative_coverage_polygons_h3_r6_center_polyfill_plus_one_ring_clipped_to_published_worldcover_tile_envelope_drop_unclassified_ocean_union_snapshot_cells",
+  modelInput: "continuous_worldcover_class_fractions",
+  hierarchyPolicy: "must_not_create_habitat_space_units",
+  cachePolicy:
+    "continuous_fractions_exact_h3_and_neighbor_identities_must_not_enter_spatial_oof_cache"
+});
+const HABITAT_FEATURE_CONTRACTS = Object.freeze([
+  Object.freeze({
+    schemaVersion: HABITAT_FEATURE_SCHEMA_VERSION,
+    kind: HABITAT_FEATURE_KIND,
+    contract: HABITAT_FEATURE_CONTRACT
+  }),
+  Object.freeze({
+    schemaVersion: CONTINUOUS_HABITAT_FEATURE_SCHEMA_VERSION,
+    kind: CONTINUOUS_HABITAT_FEATURE_KIND,
+    contract: CONTINUOUS_HABITAT_FEATURE_CONTRACT
+  })
+]);
 const WORLDCOVER_CLASS_CODES = Object.freeze([10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100]);
 const HABITAT_CLUSTERS = Object.freeze([
   "water_wetland",
@@ -117,9 +141,9 @@ function habitatClusterForFractions(fractions) {
   return "mixed";
 }
 
-function normalizeCell(cell) {
+function normalizeCell(cell, contract = HABITAT_FEATURE_CONTRACT) {
   const h3Index = String(cell?.h3Index || "").toLowerCase();
-  if (!isValidCell(h3Index) || getResolution(h3Index) !== HABITAT_FEATURE_CONTRACT.h3Resolution) {
+  if (!isValidCell(h3Index) || getResolution(h3Index) !== contract.h3Resolution) {
     throw new HabitatFeatureError(
       "HABITAT_FEATURE_H3_INVALID",
       "生境特征只接受合法 H3 r6 单元。",
@@ -129,13 +153,13 @@ function normalizeCell(cell) {
   const coverage = Number(cell.coverage);
   if (
     !Number.isFinite(coverage) ||
-    coverage < HABITAT_FEATURE_CONTRACT.minimumCellCoverage ||
+    coverage < contract.minimumCellCoverage ||
     coverage > 1
   ) {
     throw new HabitatFeatureError(
       "HABITAT_FEATURE_COVERAGE_INVALID",
       "H3 r6 生境像元覆盖率未达到固定门槛。",
-      { h3Index, coverage, minimum: HABITAT_FEATURE_CONTRACT.minimumCellCoverage }
+      { h3Index, coverage, minimum: contract.minimumCellCoverage }
     );
   }
   const fractions = normalizedFractions(cell.classFractions);
@@ -156,19 +180,29 @@ function normalizeCell(cell) {
 }
 
 function validateHabitatFeatureSet(value, {
-  expectedSnapshotSha256 = null
+  expectedSnapshotSha256 = null,
+  expectedContractId = null,
+  requiredH3Indexes = null
 } = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new HabitatFeatureError("HABITAT_FEATURE_SET_INVALID", "生境特征文件必须是 JSON 对象。");
   }
-  if (
-    Number(value.schemaVersion) !== HABITAT_FEATURE_SCHEMA_VERSION ||
-    value.kind !== HABITAT_FEATURE_KIND ||
-    canonicalJson(value.contract) !== canonicalJson(HABITAT_FEATURE_CONTRACT)
-  ) {
+  const descriptor = HABITAT_FEATURE_CONTRACTS.find((candidate) =>
+    Number(value.schemaVersion) === candidate.schemaVersion &&
+    value.kind === candidate.kind &&
+    canonicalJson(value.contract) === canonicalJson(candidate.contract)
+  );
+  if (!descriptor) {
     throw new HabitatFeatureError(
       "HABITAT_FEATURE_CONTRACT_MISMATCH",
       "生境特征 schema、kind 或固定契约不匹配。"
+    );
+  }
+  if (expectedContractId && descriptor.contract.id !== String(expectedContractId)) {
+    throw new HabitatFeatureError(
+      "HABITAT_FEATURE_CONTRACT_MISMATCH",
+      "生境特征与请求的固定契约不匹配。",
+      { expectedContractId, actualContractId: descriptor.contract.id }
     );
   }
   const actualKeys = Object.keys(value).sort();
@@ -209,7 +243,7 @@ function validateHabitatFeatureSet(value, {
   if (!Array.isArray(value.cells) || !value.cells.length) {
     throw new HabitatFeatureError("HABITAT_FEATURE_CELLS_MISSING", "生境特征没有 H3 r6 单元。");
   }
-  const cells = value.cells.map(normalizeCell)
+  const cells = value.cells.map((cell) => normalizeCell(cell, descriptor.contract))
     .sort((left, right) => left.h3Index.localeCompare(right.h3Index));
   for (let index = 1; index < cells.length; index += 1) {
     if (cells[index - 1].h3Index === cells[index].h3Index) {
@@ -221,9 +255,9 @@ function validateHabitatFeatureSet(value, {
     }
   }
   const payload = {
-    schemaVersion: HABITAT_FEATURE_SCHEMA_VERSION,
-    kind: HABITAT_FEATURE_KIND,
-    contract: HABITAT_FEATURE_CONTRACT,
+    schemaVersion: descriptor.schemaVersion,
+    kind: descriptor.kind,
+    contract: descriptor.contract,
     snapshotSha256,
     tileManifestSha256,
     generationImplementationSha256,
@@ -241,6 +275,20 @@ function validateHabitatFeatureSet(value, {
     );
   }
   const cellsByH3 = new Map(cells.map((cell) => [cell.h3Index, cell]));
+  const required = requiredH3Indexes == null
+    ? []
+    : [...new Set([...requiredH3Indexes].map((h3Index) => String(h3Index).toLowerCase()))].sort();
+  const missingRequiredH3Indexes = required.filter((h3Index) => !cellsByH3.has(h3Index));
+  if (missingRequiredH3Indexes.length) {
+    throw new HabitatFeatureError(
+      "HABITAT_FEATURE_COVERAGE_INCOMPLETE",
+      "生境特征没有覆盖全部必需 H3 r6 单元。",
+      {
+        missingCount: missingRequiredH3Indexes.length,
+        firstMissingH3Indexes: missingRequiredH3Indexes.slice(0, 20)
+      }
+    );
+  }
   const clusterCounts = Object.fromEntries(HABITAT_CLUSTERS.map((cluster) => [cluster, 0]));
   for (const cell of cells) clusterCounts[cell.habitatCluster] += 1;
   return {
@@ -277,12 +325,13 @@ function loadHabitatFeatureSet(path, options = {}) {
 
 function habitatManifestSummary(featureSet) {
   if (!featureSet) return null;
+  const contract = featureSet.contract || HABITAT_FEATURE_CONTRACT;
   return {
-    contractId: HABITAT_FEATURE_CONTRACT.id,
-    sourceDataset: HABITAT_FEATURE_CONTRACT.sourceDataset,
-    sourceDatasetYear: HABITAT_FEATURE_CONTRACT.sourceDatasetYear,
-    sourceDatasetVersion: HABITAT_FEATURE_CONTRACT.sourceDatasetVersion,
-    sourceLicense: HABITAT_FEATURE_CONTRACT.sourceLicense,
+    contractId: contract.id,
+    sourceDataset: contract.sourceDataset,
+    sourceDatasetYear: contract.sourceDatasetYear,
+    sourceDatasetVersion: contract.sourceDatasetVersion,
+    sourceLicense: contract.sourceLicense,
     fileSha256: featureSet.fileSha256 || null,
     featureSetSha256: featureSet.featureSetSha256,
     generationImplementationSha256: featureSet.generationImplementationSha256,
@@ -293,8 +342,12 @@ function habitatManifestSummary(featureSet) {
 }
 
 module.exports = {
+  CONTINUOUS_HABITAT_FEATURE_CONTRACT,
+  CONTINUOUS_HABITAT_FEATURE_KIND,
+  CONTINUOUS_HABITAT_FEATURE_SCHEMA_VERSION,
   HABITAT_CLUSTERS,
   HABITAT_FEATURE_CONTRACT,
+  HABITAT_FEATURE_CONTRACTS,
   HABITAT_FEATURE_KIND,
   HABITAT_FEATURE_SCHEMA_VERSION,
   HABITAT_FEATURE_SET_KEYS,

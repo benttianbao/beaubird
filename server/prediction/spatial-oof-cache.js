@@ -20,17 +20,20 @@ const { DatabaseSync } = require("node:sqlite");
 const { canonicalJson } = require("./spatial-splits");
 const { LOCATION_NORMALIZATION_VERSION } = require("./location-normalization");
 const {
-  HABITAT_CLUSTERS,
-  HABITAT_FEATURE_CONTRACT
+  CONTINUOUS_HABITAT_FEATURE_CONTRACT,
+  HABITAT_CLUSTERS
 } = require("./habitat-features");
+const {
+  CONTINUOUS_HABITAT_KERNEL_CONTRACT
+} = require("./continuous-habitat");
 const {
   FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1,
   buildAdminExposureCapCandidates
 } = require("./spatial-transfer");
 
-const SPATIAL_OOF_CACHE_SCHEMA_VERSION = 4;
+const SPATIAL_OOF_CACHE_SCHEMA_VERSION = 5;
 const SPATIAL_OOF_CACHE_KIND =
-  "zhejiang_development_strict_nested_spatial_oof_sufficient_statistics_habitat_v4";
+  "zhejiang_development_strict_nested_spatial_oof_sufficient_statistics_continuous_habitat_v5";
 const SPATIAL_OOF_CACHE_PANEL = "development";
 const DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY =
   "distinct_known_observer_group_key_outside_all_sealed_r6_buffers";
@@ -43,13 +46,14 @@ const SPATIAL_OOF_CACHE_DEEPEST_LEVELS = Object.freeze([
   "province",
   "city",
   "district",
-  "habitat",
+  "habitat_continuous",
   "grid_r6",
   "grid_r7",
   "point"
 ]);
 const SPATIAL_OOF_CACHE_GENERATION_FILES = Object.freeze([
   "tools/build-zhejiang-prediction-model.js",
+  "server/prediction/continuous-habitat.js",
   "server/prediction/geo.js",
   "server/prediction/habitat-features.js",
   "server/prediction/location-normalization.js",
@@ -67,6 +71,7 @@ const SOURCE_ROW_KEYS = Object.freeze([
   "baselineProbability",
   "contextIndex",
   "deepestLevel",
+  "habitatEvidence",
   "hasSupportedLocalUnit",
   "positiveCount",
   "rawProbability",
@@ -75,6 +80,12 @@ const SOURCE_ROW_KEYS = Object.freeze([
 ]);
 const ADMIN_EVIDENCE_LEVEL_KEYS = Object.freeze(["city", "district", "province"]);
 const ADMIN_EVIDENCE_VALUE_KEYS = Object.freeze(["detections", "exposure", "strength"]);
+const HABITAT_EVIDENCE_VALUE_KEYS = Object.freeze([
+  "detections",
+  "exposure",
+  "neighborCount",
+  "strength"
+]);
 const FOLD_EVIDENCE_CONFIGURATION_KEYS = Object.freeze([
   "bandwidthDays",
   "calibrationContextSampleModulo",
@@ -88,9 +99,11 @@ const EVIDENCE_OPTIONS_KEYS = Object.freeze([
   "applyOnlyWithoutSupportedLocalUnit",
   "bandwidthCandidates",
   "captureAdminEvidence",
+  "continuousHabitatKernel",
   "coordinateQcEvaluationScope",
   "dataCutoffDate",
   "habitatFeatures",
+  "habitatModel",
   "holdoutEvaluation",
   "includeFlaggedCleanReports",
   "levels",
@@ -169,6 +182,9 @@ const HABITAT_FEATURE_METADATA_KEYS = Object.freeze([
   "sourceLicense",
   "tileManifestSha256"
 ]);
+const CONTINUOUS_HABITAT_KERNEL_KEYS = Object.freeze(
+  Object.keys(CONTINUOUS_HABITAT_KERNEL_CONTRACT).sort()
+);
 const PREVALENCE_GROUP_KEYS = Object.freeze([
   "group_30_79",
   "group_80_199",
@@ -215,6 +231,9 @@ const CACHE_TABLE_COLUMNS = Object.freeze({
     "province_exposure",
     "city_exposure",
     "district_exposure",
+    "habitat_exposure",
+    "habitat_neighbor_count",
+    "habitat_strength",
     "has_supported_local_unit",
     "deepest_level"
   ]),
@@ -234,6 +253,9 @@ const CACHE_TABLE_COLUMNS = Object.freeze({
     "province_exposure",
     "city_exposure",
     "district_exposure",
+    "habitat_exposure",
+    "habitat_neighbor_count",
+    "habitat_strength",
     "has_supported_local_unit",
     "deepest_level"
   ]),
@@ -256,6 +278,7 @@ const CACHE_TABLE_COLUMNS = Object.freeze({
     "province_detections",
     "city_detections",
     "district_detections",
+    "habitat_detections",
     "reference_raw_probability",
     "reference_baseline_probability"
   ]),
@@ -279,6 +302,7 @@ const CACHE_TABLE_COLUMNS = Object.freeze({
     "province_detections",
     "city_detections",
     "district_detections",
+    "habitat_detections",
     "reference_raw_probability",
     "reference_baseline_probability"
   ]),
@@ -332,10 +356,12 @@ const SPATIAL_OOF_CACHE_EVIDENCE_CONTRACT_SHA256 = sha256(Buffer.from(canonicalJ
   sourceRowKeys: SOURCE_ROW_KEYS,
   adminEvidenceLevels: ADMIN_EVIDENCE_LEVEL_KEYS,
   adminEvidenceValueKeys: ADMIN_EVIDENCE_VALUE_KEYS,
+  habitatEvidenceValueKeys: HABITAT_EVIDENCE_VALUE_KEYS,
   foldEvidenceConfigurationKeys: FOLD_EVIDENCE_CONFIGURATION_KEYS,
   evidenceOptionsKeys: EVIDENCE_OPTIONS_KEYS,
   contextIdentity: "outer_inner_fold_local_dense_ordinal_without_location_mapping",
-  candidateEvidence: "uncapped_province_city_district_float64_sufficient_statistics",
+  candidateEvidence:
+    "uncapped_province_city_district_plus_fixed_continuous_habitat_float64_sufficient_statistics",
   developmentPoolPositiveCountPolicy: DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY,
   outerTrainingPositiveCountPolicy: OUTER_TRAINING_POSITIVE_COUNT_POLICY,
   innerTrainingPositiveCountPolicy: INNER_TRAINING_POSITIVE_COUNT_POLICY,
@@ -585,11 +611,11 @@ function normalizeHabitatFeatures(value) {
     "evidenceOptions.habitatFeatures"
   );
   if (
-    value.contractId !== HABITAT_FEATURE_CONTRACT.id ||
-    value.sourceDataset !== HABITAT_FEATURE_CONTRACT.sourceDataset ||
-    Number(value.sourceDatasetYear) !== HABITAT_FEATURE_CONTRACT.sourceDatasetYear ||
-    value.sourceDatasetVersion !== HABITAT_FEATURE_CONTRACT.sourceDatasetVersion ||
-    value.sourceLicense !== HABITAT_FEATURE_CONTRACT.sourceLicense
+    value.contractId !== CONTINUOUS_HABITAT_FEATURE_CONTRACT.id ||
+    value.sourceDataset !== CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceDataset ||
+    Number(value.sourceDatasetYear) !== CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceDatasetYear ||
+    value.sourceDatasetVersion !== CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceDatasetVersion ||
+    value.sourceLicense !== CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceLicense
   ) {
     throw new SpatialOofCacheError(
       "SPATIAL_OOF_CACHE_VALUE_INVALID",
@@ -625,7 +651,7 @@ function normalizeHabitatFeatures(value) {
   return {
     cellCount,
     clusterCounts,
-    contractId: HABITAT_FEATURE_CONTRACT.id,
+    contractId: CONTINUOUS_HABITAT_FEATURE_CONTRACT.id,
     featureSetSha256: normalizeSha256(
       value.featureSetSha256,
       "evidenceOptions.habitatFeatures.featureSetSha256"
@@ -641,21 +667,21 @@ function normalizeHabitatFeatures(value) {
     meanCoverage: finiteNumber(
       value.meanCoverage,
       "evidenceOptions.habitatFeatures.meanCoverage",
-      { minimum: HABITAT_FEATURE_CONTRACT.minimumCellCoverage, maximum: 1 }
+      { minimum: CONTINUOUS_HABITAT_FEATURE_CONTRACT.minimumCellCoverage, maximum: 1 }
     ),
     minimumCoverage: finiteNumber(
       value.minimumCoverage,
       "evidenceOptions.habitatFeatures.minimumCoverage",
-      { minimum: HABITAT_FEATURE_CONTRACT.minimumCellCoverage, maximum: 1 }
+      { minimum: CONTINUOUS_HABITAT_FEATURE_CONTRACT.minimumCellCoverage, maximum: 1 }
     ),
     snapshotSha256: normalizeSha256(
       value.snapshotSha256,
       "evidenceOptions.habitatFeatures.snapshotSha256"
     ),
-    sourceDataset: HABITAT_FEATURE_CONTRACT.sourceDataset,
-    sourceDatasetVersion: HABITAT_FEATURE_CONTRACT.sourceDatasetVersion,
-    sourceDatasetYear: HABITAT_FEATURE_CONTRACT.sourceDatasetYear,
-    sourceLicense: HABITAT_FEATURE_CONTRACT.sourceLicense,
+    sourceDataset: CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceDataset,
+    sourceDatasetVersion: CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceDatasetVersion,
+    sourceDatasetYear: CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceDatasetYear,
+    sourceLicense: CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceLicense,
     tileManifestSha256: normalizeSha256(
       value.tileManifestSha256,
       "evidenceOptions.habitatFeatures.tileManifestSha256"
@@ -678,6 +704,27 @@ function normalizeEvidenceOptions(value) {
   }
   if (canonicalJson(value.levels) !== canonicalJson(["province", "city", "district"])) {
     throw new SpatialOofCacheError("SPATIAL_OOF_CACHE_VALUE_INVALID", "evidenceOptions.levels 必须固定为省、市、区县。" );
+  }
+  if (value.habitatModel !== CONTINUOUS_HABITAT_KERNEL_CONTRACT.id) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_VALUE_INVALID",
+      "evidenceOptions.habitatModel 必须匹配连续生境 v7 契约。"
+    );
+  }
+  assertExactKeys(
+    value.continuousHabitatKernel,
+    CONTINUOUS_HABITAT_KERNEL_KEYS,
+    "SPATIAL_OOF_CACHE_PRIVACY_VIOLATION",
+    "evidenceOptions.continuousHabitatKernel"
+  );
+  if (
+    canonicalJson(value.continuousHabitatKernel) !==
+    canonicalJson(CONTINUOUS_HABITAT_KERNEL_CONTRACT)
+  ) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_VALUE_INVALID",
+      "evidenceOptions.continuousHabitatKernel 不匹配预登记契约。"
+    );
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value.dataCutoffDate || ""))) {
     throw new SpatialOofCacheError("SPATIAL_OOF_CACHE_VALUE_INVALID", "evidenceOptions.dataCutoffDate 非法。" );
@@ -737,9 +784,11 @@ function normalizeEvidenceOptions(value) {
       integer: true
     }),
     captureAdminEvidence: true,
+    continuousHabitatKernel: JSON.parse(canonicalJson(CONTINUOUS_HABITAT_KERNEL_CONTRACT)),
     coordinateQcEvaluationScope: EVIDENCE_POLICY_VALUES.coordinateQcEvaluationScope,
     dataCutoffDate: String(value.dataCutoffDate),
     habitatFeatures: normalizeHabitatFeatures(value.habitatFeatures),
+    habitatModel: CONTINUOUS_HABITAT_KERNEL_CONTRACT.id,
     holdoutEvaluation,
     includeFlaggedCleanReports: value.includeFlaggedCleanReports,
     levels: ["province", "city", "district"],
@@ -870,6 +919,36 @@ function normalizeAdminEvidence(value, path) {
   return result;
 }
 
+function normalizeHabitatEvidence(value, path) {
+  assertExactKeys(
+    value,
+    HABITAT_EVIDENCE_VALUE_KEYS,
+    "SPATIAL_OOF_CACHE_PRIVACY_VIOLATION",
+    path
+  );
+  const exposure = finiteNumber(value.exposure, `${path}.exposure`, { minimum: 0 });
+  const detections = finiteNumber(value.detections, `${path}.detections`, {
+    minimum: 0,
+    maximum: exposure
+  });
+  const strength = finiteNumber(value.strength, `${path}.strength`, {
+    minimum: Number.MIN_VALUE
+  });
+  const neighborCount = finiteInteger(value.neighborCount, `${path}.neighborCount`, {
+    minimum: 1,
+    maximum: CONTINUOUS_HABITAT_KERNEL_CONTRACT.neighborCount
+  });
+  if (
+    strength !== CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidencePriorStrength
+  ) {
+    throw new SpatialOofCacheError(
+      "SPATIAL_OOF_CACHE_VALUE_INVALID",
+      `${path}.strength 不匹配预登记连续生境强度。`
+    );
+  }
+  return { exposure, detections, neighborCount, strength };
+}
+
 function normalizeSourceRow(row, foldId, rowIndex, pathPrefix = `folds[${foldId}]`) {
   const path = `${pathPrefix}.scoreRows[${rowIndex}]`;
   assertExactKeys(row, SOURCE_ROW_KEYS, "SPATIAL_OOF_CACHE_PRIVACY_VIOLATION", path);
@@ -916,7 +995,8 @@ function normalizeSourceRow(row, foldId, rowIndex, pathPrefix = `folds[${foldId}
     baselineProbability,
     deepestLevel,
     hasSupportedLocalUnit: row.hasSupportedLocalUnit,
-    adminEvidence: normalizeAdminEvidence(row.adminEvidence, `${path}.adminEvidence`)
+    adminEvidence: normalizeAdminEvidence(row.adminEvidence, `${path}.adminEvidence`),
+    habitatEvidence: normalizeHabitatEvidence(row.habitatEvidence, `${path}.habitatEvidence`)
   };
 }
 
@@ -952,12 +1032,23 @@ function normalizeEvidenceSet({
       provinceExposure: row.adminEvidence.province.exposure,
       cityExposure: row.adminEvidence.city.exposure,
       districtExposure: row.adminEvidence.district.exposure,
+      habitatExposure: row.habitatEvidence.exposure,
+      habitatNeighborCount: row.habitatEvidence.neighborCount,
+      habitatStrength: row.habitatEvidence.strength,
       hasSupportedLocalUnit: row.hasSupportedLocalUnit,
       deepestLevel: row.deepestLevel
     };
     const priorContext = contexts.get(row.contextIndex);
     if (priorContext) {
-      for (const key of ["total", "provinceExposure", "cityExposure", "districtExposure"]) {
+      for (const key of [
+        "total",
+        "provinceExposure",
+        "cityExposure",
+        "districtExposure",
+        "habitatExposure",
+        "habitatNeighborCount",
+        "habitatStrength"
+      ]) {
         if (!comparableNumber(priorContext[key], context[key])) {
           throw new SpatialOofCacheError(
             "SPATIAL_OOF_CACHE_CONTEXT_INCONSISTENT",
@@ -1121,8 +1212,11 @@ function createCacheSchema(database) {
       province_exposure REAL NOT NULL CHECK(province_exposure >= 0),
       city_exposure REAL NOT NULL CHECK(city_exposure >= 0),
       district_exposure REAL NOT NULL CHECK(district_exposure >= 0),
+      habitat_exposure REAL NOT NULL CHECK(habitat_exposure >= 0),
+      habitat_neighbor_count INTEGER NOT NULL CHECK(habitat_neighbor_count BETWEEN 1 AND 24),
+      habitat_strength REAL NOT NULL CHECK(habitat_strength > 0),
       has_supported_local_unit INTEGER NOT NULL CHECK(has_supported_local_unit IN (0, 1)),
-      deepest_level TEXT NOT NULL CHECK(deepest_level IN ('province','city','district','habitat','grid_r6','grid_r7','point')),
+      deepest_level TEXT NOT NULL CHECK(deepest_level IN ('province','city','district','habitat_continuous','grid_r6','grid_r7','point')),
       PRIMARY KEY (fold_id, context_index),
       FOREIGN KEY (fold_id) REFERENCES folds(fold_id)
     ) WITHOUT ROWID;
@@ -1134,8 +1228,11 @@ function createCacheSchema(database) {
       province_exposure REAL NOT NULL CHECK(province_exposure >= 0),
       city_exposure REAL NOT NULL CHECK(city_exposure >= 0),
       district_exposure REAL NOT NULL CHECK(district_exposure >= 0),
+      habitat_exposure REAL NOT NULL CHECK(habitat_exposure >= 0),
+      habitat_neighbor_count INTEGER NOT NULL CHECK(habitat_neighbor_count BETWEEN 1 AND 24),
+      habitat_strength REAL NOT NULL CHECK(habitat_strength > 0),
       has_supported_local_unit INTEGER NOT NULL CHECK(has_supported_local_unit IN (0, 1)),
-      deepest_level TEXT NOT NULL CHECK(deepest_level IN ('province','city','district','habitat','grid_r6','grid_r7','point')),
+      deepest_level TEXT NOT NULL CHECK(deepest_level IN ('province','city','district','habitat_continuous','grid_r6','grid_r7','point')),
       PRIMARY KEY (outer_fold_id, inner_fold_id, context_index),
       FOREIGN KEY (outer_fold_id, inner_fold_id) REFERENCES inner_folds(outer_fold_id, inner_fold_id)
     ) WITHOUT ROWID;
@@ -1173,6 +1270,7 @@ function createCacheSchema(database) {
       province_detections REAL NOT NULL CHECK(province_detections >= 0),
       city_detections REAL NOT NULL CHECK(city_detections >= 0),
       district_detections REAL NOT NULL CHECK(district_detections >= 0),
+      habitat_detections REAL NOT NULL CHECK(habitat_detections >= 0),
       reference_raw_probability REAL NOT NULL CHECK(reference_raw_probability BETWEEN 0 AND 1),
       reference_baseline_probability REAL NOT NULL CHECK(reference_baseline_probability BETWEEN 0 AND 1),
       PRIMARY KEY (fold_id, context_index, taxon_index),
@@ -1188,6 +1286,7 @@ function createCacheSchema(database) {
       province_detections REAL NOT NULL CHECK(province_detections >= 0),
       city_detections REAL NOT NULL CHECK(city_detections >= 0),
       district_detections REAL NOT NULL CHECK(district_detections >= 0),
+      habitat_detections REAL NOT NULL CHECK(habitat_detections >= 0),
       reference_raw_probability REAL NOT NULL CHECK(reference_raw_probability BETWEEN 0 AND 1),
       reference_baseline_probability REAL NOT NULL CHECK(reference_baseline_probability BETWEEN 0 AND 1),
       PRIMARY KEY (outer_fold_id, inner_fold_id, context_index, taxon_index),
@@ -1214,10 +1313,13 @@ function logicalPayloadSha256(database) {
                                  taxon_count, score_count, evidence_configuration_json, reference_raw_metrics_json
                           FROM inner_folds ORDER BY outer_fold_id, inner_fold_id`);
   addRows("context", `SELECT fold_id, context_index, total, province_exposure, city_exposure,
-                              district_exposure, has_supported_local_unit, deepest_level
+                              district_exposure, habitat_exposure, habitat_neighbor_count,
+                              habitat_strength, has_supported_local_unit, deepest_level
                        FROM contexts ORDER BY fold_id, context_index`);
   addRows("inner_context", `SELECT outer_fold_id, inner_fold_id, context_index, total, province_exposure,
-                                    city_exposure, district_exposure, has_supported_local_unit, deepest_level
+                                    city_exposure, district_exposure, habitat_exposure,
+                                    habitat_neighbor_count, habitat_strength,
+                                    has_supported_local_unit, deepest_level
                              FROM inner_contexts ORDER BY outer_fold_id, inner_fold_id, context_index`);
   addRows("taxon", `SELECT fold_id, taxon_index, taxon_id, positive_count, development_positive_count,
                             city_strength, district_strength
@@ -1226,11 +1328,11 @@ function logicalPayloadSha256(database) {
                                   outer_positive_count, development_positive_count, city_strength, district_strength
                            FROM inner_taxa ORDER BY outer_fold_id, inner_fold_id, taxon_index`);
   addRows("score", `SELECT fold_id, context_index, taxon_index, actual_positive, province_detections,
-                            city_detections, district_detections, reference_raw_probability,
+                            city_detections, district_detections, habitat_detections, reference_raw_probability,
                             reference_baseline_probability
                      FROM scores ORDER BY fold_id, context_index, taxon_index`);
   addRows("inner_score", `SELECT outer_fold_id, inner_fold_id, context_index, taxon_index, actual_positive,
-                                  province_detections, city_detections, district_detections,
+                                  province_detections, city_detections, district_detections, habitat_detections,
                                   reference_raw_probability, reference_baseline_probability
                            FROM inner_scores ORDER BY outer_fold_id, inner_fold_id, context_index, taxon_index`);
   return hash.digest("hex");
@@ -1369,8 +1471,9 @@ function writeSpatialOofCache({
     const insertContext = database.prepare(`
       INSERT INTO contexts
         (fold_id, context_index, total, province_exposure, city_exposure, district_exposure,
+         habitat_exposure, habitat_neighbor_count, habitat_strength,
          has_supported_local_unit, deepest_level)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertTaxon = database.prepare(`
       INSERT INTO taxa
@@ -1381,9 +1484,9 @@ function writeSpatialOofCache({
     const insertScore = database.prepare(`
       INSERT INTO scores
         (fold_id, context_index, taxon_index, actual_positive, province_detections,
-         city_detections, district_detections, reference_raw_probability,
+         city_detections, district_detections, habitat_detections, reference_raw_probability,
          reference_baseline_probability)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertInnerFold = database.prepare(`
       INSERT INTO inner_folds
@@ -1394,8 +1497,9 @@ function writeSpatialOofCache({
     const insertInnerContext = database.prepare(`
       INSERT INTO inner_contexts
         (outer_fold_id, inner_fold_id, context_index, total, province_exposure, city_exposure,
-         district_exposure, has_supported_local_unit, deepest_level)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         district_exposure, habitat_exposure, habitat_neighbor_count, habitat_strength,
+         has_supported_local_unit, deepest_level)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertInnerTaxon = database.prepare(`
       INSERT INTO inner_taxa
@@ -1406,9 +1510,10 @@ function writeSpatialOofCache({
     const insertInnerScore = database.prepare(`
       INSERT INTO inner_scores
         (outer_fold_id, inner_fold_id, context_index, taxon_index, actual_positive,
-         province_detections, city_detections, district_detections, reference_raw_probability,
+         province_detections, city_detections, district_detections, habitat_detections,
+         reference_raw_probability,
          reference_baseline_probability)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     let totalRows = 0;
@@ -1443,12 +1548,23 @@ function writeSpatialOofCache({
           provinceExposure: row.adminEvidence.province.exposure,
           cityExposure: row.adminEvidence.city.exposure,
           districtExposure: row.adminEvidence.district.exposure,
+          habitatExposure: row.habitatEvidence.exposure,
+          habitatNeighborCount: row.habitatEvidence.neighborCount,
+          habitatStrength: row.habitatEvidence.strength,
           hasSupportedLocalUnit: row.hasSupportedLocalUnit,
           deepestLevel: row.deepestLevel
         };
         const priorContext = contexts.get(row.contextIndex);
         if (priorContext) {
-          for (const key of ["total", "provinceExposure", "cityExposure", "districtExposure"]) {
+          for (const key of [
+            "total",
+            "provinceExposure",
+            "cityExposure",
+            "districtExposure",
+            "habitatExposure",
+            "habitatNeighborCount",
+            "habitatStrength"
+          ]) {
             if (!comparableNumber(priorContext[key], context[key])) {
               throw new SpatialOofCacheError(
                 "SPATIAL_OOF_CACHE_CONTEXT_INCONSISTENT",
@@ -1543,6 +1659,9 @@ function writeSpatialOofCache({
           context.provinceExposure,
           context.cityExposure,
           context.districtExposure,
+          context.habitatExposure,
+          context.habitatNeighborCount,
+          context.habitatStrength,
           context.hasSupportedLocalUnit ? 1 : 0,
           context.deepestLevel
         );
@@ -1568,6 +1687,7 @@ function writeSpatialOofCache({
           row.adminEvidence.province.detections,
           row.adminEvidence.city.detections,
           row.adminEvidence.district.detections,
+          row.habitatEvidence.detections,
           row.rawProbability,
           row.baselineProbability
         );
@@ -1646,6 +1766,9 @@ function writeSpatialOofCache({
             context.provinceExposure,
             context.cityExposure,
             context.districtExposure,
+            context.habitatExposure,
+            context.habitatNeighborCount,
+            context.habitatStrength,
             context.hasSupportedLocalUnit ? 1 : 0,
             context.deepestLevel
           );
@@ -1674,6 +1797,7 @@ function writeSpatialOofCache({
             row.adminEvidence.province.detections,
             row.adminEvidence.city.detections,
             row.adminEvidence.district.detections,
+            row.habitatEvidence.detections,
             row.rawProbability,
             row.baselineProbability
           );
@@ -2099,6 +2223,7 @@ function validateCacheContents(database, metadata, expectedFoldIds) {
        OR scores.province_detections < 0 OR scores.province_detections > contexts.province_exposure
        OR scores.city_detections < 0 OR scores.city_detections > contexts.city_exposure
        OR scores.district_detections < 0 OR scores.district_detections > contexts.district_exposure
+       OR scores.habitat_detections < 0 OR scores.habitat_detections > contexts.habitat_exposure
        OR scores.reference_raw_probability < 0 OR scores.reference_raw_probability > 1
        OR scores.reference_baseline_probability < 0 OR scores.reference_baseline_probability > 1
        OR taxa.positive_count < 0 OR taxa.development_positive_count < taxa.positive_count
@@ -2118,6 +2243,7 @@ function validateCacheContents(database, metadata, expectedFoldIds) {
        OR scores.province_detections < 0 OR scores.province_detections > contexts.province_exposure
        OR scores.city_detections < 0 OR scores.city_detections > contexts.city_exposure
        OR scores.district_detections < 0 OR scores.district_detections > contexts.district_exposure
+       OR scores.habitat_detections < 0 OR scores.habitat_detections > contexts.habitat_exposure
        OR scores.reference_raw_probability < 0 OR scores.reference_raw_probability > 1
        OR scores.reference_baseline_probability < 0 OR scores.reference_baseline_probability > 1
        OR taxa.positive_count < 0 OR taxa.outer_positive_count < taxa.positive_count
@@ -2261,7 +2387,9 @@ function loadSpatialOofCache({
              contexts.deepest_level, contexts.has_supported_local_unit,
              contexts.province_exposure, scores.province_detections,
              contexts.city_exposure, scores.city_detections, taxa.city_strength,
-             contexts.district_exposure, scores.district_detections, taxa.district_strength
+             contexts.district_exposure, scores.district_detections, taxa.district_strength,
+             contexts.habitat_exposure, scores.habitat_detections,
+             contexts.habitat_strength, contexts.habitat_neighbor_count
       FROM scores
       JOIN contexts USING (fold_id, context_index)
       JOIN taxa USING (fold_id, taxon_index)
@@ -2285,7 +2413,11 @@ function loadSpatialOofCache({
         cityStrength: Number(row.city_strength),
         districtExposure: Number(row.district_exposure),
         districtDetections: Number(row.district_detections),
-        districtStrength: Number(row.district_strength)
+        districtStrength: Number(row.district_strength),
+        habitatExposure: Number(row.habitat_exposure),
+        habitatDetections: Number(row.habitat_detections),
+        habitatStrength: Number(row.habitat_strength),
+        habitatNeighborCount: Number(row.habitat_neighbor_count)
       });
     }
     for (const row of database.prepare(`
@@ -2297,7 +2429,9 @@ function loadSpatialOofCache({
              contexts.deepest_level, contexts.has_supported_local_unit,
              contexts.province_exposure, scores.province_detections,
              contexts.city_exposure, scores.city_detections, taxa.city_strength,
-             contexts.district_exposure, scores.district_detections, taxa.district_strength
+             contexts.district_exposure, scores.district_detections, taxa.district_strength,
+             contexts.habitat_exposure, scores.habitat_detections,
+             contexts.habitat_strength, contexts.habitat_neighbor_count
       FROM inner_scores scores
       JOIN inner_contexts contexts USING (outer_fold_id, inner_fold_id, context_index)
       JOIN inner_taxa taxa USING (outer_fold_id, inner_fold_id, taxon_index)
@@ -2322,7 +2456,11 @@ function loadSpatialOofCache({
         cityStrength: Number(row.city_strength),
         districtExposure: Number(row.district_exposure),
         districtDetections: Number(row.district_detections),
-        districtStrength: Number(row.district_strength)
+        districtStrength: Number(row.district_strength),
+        habitatExposure: Number(row.habitat_exposure),
+        habitatDetections: Number(row.habitat_detections),
+        habitatStrength: Number(row.habitat_strength),
+        habitatNeighborCount: Number(row.habitat_neighbor_count)
       });
     }
     return {

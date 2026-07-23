@@ -17,11 +17,17 @@ const {
 const { betaInterval, fitBetaCalibration, regularizedIncompleteBeta } = require("../server/prediction/math");
 const { PredictionError, PredictionModel } = require("../server/prediction/model");
 const {
+  CONTINUOUS_HABITAT_FEATURE_CONTRACT,
+  CONTINUOUS_HABITAT_FEATURE_KIND,
+  CONTINUOUS_HABITAT_FEATURE_SCHEMA_VERSION,
   HABITAT_FEATURE_CONTRACT,
   HABITAT_FEATURE_KIND,
   HABITAT_FEATURE_SCHEMA_VERSION,
   validateHabitatFeatureSet
 } = require("../server/prediction/habitat-features");
+const {
+  CONTINUOUS_HABITAT_KERNEL_CONTRACT
+} = require("../server/prediction/continuous-habitat");
 const {
   DEFAULT_OPTIONS,
   PredictionBuildError,
@@ -34,10 +40,12 @@ const {
   createTrainingSnapshot,
   crossFitSpatialCalibrators,
   evaluateCachedSpatialRows,
+  evaluationProbability,
   evaluateReleaseQuality,
   guardCalibrationCandidates,
   inspectSnapshotQuality,
   insertSpaceUnits,
+  insertContinuousHabitatFeatures,
   insertTaxa,
   insertTrainingRows,
   publishModelPointer,
@@ -420,6 +428,202 @@ test("runtime applies frozen transfer caps and spatial calibration only to novel
   assert.equal(local.effectiveChecklists, 50);
   assert.equal(local.probability, local.rawProbability);
   model.close();
+  database.close();
+});
+
+test("continuous habitat runtime uses the frozen kernel between district and local grid", () => {
+  const database = new DatabaseSync(":memory:");
+  createArtifactSchema(database);
+  const setManifest = database.prepare("INSERT INTO manifest(key, value) VALUES (?, ?)");
+  for (const [key, value] of Object.entries({
+    schema_version: "2",
+    quality_gate: { passed: true, internalBuild: true },
+    test_only: false,
+    temporal_bandwidth_days: 14,
+    prior_strengths: {
+      city: 24,
+      district: 18,
+      habitat: 14,
+      grid_r6: 14,
+      grid_r7: 10,
+      point: 8
+    },
+    habitat_model: CONTINUOUS_HABITAT_KERNEL_CONTRACT.id,
+    habitat_features: {
+      contractId: CONTINUOUS_HABITAT_FEATURE_CONTRACT.id,
+      cellCount: 9
+    },
+    continuous_habitat_kernel: CONTINUOUS_HABITAT_KERNEL_CONTRACT,
+    novel_grid_spatial_calibration_enabled: false,
+    novel_grid_spatial_calibrators: []
+  })) setManifest.run(key, JSON.stringify(value));
+  database.prepare(`
+    INSERT INTO taxa
+      (taxon_id, common_name, positive_count, observer_count, calibration_scope)
+    VALUES ('common-a', '测试鸟', 300, 30, 'none')
+  `).run();
+  const insertUnit = database.prepare(`
+    INSERT INTO space_units
+      (id, level, code, name, parent_id, city_name,
+       checklist_count, observer_count, support_years_json, supported)
+    VALUES (?, ?, ?, ?, ?, '测试市', ?, ?, '[2025]', ?)
+  `);
+  insertUnit.run("province:zhejiang", "province", "zhejiang", "浙江省", null, 1000, 30, 1);
+  insertUnit.run("city:test", "city", "test", "测试市", "province:zhejiang", 1000, 30, 1);
+  insertUnit.run("district:test", "district", "test", "测试区", "city:test", 1000, 30, 1);
+  insertUnit.run("grid_r6:target", "grid_r6", "target", "目标网格", "district:test", 50, 12, 1);
+  const insertFeature = database.prepare(`
+    INSERT INTO continuous_habitat_features
+      (h3_r6, forest, open, cropland, urban, water_wetland)
+    VALUES (?, 0, 0, 0, 0, 1)
+  `);
+  insertFeature.run("target");
+  const insertExposure = database.prepare(`
+    INSERT INTO checklist_exposure
+      (space_unit_id, season_week, effective_checklists, raw_checklists,
+       observer_count, support_years_json)
+    VALUES (?, 26, ?, ?, 20, '[2025]')
+  `);
+  const insertDetection = database.prepare(`
+    INSERT INTO taxon_detection
+      (space_unit_id, season_week, taxon_id, effective_detections, raw_detections,
+       observer_count, support_years_json)
+    VALUES (?, 26, 'common-a', ?, ?, 10, '[2025]')
+  `);
+  for (const [unitId, exposure, detections] of [
+    ["province:zhejiang", 100, 10],
+    ["city:test", 100, 10],
+    ["district:test", 100, 10]
+  ]) {
+    insertExposure.run(unitId, exposure, exposure);
+    insertDetection.run(unitId, detections, detections);
+  }
+  for (let index = 1; index <= 8; index += 1) {
+    const unitId = `grid_r6:neighbor-${index}`;
+    const code = `neighbor-${index}`;
+    insertUnit.run(unitId, "grid_r6", code, `邻居 ${index}`, "district:test", 20, 5, 0);
+    insertFeature.run(code);
+    insertExposure.run(unitId, 20, 20);
+    insertDetection.run(unitId, 16, 16);
+  }
+  const model = new PredictionModel({ database, builderEvaluation: true });
+  const district = model.scoreUnitTaxonAtWeek("district:test", "common-a", 26);
+  const target = model.scoreUnitTaxonAtWeek("grid_r6:target", "common-a", 26);
+  assert.equal(target.habitatEvidence.neighborCount, 8);
+  assert.equal(target.habitatEvidence.scope, "same_city");
+  assert.equal(target.habitatEvidence.exposure, 160);
+  assert.equal(target.habitatEvidence.detections, 128);
+  assert.equal(target.effectiveChecklists, 10);
+  assert.ok(target.rawProbability > district.rawProbability);
+  assert.equal(target.unit.id, "grid_r6:target");
+  const weekly = (value) => {
+    const values = Array(53).fill(0);
+    values[26] = value;
+    return values;
+  };
+  const exposures = new Map([
+    ["province:zhejiang", weekly(100)],
+    ["city:test", weekly(100)],
+    ["district:test", weekly(100)],
+    ["grid_r6:target", weekly(0)]
+  ]);
+  const hits = new Map([
+    ["province:zhejiang\u0000common-a", weekly(10)],
+    ["city:test\u0000common-a", weekly(10)],
+    ["district:test\u0000common-a", weekly(10)],
+    ["grid_r6:target\u0000common-a", weekly(0)]
+  ]);
+  const habitatNeighbors = [];
+  for (let index = 1; index <= 8; index += 1) {
+    const unitId = `grid_r6:neighbor-${index}`;
+    exposures.set(unitId, weekly(20));
+    hits.set(`${unitId}\u0000common-a`, weekly(16));
+    habitatNeighbors.push({ unitId, weight: 1 });
+  }
+  const expected = evaluationProbability({
+    context: {
+      province_unit: "province:zhejiang",
+      city_unit: "city:test",
+      district_unit: "district:test",
+      habitat_unit: null,
+      grid_r6_unit: "grid_r6:target",
+      grid_r7_unit: null,
+      point_unit: null,
+      season_week: 26,
+      continuousHabitat: { scope: "same_city", neighbors: habitatNeighbors }
+    },
+    taxonId: "common-a",
+    taxonPositiveCount: 300,
+    exposures,
+    hits,
+    supports: new Map([
+      ["province:zhejiang", { checklists: 1000, observers: 30 }],
+      ["city:test", { checklists: 1000, observers: 30 }],
+      ["district:test", { checklists: 1000, observers: 30 }],
+      ["grid_r6:target", { checklists: 50, observers: 12 }]
+    ]),
+    bandwidthDays: 14,
+    options: {
+      ...DEFAULT_OPTIONS,
+      habitatModel: CONTINUOUS_HABITAT_KERNEL_CONTRACT.id,
+      continuousHabitatKernel: CONTINUOUS_HABITAT_KERNEL_CONTRACT
+    }
+  });
+  assert.ok(Math.abs(target.rawProbability - expected.probability) < 1e-12);
+  model.close();
+  database.close();
+});
+
+test("continuous habitat feature materialization conserves every v2 cell", () => {
+  const database = new DatabaseSync(":memory:");
+  createArtifactSchema(database);
+  database.prepare(`
+    INSERT INTO space_units
+      (id, level, code, name, checklist_count, observer_count, support_years_json, supported)
+    VALUES ('grid_r6:a', 'grid_r6', 'a', '网格 A', 1, 1, '[2025]', 0)
+  `).run();
+  const classFractions = {
+    "10": 0.2,
+    "20": 0.1,
+    "30": 0.1,
+    "40": 0.2,
+    "50": 0.1,
+    "60": 0,
+    "70": 0,
+    "80": 0.2,
+    "90": 0.05,
+    "95": 0.05,
+    "100": 0
+  };
+  const featureSet = {
+    contract: CONTINUOUS_HABITAT_FEATURE_CONTRACT,
+    cells: [
+      { h3Index: "b", classFractions },
+      { h3Index: "a", classFractions }
+    ],
+    summary: { cellCount: 2 }
+  };
+  const result = insertContinuousHabitatFeatures(
+    database,
+    featureSet,
+    CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+  );
+  assert.deepEqual(result, {
+    enabled: true,
+    storedCellCount: 2,
+    observedGridR6Count: 1,
+    missingObservedGridR6Count: 0
+  });
+  assert.deepEqual(
+    database.prepare(`
+      SELECT h3_r6, forest, open, cropland, urban, water_wetland
+      FROM continuous_habitat_features ORDER BY h3_r6
+    `).all().map((row) => ({ ...row })),
+    [
+      { h3_r6: "a", forest: 0.2, open: 0.2, cropland: 0.2, urban: 0.1, water_wetland: 0.3 },
+      { h3_r6: "b", forest: 0.2, open: 0.2, cropland: 0.2, urban: 0.1, water_wetland: 0.3 }
+    ]
+  );
   database.close();
 });
 
@@ -936,6 +1140,135 @@ test("district×habitat 回退层完整覆盖报告并保持报告与鸟种证�
        JOIN space_units ON space_units.id = taxon_detection.space_unit_id
        WHERE space_units.level='habitat'`
     ).get().count,
+    sourceObservationCount
+  );
+  artifact.close();
+  source.close();
+});
+
+test("continuous habitat keeps reports and detections conserved without virtual habitat units", () => {
+  const directory = testDirectory("continuous-habitat-conservation");
+  const sourcePath = join(directory, "source.sqlite");
+  createSourceDatabase(sourcePath, {
+    reportCount: 24,
+    yearSpan: 3,
+    observerModulo: 24,
+    multiGrid: true
+  });
+  const source = new DatabaseSync(sourcePath);
+  const quality = inspectSnapshotQuality(source, {
+    minimumNormalReports: 1,
+    minimumCompleteCoverage: 1,
+    minimumCoordinateCoverage: 1,
+    minimumDateCoverage: 1,
+    coordinateSystemConfirmed: true
+  });
+  const h3Indexes = [...new Set(source.prepare(
+    "SELECT longitude, latitude FROM reports ORDER BY report_id"
+  ).all().map((row) => {
+    const coordinate = bd09ToWgs84(row.longitude, row.latitude);
+    return gridCell(coordinate.longitude, coordinate.latitude, "grid_r6").h3Index;
+  }))].sort();
+  const fractions = {
+    "10": 0.4,
+    "20": 0.1,
+    "30": 0,
+    "40": 0.2,
+    "50": 0.1,
+    "60": 0,
+    "70": 0,
+    "80": 0.2,
+    "90": 0,
+    "95": 0,
+    "100": 0
+  };
+  const habitatFeatureSet = validateHabitatFeatureSet({
+    schemaVersion: CONTINUOUS_HABITAT_FEATURE_SCHEMA_VERSION,
+    kind: CONTINUOUS_HABITAT_FEATURE_KIND,
+    contract: CONTINUOUS_HABITAT_FEATURE_CONTRACT,
+    snapshotSha256: "a".repeat(64),
+    tileManifestSha256: "b".repeat(64),
+    generationImplementationSha256: "c".repeat(64),
+    cells: h3Indexes.map((h3Index) => ({
+      h3Index,
+      coverage: 1,
+      classFractions: fractions
+    }))
+  });
+  const artifact = new DatabaseSync(":memory:");
+  createArtifactSchema(artifact);
+  const options = {
+    ...DEFAULT_OPTIONS,
+    dataCutoffDate: quality.report.dataCutoffDate,
+    habitatFeatureSet,
+    habitatModel: CONTINUOUS_HABITAT_KERNEL_CONTRACT.id,
+    continuousHabitatKernel: CONTINUOUS_HABITAT_KERNEL_CONTRACT
+  };
+  const training = insertTrainingRows(
+    source,
+    artifact,
+    quality.pointStats,
+    quality.locationNormalization,
+    quality.report,
+    options
+  );
+  const sourceReportCount = Number(source.prepare("SELECT COUNT(*) count FROM reports").get().count);
+  const sourceObservationCount = Number(source.prepare("SELECT COUNT(*) count FROM observations").get().count);
+  assert.equal(training.stats.insertedReports, sourceReportCount);
+  assert.equal(training.stats.duplicateReports, 0);
+  assert.equal(
+    artifact.prepare("SELECT COUNT(*) count FROM training_reports WHERE habitat_unit IS NOT NULL").get().count,
+    0
+  );
+  assert.equal(
+    artifact.prepare("SELECT COUNT(*) count FROM training_detections").get().count,
+    sourceObservationCount
+  );
+  assert.equal(
+    [...training.registry.units.values()].filter((unit) => unit.level === "habitat").length,
+    0
+  );
+  const occurrence = analyzeOccurrenceEvents(artifact, options);
+  assert.equal(occurrence.analyzedDetections, sourceObservationCount);
+  const summaries = aggregateUnitSummaries(artifact, options);
+  insertSpaceUnits(artifact, training.registry, summaries);
+  const featureRows = insertContinuousHabitatFeatures(
+    artifact,
+    habitatFeatureSet,
+    CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+  );
+  insertTaxa(artifact);
+  aggregateTrainingStatistics(artifact);
+  assert.equal(featureRows.missingObservedGridR6Count, 0);
+  assert.equal(
+    artifact.prepare("SELECT COUNT(*) count FROM space_units WHERE level = 'habitat'").get().count,
+    0
+  );
+  assert.equal(
+    artifact.prepare(`
+      SELECT COUNT(*) count
+      FROM space_units child
+      JOIN space_units parent ON parent.id = child.parent_id
+      WHERE child.level = 'grid_r6' AND parent.level = 'habitat'
+    `).get().count,
+    0
+  );
+  assert.equal(
+    artifact.prepare(`
+      SELECT SUM(raw_checklists) count
+      FROM checklist_exposure
+      JOIN space_units ON space_units.id = checklist_exposure.space_unit_id
+      WHERE space_units.level = 'grid_r6'
+    `).get().count,
+    sourceReportCount
+  );
+  assert.equal(
+    artifact.prepare(`
+      SELECT SUM(raw_detections) count
+      FROM taxon_detection
+      JOIN space_units ON space_units.id = taxon_detection.space_unit_id
+      WHERE space_units.level = 'grid_r6'
+    `).get().count,
     sourceObservationCount
   );
   artifact.close();

@@ -28,6 +28,11 @@ const {
   parameterSetSha256,
   referenceRange
 } = require("./ranking-reference-runtime");
+const {
+  CONTINUOUS_HABITAT_KERNEL_CONTRACT,
+  selectContinuousHabitatNeighbors
+} = require("./continuous-habitat");
+const { canonicalJson } = require("./spatial-splits");
 class SensitivePredictionModel {
   constructor() {
     throw new Error("当前离线模型不启用独立敏感鸟制品；所有有效鸟种统一来自公共训练快照。");
@@ -261,6 +266,11 @@ class PredictionModel {
     this.calibrationCache = new Map();
     this.spatialCalibrationCache = new Map();
     this.spatialCalibrationEnabled = false;
+    this.continuousHabitatEnabled = false;
+    this.continuousHabitatCandidates = null;
+    this.continuousHabitatNeighborCache = new Map();
+    this.continuousHabitatExposureCache = new Map();
+    this.continuousHabitatDetectionCache = new Map();
     this.rankingReferenceParameters = new Map();
     this.rankingReferenceEnabled = false;
     this.schemaVersion = "";
@@ -362,6 +372,27 @@ class PredictionModel {
           c: Number(fit.c)
         });
       }
+      const habitatModel = this.manifestMap.get("habitat_model");
+      if (habitatModel === CONTINUOUS_HABITAT_KERNEL_CONTRACT.id) {
+        const habitatFeatures = this.manifestMap.get("habitat_features");
+        const kernel = this.manifestMap.get("continuous_habitat_kernel");
+        if (
+          habitatFeatures?.contractId !== CONTINUOUS_HABITAT_KERNEL_CONTRACT.featureContractId ||
+          canonicalJson(kernel) !== canonicalJson(CONTINUOUS_HABITAT_KERNEL_CONTRACT)
+        ) {
+          throw new Error("连续生境模型缺少有效的 WorldCover v2 特征或冻结核绑定");
+        }
+        const featureCount = Number(
+          this.database.prepare("SELECT COUNT(*) AS count FROM continuous_habitat_features").get().count
+        ) || 0;
+        if (
+          !featureCount ||
+          Number(habitatFeatures.cellCount) !== featureCount
+        ) {
+          throw new Error("连续生境特征表的行数与 manifest 不一致");
+        }
+        this.continuousHabitatEnabled = true;
+      }
       if (this.schemaVersion === SCHEMA_VERSION) {
         const binding = this.manifestMap.get("ranking_reference");
         if (
@@ -421,6 +452,9 @@ class PredictionModel {
       if (this.schemaVersion === SCHEMA_VERSION) {
         this.database.prepare("SELECT 1 FROM ranking_reference_parameters LIMIT 1").get();
       }
+      if (this.continuousHabitatEnabled) {
+        this.database.prepare("SELECT 1 FROM continuous_habitat_features LIMIT 1").get();
+      }
       if (this.sensitiveModel) this.sensitiveModel.meta();
       const meta = this.meta();
       return { ok: true, modelVersion: meta.modelVersion, schemaVersion: meta.schemaVersion };
@@ -455,6 +489,8 @@ class PredictionModel {
       temporalBandwidthDays: Number(this.manifestMap.get("temporal_bandwidth_days") || 14),
       temporalEvaluationModel: String(this.manifestMap.get("temporal_evaluation_model") || ""),
       rankingReference: this.manifestMap.get("ranking_reference") || null,
+      habitatModel: this.manifestMap.get("habitat_model") || null,
+      continuousHabitatKernel: this.manifestMap.get("continuous_habitat_kernel") || null,
       temporalBaselineModel: String(this.manifestMap.get("temporal_baseline_model") || ""),
       coverage,
       sensitiveAvailable: Boolean(this.sensitiveModel),
@@ -603,6 +639,161 @@ class PredictionModel {
     return unitCache.get(taxonId);
   }
 
+  #continuousHabitatNeighbors(targetGridUnit) {
+    if (!this.continuousHabitatEnabled || !targetGridUnit?.id) return null;
+    if (this.continuousHabitatNeighborCache.has(targetGridUnit.id)) {
+      return this.continuousHabitatNeighborCache.get(targetGridUnit.id);
+    }
+    const targetH3R6 = String(targetGridUnit.code || "").startsWith("grid_r6:")
+      ? String(targetGridUnit.code).slice("grid_r6:".length)
+      : String(targetGridUnit.code || "");
+    const targetFeature = this.database.prepare(`
+      SELECT forest, open, cropland, urban, water_wetland
+      FROM continuous_habitat_features
+      WHERE h3_r6 = ?
+    `).get(targetH3R6);
+    if (!targetFeature) {
+      throw new PredictionError(
+        "MODEL_UNAVAILABLE",
+        `连续生境特征缺少目标网格 ${targetGridUnit.code || targetGridUnit.id}。`,
+        503
+      );
+    }
+    if (!this.continuousHabitatCandidates) {
+      this.continuousHabitatCandidates = this.database.prepare(`
+        SELECT units.id AS unit_id, units.city_name,
+               features.forest, features.open, features.cropland,
+               features.urban, features.water_wetland
+        FROM space_units units
+        JOIN continuous_habitat_features features
+          ON features.h3_r6 = CASE
+            WHEN units.code LIKE 'grid_r6:%' THEN SUBSTR(units.code, 9)
+            ELSE units.code
+          END
+        WHERE units.level = 'grid_r6'
+          AND EXISTS (
+            SELECT 1 FROM checklist_exposure exposure
+            WHERE exposure.space_unit_id = units.id
+          )
+        ORDER BY units.id
+      `).all().map((row) => ({
+        unitId: row.unit_id,
+        cityName: row.city_name,
+        vector: [
+          Number(row.forest),
+          Number(row.open),
+          Number(row.cropland),
+          Number(row.urban),
+          Number(row.water_wetland)
+        ]
+      }));
+    }
+    const selection = selectContinuousHabitatNeighbors({
+      targetUnitId: targetGridUnit.id,
+      targetCityName: targetGridUnit.cityName,
+      targetVector: [
+        Number(targetFeature.forest),
+        Number(targetFeature.open),
+        Number(targetFeature.cropland),
+        Number(targetFeature.urban),
+        Number(targetFeature.water_wetland)
+      ],
+      candidates: this.continuousHabitatCandidates,
+      contract: CONTINUOUS_HABITAT_KERNEL_CONTRACT
+    });
+    if (!selection.neighbors.length) {
+      throw new PredictionError(
+        "MODEL_UNAVAILABLE",
+        `连续生境核在固定最大距离内找不到目标网格 ${targetGridUnit.id} 的训练邻居。`,
+        503
+      );
+    }
+    this.continuousHabitatNeighborCache.set(targetGridUnit.id, selection);
+    return selection;
+  }
+
+  #continuousHabitatExposure(targetGridUnit) {
+    if (this.continuousHabitatExposureCache.has(targetGridUnit.id)) {
+      return this.continuousHabitatExposureCache.get(targetGridUnit.id);
+    }
+    const selection = this.#continuousHabitatNeighbors(targetGridUnit);
+    if (!selection) return null;
+    const values = Array.from(
+      { length: 53 },
+      () => ({ effective: 0, raw: 0, observers: 0, years: [] })
+    );
+    const placeholders = selection.neighbors.map(() => "(?, ?, ?)").join(", ");
+    const parameters = selection.neighbors.flatMap((neighbor, index) => [
+      index,
+      neighbor.unitId,
+      neighbor.weight
+    ]);
+    const rows = this.database.prepare(`
+      WITH neighbors(ordinal, space_unit_id, weight) AS (VALUES ${placeholders})
+      SELECT neighbors.ordinal, neighbors.weight, exposure.*
+      FROM neighbors
+      JOIN checklist_exposure exposure USING (space_unit_id)
+      ORDER BY exposure.season_week, neighbors.ordinal
+    `).all(...parameters);
+    for (const row of rows) {
+      const week = Number(row.season_week);
+      values[week].effective += Number(row.weight) * (Number(row.effective_checklists) || 0);
+      values[week].raw += Number(row.weight) * (Number(row.raw_checklists) || 0);
+      values[week].observers = Math.max(
+        values[week].observers,
+        Number(row.observer_count) || 0
+      );
+      const years = new Set(values[week].years);
+      for (const year of parseJson(row.support_years_json, [])) years.add(Number(year));
+      values[week].years = [...years].filter(Number.isFinite).sort((left, right) => left - right);
+    }
+    const result = { selection, values };
+    this.continuousHabitatExposureCache.set(targetGridUnit.id, result);
+    return result;
+  }
+
+  #continuousHabitatDetection(targetGridUnit, taxonId) {
+    if (!this.continuousHabitatDetectionCache.has(targetGridUnit.id)) {
+      this.continuousHabitatDetectionCache.set(targetGridUnit.id, new Map());
+    }
+    const targetCache = this.continuousHabitatDetectionCache.get(targetGridUnit.id);
+    if (targetCache.has(taxonId)) return targetCache.get(taxonId);
+    const exposure = this.#continuousHabitatExposure(targetGridUnit);
+    if (!exposure) return null;
+    const values = Array.from(
+      { length: 53 },
+      () => ({ effective: 0, raw: 0, observers: 0, years: [] })
+    );
+    const placeholders = exposure.selection.neighbors.map(() => "(?, ?, ?)").join(", ");
+    const parameters = exposure.selection.neighbors.flatMap((neighbor, index) => [
+      index,
+      neighbor.unitId,
+      neighbor.weight
+    ]);
+    const rows = this.database.prepare(`
+      WITH neighbors(ordinal, space_unit_id, weight) AS (VALUES ${placeholders})
+      SELECT neighbors.ordinal, neighbors.weight, detections.*
+      FROM neighbors
+      JOIN taxon_detection detections USING (space_unit_id)
+      WHERE detections.taxon_id = ?
+      ORDER BY detections.season_week, neighbors.ordinal
+    `).all(...parameters, taxonId);
+    for (const row of rows) {
+      const week = Number(row.season_week);
+      values[week].effective += Number(row.weight) * (Number(row.effective_detections) || 0);
+      values[week].raw += Number(row.weight) * (Number(row.raw_detections) || 0);
+      values[week].observers = Math.max(
+        values[week].observers,
+        Number(row.observer_count) || 0
+      );
+      const years = new Set(values[week].years);
+      for (const year of parseJson(row.support_years_json, [])) years.add(Number(year));
+      values[week].years = [...years].filter(Number.isFinite).sort((left, right) => left - right);
+    }
+    targetCache.set(taxonId, values);
+    return values;
+  }
+
   #smoothed(values, day, field) {
     const bandwidth = Number(this.manifestMap.get("temporal_bandwidth_days") || 14);
     let total = 0;
@@ -635,6 +826,11 @@ class PredictionModel {
   releaseUnitScoreCache(unitId) {
     this.exposureCache.delete(unitId);
     this.detectionCache.delete(unitId);
+    const targetGridUnit = this.#pathFromUnit(unitId).find((unit) => unit.level === "grid_r6");
+    if (targetGridUnit) {
+      this.continuousHabitatExposureCache.delete(targetGridUnit.id);
+      this.continuousHabitatDetectionCache.delete(targetGridUnit.id);
+    }
   }
 
   #calibratorFor(taxon) {
@@ -675,6 +871,7 @@ class PredictionModel {
     const hasSupportedLocalUnit = fullPath.some(
       (unit) => unit.supported && ["habitat", "grid_r6", "grid_r7", "point"].includes(unit.level)
     );
+    const targetGridUnit = fullPath.find((unit) => unit.level === "grid_r6") || null;
     const applyNovelGridTransfer = Boolean(adminExposureCapsByPrevalence && !hasSupportedLocalUnit);
     const taxonPrevalenceGroup = prevalenceGroup(taxon.positiveCount);
     let alpha = 1;
@@ -682,7 +879,51 @@ class PredictionModel {
     let effective = 0;
     let deepest = path[0];
     let detectionSupport = { observers: 0, years: [] };
+    let habitatApplied = false;
+    let habitatEvidence = null;
+    const applyContinuousHabitat = () => {
+      if (
+        habitatApplied ||
+        !this.continuousHabitatEnabled ||
+        !targetGridUnit
+      ) return;
+      habitatApplied = true;
+      const exposureAggregate = this.#continuousHabitatExposure(targetGridUnit);
+      const detectionValues = this.#continuousHabitatDetection(targetGridUnit, taxonId);
+      if (!exposureAggregate || !detectionValues) return;
+      const exposure = this.#smoothed(exposureAggregate.values, day, "effective");
+      const detections = Math.min(
+        exposure,
+        this.#smoothed(detectionValues, day, "effective")
+      );
+      const capped = capEffectiveEvidence(
+        exposure,
+        detections,
+        CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidenceExposureCap
+      );
+      habitatEvidence = {
+        exposure,
+        detections,
+        strength: CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidencePriorStrength,
+        neighborCount: exposureAggregate.selection.neighbors.length,
+        scope: exposureAggregate.selection.scope
+      };
+      if (capped.exposure <= 0) return;
+      const parentProbability = alpha / (alpha + beta);
+      alpha =
+        parentProbability * CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidencePriorStrength +
+        capped.detections;
+      beta =
+        (1 - parentProbability) * CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidencePriorStrength +
+        Math.max(0, capped.exposure - capped.detections);
+      effective = capped.exposure;
+      deepest = targetGridUnit;
+      detectionSupport = this.#supportAround(detectionValues, day);
+    };
     for (const unit of path) {
+      if (["grid_r6", "grid_r7", "point"].includes(unit.level)) {
+        applyContinuousHabitat();
+      }
       let exposure = this.#smoothed(this.#readExposure(unit.id), day, "effective");
       const detectionValues = this.#readDetection(unit.id, taxonId);
       let detections = Math.min(exposure, this.#smoothed(detectionValues, day, "effective"));
@@ -718,6 +959,7 @@ class PredictionModel {
       deepest = unit;
       detectionSupport = this.#supportAround(detectionValues, day);
     }
+    applyContinuousHabitat();
     const rawProbability = alpha / (alpha + beta);
     const rawInterval = betaInterval(alpha, beta, 0.9);
     const calibrator = applyNovelGridTransfer && this.spatialCalibrationEnabled
@@ -756,7 +998,8 @@ class PredictionModel {
       observerCount: detectionSupport.observers,
       supportYears: detectionSupport.years,
       confidence: range.confidence,
-      unit: deepest
+      unit: deepest,
+      habitatEvidence
     };
   }
 

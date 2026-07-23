@@ -2,7 +2,7 @@
 
 const { Worker, isMainThread, parentPort } = require("node:worker_threads");
 
-const ADMIN_CAP_TASK_WIDTH = 10;
+const ADMIN_CAP_TASK_WIDTH = 14;
 const DEFAULT_ADMIN_CAP_CHUNK_RECORDS = 4096;
 
 function cappedEvidence(exposure, detections, cap) {
@@ -40,6 +40,10 @@ function scoreAdminCapChunk(values, candidates) {
     const districtExposure = values[offset + 7];
     const districtDetections = values[offset + 8];
     const districtStrength = values[offset + 9];
+    const habitatExposure = values[offset + 10];
+    const habitatDetections = values[offset + 11];
+    const habitatStrength = values[offset + 12];
+    const habitatExposureCap = values[offset + 13];
     let provinceAlpha = 1;
     let provinceBeta = 1;
     if (provinceExposure > 0) {
@@ -70,6 +74,14 @@ function scoreAdminCapChunk(values, candidates) {
         districtDetections,
         districtStrength,
         candidate.caps.district
+      );
+      [alpha, beta] = applyChild(
+        alpha,
+        beta,
+        habitatExposure,
+        habitatDetections,
+        habitatStrength,
+        habitatExposureCap
       );
       const probability = alpha / (alpha + beta);
       modelLosses[candidateIndex] +=

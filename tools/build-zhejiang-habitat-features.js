@@ -14,10 +14,22 @@ const {
 const { dirname, join, resolve } = require("node:path");
 const { spawnSync } = require("node:child_process");
 const { DatabaseSync } = require("node:sqlite");
-const { cellToBoundary } = require("h3-js");
-
-const { bd09ToWgs84, gridCell, isWithinZhejiang } = require("../server/prediction/geo");
 const {
+  cellToBoundary,
+  gridDisk,
+  polygonToCells
+} = require("h3-js");
+
+const {
+  ZHEJIANG_COVERAGE_POLYGONS,
+  bd09ToWgs84,
+  gridCell,
+  isWithinZhejiang
+} = require("../server/prediction/geo");
+const {
+  CONTINUOUS_HABITAT_FEATURE_CONTRACT,
+  CONTINUOUS_HABITAT_FEATURE_KIND,
+  CONTINUOUS_HABITAT_FEATURE_SCHEMA_VERSION,
   HABITAT_FEATURE_CONTRACT,
   HABITAT_FEATURE_KIND,
   HABITAT_FEATURE_SCHEMA_VERSION,
@@ -159,6 +171,43 @@ function collectSnapshotH3Cells(snapshotPath) {
   }
 }
 
+function collectZhejiangCoverageH3Cells(snapshotPath) {
+  const cells = new Set();
+  for (const polygon of ZHEJIANG_COVERAGE_POLYGONS) {
+    const latitudeLongitudePolygon = polygon.map(([longitude, latitude]) => [
+      latitude,
+      longitude
+    ]);
+    for (const h3Index of polygonToCells(
+      latitudeLongitudePolygon,
+      CONTINUOUS_HABITAT_FEATURE_CONTRACT.h3Resolution
+    )) {
+      for (const neighbor of gridDisk(h3Index, 1)) cells.add(neighbor);
+    }
+  }
+  const snapshotCells = collectSnapshotH3Cells(snapshotPath);
+  const snapshotIndexes = new Set(snapshotCells.map((cell) => cell.h3Index));
+  for (const cell of snapshotCells) cells.add(cell.h3Index);
+  if (!cells.size) {
+    throw new HabitatFeatureBuildError(
+      "ZHEJIANG_COVERAGE_CELLS_MISSING",
+      "浙江连续生境覆盖没有生成 H3 r6 单元。"
+    );
+  }
+  return [...cells]
+    .sort()
+    .map(boundarySummary)
+    .filter((cell) =>
+      snapshotIndexes.has(cell.h3Index) ||
+      (
+        cell.minLongitude >= 117 &&
+        cell.maxLongitude <= 123 &&
+        cell.minLatitude >= 24 &&
+        cell.maxLatitude <= 33
+      )
+    );
+}
+
 function requiredTileIds(cells) {
   const ids = new Set();
   for (const cell of cells) {
@@ -175,7 +224,11 @@ function requiredTileIds(cells) {
   return [...ids].sort();
 }
 
-function buildTileManifest(tileDirectory, ids) {
+function buildTileManifest(
+  tileDirectory,
+  ids,
+  featureContract = HABITAT_FEATURE_CONTRACT
+) {
   const tiles = ids.map((id) => {
     const fileName = `${TILE_FILE_PREFIX}${id}${TILE_FILE_SUFFIX}`;
     const path = resolve(tileDirectory, fileName);
@@ -198,9 +251,9 @@ function buildTileManifest(tileDirectory, ids) {
   });
   const publicManifest = {
     schemaVersion: TILE_MANIFEST_SCHEMA_VERSION,
-    dataset: HABITAT_FEATURE_CONTRACT.sourceDataset,
-    datasetVersion: HABITAT_FEATURE_CONTRACT.sourceDatasetVersion,
-    sourceLicense: HABITAT_FEATURE_CONTRACT.sourceLicense,
+    dataset: featureContract.sourceDataset,
+    datasetVersion: featureContract.sourceDatasetVersion,
+    sourceLicense: featureContract.sourceLicense,
     tiles: tiles.map(({ path, ...tile }) => tile)
   };
   return {
@@ -254,15 +307,21 @@ function sampleWorldCover({
   return parsed.cells;
 }
 
-function buildFeatureCells(sampledCells) {
-  return sampledCells.map((cell) => {
+function buildFeatureCells(sampledCells, {
+  dropBelowMinimumCoverage = false,
+  requiredH3Indexes = []
+} = {}) {
+  const required = new Set([...requiredH3Indexes].map((h3Index) => String(h3Index)));
+  const output = [];
+  for (const cell of sampledCells) {
     const sampleCount = Number(cell.sampleCount);
     const validSampleCount = Number(cell.validSampleCount);
+    const coverage = sampleCount > 0 ? validSampleCount / sampleCount : 0;
     if (
       !Number.isInteger(sampleCount) ||
       !Number.isInteger(validSampleCount) ||
       sampleCount <= 0 ||
-      validSampleCount <= 0 ||
+      validSampleCount < 0 ||
       validSampleCount > sampleCount
     ) {
       throw new HabitatFeatureBuildError(
@@ -271,20 +330,39 @@ function buildFeatureCells(sampledCells) {
         { h3Index: cell.h3Index, sampleCount, validSampleCount }
       );
     }
+    if (
+      validSampleCount <= 0 ||
+      coverage < CONTINUOUS_HABITAT_FEATURE_CONTRACT.minimumCellCoverage
+    ) {
+      if (dropBelowMinimumCoverage && !required.has(String(cell.h3Index))) continue;
+      throw new HabitatFeatureBuildError(
+        "WORLDCOVER_SAMPLE_COVERAGE_INCOMPLETE",
+        "WorldCover 抽样有效分类覆盖低于固定门槛。",
+        {
+          h3Index: cell.h3Index,
+          sampleCount,
+          validSampleCount,
+          coverage,
+          minimumCoverage: CONTINUOUS_HABITAT_FEATURE_CONTRACT.minimumCellCoverage,
+          requiredSnapshotCell: required.has(String(cell.h3Index))
+        }
+      );
+    }
     const classFractions = Object.fromEntries(WORLDCOVER_CLASS_CODES.map((code) => [
       String(code),
       Number(cell.classCounts?.[String(code)] || 0) / validSampleCount
     ]));
-    return {
+    output.push({
       h3Index: String(cell.h3Index),
-      coverage: validSampleCount / sampleCount,
+      coverage,
       classFractions
-    };
-  });
+    });
+  }
+  return output;
 }
 
 function parseCliArguments(argv) {
-  const options = { pythonPath: "python" };
+  const options = { pythonPath: "python", coverage: "snapshot" };
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     const value = () => {
@@ -299,6 +377,7 @@ function parseCliArguments(argv) {
     else if (argument === "--tiles") options.tileDirectory = value();
     else if (argument === "--output") options.outputPath = value();
     else if (argument === "--python") options.pythonPath = value();
+    else if (argument === "--coverage") options.coverage = value();
     else if (argument === "--help" || argument === "-h") options.help = true;
     else throw new HabitatFeatureBuildError("INVALID_OPTIONS", `未知参数：${argument}`);
   }
@@ -310,6 +389,9 @@ function usage() {
 
 用法：
   node tools/build-zhejiang-habitat-features.js --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --expected-snapshot-sha256 92602be9... --tiles data/prediction-features/worldcover-2021-v200 --output data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-v1.json
+
+连续 v2 全省覆盖增加：
+  --coverage zhejiang
 
 输入 GeoTIFF 必须是官方 ESA WorldCover 2021 v200 3×3 度 Map COG；工具不联网，只读取本地 tile。`;
 }
@@ -344,22 +426,56 @@ function buildHabitatFeatures(options) {
       { expected: options.expectedSnapshotSha256, actual: snapshotSha256 }
     );
   }
-  const cells = collectSnapshotH3Cells(snapshotPath);
-  const tileManifest = buildTileManifest(resolve(options.tileDirectory), requiredTileIds(cells));
+  const coverage = String(options.coverage || "snapshot");
+  if (!["snapshot", "zhejiang"].includes(coverage)) {
+    throw new HabitatFeatureBuildError(
+      "INVALID_OPTIONS",
+      "coverage 只能是 snapshot 或 zhejiang。",
+      { coverage }
+    );
+  }
+  const featureDescriptor = coverage === "zhejiang"
+    ? {
+        schemaVersion: CONTINUOUS_HABITAT_FEATURE_SCHEMA_VERSION,
+        kind: CONTINUOUS_HABITAT_FEATURE_KIND,
+        contract: CONTINUOUS_HABITAT_FEATURE_CONTRACT
+      }
+    : {
+        schemaVersion: HABITAT_FEATURE_SCHEMA_VERSION,
+        kind: HABITAT_FEATURE_KIND,
+        contract: HABITAT_FEATURE_CONTRACT
+      };
+  const snapshotCells = collectSnapshotH3Cells(snapshotPath);
+  const cells = coverage === "zhejiang"
+    ? collectZhejiangCoverageH3Cells(snapshotPath)
+    : snapshotCells;
+  const tileManifest = buildTileManifest(
+    resolve(options.tileDirectory),
+    requiredTileIds(cells),
+    featureDescriptor.contract
+  );
   const sampledCells = sampleWorldCover({
     cells,
     tileManifest,
-    pythonPath: options.pythonPath || "python"
+    pythonPath: options.pythonPath || "python",
+    samplingContract: featureDescriptor.contract
   });
   const validated = validateHabitatFeatureSet({
-    schemaVersion: HABITAT_FEATURE_SCHEMA_VERSION,
-    kind: HABITAT_FEATURE_KIND,
-    contract: HABITAT_FEATURE_CONTRACT,
+    schemaVersion: featureDescriptor.schemaVersion,
+    kind: featureDescriptor.kind,
+    contract: featureDescriptor.contract,
     snapshotSha256,
     tileManifestSha256: tileManifest.sha256,
     generationImplementationSha256: habitatFeatureGenerationImplementationSha256(),
-    cells: buildFeatureCells(sampledCells)
-  }, { expectedSnapshotSha256: snapshotSha256 });
+    cells: buildFeatureCells(sampledCells, {
+      dropBelowMinimumCoverage: coverage === "zhejiang",
+      requiredH3Indexes: snapshotCells.map((cell) => cell.h3Index)
+    })
+  }, {
+    expectedSnapshotSha256: snapshotSha256,
+    expectedContractId: featureDescriptor.contract.id,
+    requiredH3Indexes: snapshotCells.map((cell) => cell.h3Index)
+  });
   const payload = {
     schemaVersion: validated.schemaVersion,
     kind: validated.kind,
@@ -386,6 +502,8 @@ function buildHabitatFeatures(options) {
     featureSetSha256: validated.featureSetSha256,
     generationImplementationSha256: validated.generationImplementationSha256,
     snapshotSha256,
+    coverage,
+    featureContractId: featureDescriptor.contract.id,
     tileManifestPath: manifestPath,
     tileManifestSha256: tileManifest.sha256,
     cellCount: validated.summary.cellCount,
@@ -422,6 +540,7 @@ module.exports = {
   buildHabitatFeatures,
   buildTileManifest,
   collectSnapshotH3Cells,
+  collectZhejiangCoverageH3Cells,
   habitatFeatureGenerationImplementationSha256,
   parseCliArguments,
   requiredTileIds,

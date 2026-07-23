@@ -32,7 +32,12 @@ const {
 const { FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1 } = require("../server/prediction/spatial-transfer");
 const { prevalenceGroup } = require("../server/prediction/model");
 const { LOCATION_NORMALIZATION_VERSION } = require("../server/prediction/location-normalization");
-const { HABITAT_FEATURE_CONTRACT } = require("../server/prediction/habitat-features");
+const {
+  CONTINUOUS_HABITAT_FEATURE_CONTRACT
+} = require("../server/prediction/habitat-features");
+const {
+  CONTINUOUS_HABITAT_KERNEL_CONTRACT
+} = require("../server/prediction/continuous-habitat");
 
 const SNAPSHOT_SHA = "a".repeat(64);
 const SPLIT_SHA = "b".repeat(64);
@@ -95,7 +100,7 @@ function scoreRow({ foldId, contextIndex, taxonId, positiveCount, taxonIndex }) 
     total,
     rawProbability: 0,
     baselineProbability: 0,
-    deepestLevel: "district",
+    deepestLevel: "habitat_continuous",
     hasSupportedLocalUnit: false,
     provinceExposure: adminEvidence.province.exposure,
     provinceDetections: adminEvidence.province.detections,
@@ -104,7 +109,11 @@ function scoreRow({ foldId, contextIndex, taxonId, positiveCount, taxonIndex }) 
     cityStrength: adminEvidence.city.strength,
     districtExposure: adminEvidence.district.exposure,
     districtDetections: adminEvidence.district.detections,
-    districtStrength: adminEvidence.district.strength
+    districtStrength: adminEvidence.district.strength,
+    habitatExposure: 18 + contextIndex,
+    habitatDetections: 2 + taxonIndex + contextIndex * 0.25,
+    habitatStrength: CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidencePriorStrength,
+    habitatNeighborCount: 8 + contextIndex
   };
   const caps = FROZEN_NOVEL_GRID_ADMIN_EXPOSURE_CAPS_V1[prevalenceGroup(positiveCount)];
   flat.rawProbability = probabilityFromAdminEvidence(flat, caps);
@@ -117,9 +126,15 @@ function scoreRow({ foldId, contextIndex, taxonId, positiveCount, taxonIndex }) 
     total,
     rawProbability: flat.rawProbability,
     baselineProbability: flat.baselineProbability,
-    deepestLevel: "district",
+    deepestLevel: "habitat_continuous",
     hasSupportedLocalUnit: false,
-    adminEvidence
+    adminEvidence,
+    habitatEvidence: {
+      exposure: flat.habitatExposure,
+      detections: flat.habitatDetections,
+      strength: flat.habitatStrength,
+      neighborCount: flat.habitatNeighborCount
+    }
   };
 }
 
@@ -205,6 +220,7 @@ function fixtureEvidenceOptions() {
     applyOnlyWithoutSupportedLocalUnit: true,
     bandwidthCandidates: [7, 14, 21, 28],
     captureAdminEvidence: true,
+    continuousHabitatKernel: CONTINUOUS_HABITAT_KERNEL_CONTRACT,
     coordinateQcEvaluationScope: "fixed_snapshot_coordinate_qc_target_independent_not_refit_per_fold",
     dataCutoffDate: "2026-07-15",
     habitatFeatures: {
@@ -217,19 +233,20 @@ function fixtureEvidenceOptions() {
         urban: 1,
         water_wetland: 1
       },
-      contractId: HABITAT_FEATURE_CONTRACT.id,
+      contractId: CONTINUOUS_HABITAT_FEATURE_CONTRACT.id,
       featureSetSha256: "1".repeat(64),
       fileSha256: "2".repeat(64),
       generationImplementationSha256: "4".repeat(64),
       meanCoverage: 0.98,
       minimumCoverage: 0.91,
       snapshotSha256: SNAPSHOT_SHA,
-      sourceDataset: HABITAT_FEATURE_CONTRACT.sourceDataset,
-      sourceDatasetVersion: HABITAT_FEATURE_CONTRACT.sourceDatasetVersion,
-      sourceDatasetYear: HABITAT_FEATURE_CONTRACT.sourceDatasetYear,
-      sourceLicense: HABITAT_FEATURE_CONTRACT.sourceLicense,
+      sourceDataset: CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceDataset,
+      sourceDatasetVersion: CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceDatasetVersion,
+      sourceDatasetYear: CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceDatasetYear,
+      sourceLicense: CONTINUOUS_HABITAT_FEATURE_CONTRACT.sourceLicense,
       tileManifestSha256: "3".repeat(64)
     },
+    habitatModel: CONTINUOUS_HABITAT_KERNEL_CONTRACT.id,
     holdoutEvaluation: {
       minimumTaxonPositives: 30,
       observerFoldCount: 3,
@@ -321,7 +338,11 @@ test("development OOF 缓存规范化往返且不含身份或精确空间字段"
       sourceSnapshotSha256: SNAPSHOT_SHA
     });
     assert.equal(loaded.metadata.panel, "development");
-    assert.equal(loaded.metadata.schemaVersion, 4);
+    assert.equal(loaded.metadata.schemaVersion, 5);
+    assert.equal(
+      loaded.metadata.evidenceOptions.habitatModel,
+      CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+    );
     assert.equal(loaded.metadata.evidenceOptions.locationNormalizationVersion, LOCATION_NORMALIZATION_VERSION);
     assert.equal(loaded.metadata.evidenceOptions.locationAliasMapSha256, "e".repeat(64));
     assert.equal(loaded.metadata.evidenceOptions.locationNormalizationAuditSha256, "f".repeat(64));
@@ -405,7 +426,7 @@ test("缓存 writer 拒绝 scoreRows 隐私白名单之外的字段", () => {
   }
 });
 
-test("cache v4 拒绝 inner scoreRows 私密字段和不完整 outer×inner 折", () => {
+test("cache v5 拒绝 inner scoreRows 私密字段和不完整 outer×inner 折", () => {
   const directory = testDirectory("spatial-oof-inner-contract");
   try {
     const privatePath = join(directory, "private.sqlite");

@@ -6,6 +6,9 @@ const { DatabaseSync } = require("node:sqlite");
 
 const { buildAdminExposureCapCandidates } = require("../server/prediction/spatial-transfer");
 const {
+  CONTINUOUS_HABITAT_KERNEL_CONTRACT
+} = require("../server/prediction/continuous-habitat");
+const {
   ADMIN_CAP_TASK_WIDTH,
   scoreAdminCapChunk,
   scoreAdminCapTasks
@@ -39,7 +42,11 @@ function syntheticTaskValues(recordCount, groupIndex) {
       20 + groupIndex * 5,
       districtExposure,
       districtDetections,
-      12 + groupIndex * 3
+      12 + groupIndex * 3,
+      16 + (index % 13),
+      (16 + (index % 13)) * (0.02 + (index % 5) * 0.03),
+      CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidencePriorStrength,
+      CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidenceExposureCap
     );
   }
   return values;
@@ -61,6 +68,7 @@ function safeCacheBuildOptions(overrides = {}) {
     spatialSplitManifestPath: "development-splits.json",
     spatialEvaluationPanel: "development",
     habitatFeaturesPath: "development-habitat.json",
+    habitatModel: CONTINUOUS_HABITAT_KERNEL_CONTRACT.id,
     writeSpatialOofCachePath: "development-oof-cache.json",
     qualityGate: { ...DEFAULT_OPTIONS.qualityGate },
     holdoutEvaluation: { ...DEFAULT_OPTIONS.holdoutEvaluation },
@@ -74,12 +82,14 @@ test("CLI 解析显式 development OOF 缓存输出", () => {
     "--spatial-split-manifest", "development-splits.json",
     "--spatial-panel", "development",
     "--habitat-features", "development-habitat.json",
+    "--habitat-model", CONTINUOUS_HABITAT_KERNEL_CONTRACT.id,
     "--write-spatial-oof-cache", "development-oof-cache.json",
     "--evaluation-only"
   ]);
   assert.equal(options.spatialSplitManifestPath, "development-splits.json");
   assert.equal(options.spatialEvaluationPanel, "development");
   assert.equal(options.habitatFeaturesPath, "development-habitat.json");
+  assert.equal(options.habitatModel, CONTINUOUS_HABITAT_KERNEL_CONTRACT.id);
   assert.equal(options.writeSpatialOofCachePath, "development-oof-cache.json");
   assert.equal(options.testOnly, true);
   assert.equal(options.materializationProfile, "evaluation-only");

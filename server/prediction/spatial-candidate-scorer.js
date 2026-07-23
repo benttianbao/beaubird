@@ -5,6 +5,9 @@ const { readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
 
 const { calibrateProbability, fitBetaCalibration } = require("./math");
+const {
+  CONTINUOUS_HABITAT_KERNEL_CONTRACT
+} = require("./continuous-habitat");
 const { PREVALENCE_GROUPS, prevalenceGroup } = require("./model");
 const {
   RANKING_REFERENCE_CONTRACT,
@@ -23,8 +26,9 @@ const {
   candidateSetSha256
 } = require("./spatial-oof-cache");
 
-const SPATIAL_CANDIDATE_SCORER_SCHEMA_VERSION = 6;
+const SPATIAL_CANDIDATE_SCORER_SCHEMA_VERSION = 7;
 const SPATIAL_CANDIDATE_SCORER_FILES = Object.freeze([
+  "server/prediction/continuous-habitat.js",
   "server/prediction/habitat-features.js",
   "server/prediction/math.js",
   "server/prediction/model.js",
@@ -256,6 +260,14 @@ function probabilityFromAdminEvidence(row, caps) {
     row.districtStrength,
     caps?.district ?? null
   );
+  [alpha, beta] = applyChild(
+    alpha,
+    beta,
+    row.habitatExposure,
+    row.habitatDetections,
+    row.habitatStrength,
+    CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidenceExposureCap
+  );
   return alpha / (alpha + beta);
 }
 
@@ -303,7 +315,11 @@ function taskValuesForRow(row) {
     Number(row.cityStrength),
     Number(row.districtExposure),
     Number(row.districtDetections),
-    Number(row.districtStrength)
+    Number(row.districtStrength),
+    Number(row.habitatExposure),
+    Number(row.habitatDetections),
+    Number(row.habitatStrength),
+    CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidenceExposureCap
   ];
 }
 
@@ -1125,6 +1141,17 @@ function validateScoringCache(cache, candidates) {
   if (cache.metadata.candidateSetSha256 !== candidateSetSha256()) {
     throw new SpatialCandidateScorerError("SPATIAL_CAP_CANDIDATES_MISMATCH", "缓存绑定的 25 组候选与当前实现不匹配。");
   }
+  if (
+    cache.metadata.evidenceOptions?.habitatModel !==
+      CONTINUOUS_HABITAT_KERNEL_CONTRACT.id ||
+    canonicalJson(cache.metadata.evidenceOptions?.continuousHabitatKernel) !==
+      canonicalJson(CONTINUOUS_HABITAT_KERNEL_CONTRACT)
+  ) {
+    throw new SpatialCandidateScorerError(
+      "SPATIAL_CONTINUOUS_HABITAT_CONTRACT_MISMATCH",
+      "候选评分缓存没有绑定预登记的连续生境核。"
+    );
+  }
   if (cache.metadata.developmentPoolPositiveCountPolicy !== DEVELOPMENT_POOL_POSITIVE_COUNT_POLICY) {
     throw new SpatialCandidateScorerError(
       "SPATIAL_OOF_DEVELOPMENT_COUNT_POLICY_MISMATCH",
@@ -1773,6 +1800,7 @@ function fixedCandidateManifest(families, candidates) {
     capPolicy: STABLE_CAP_SELECTION_POLICY,
     calibratorFamilies: families,
     calibrationGuard: SPATIAL_CALIBRATION_GUARD,
+    continuousHabitatKernel: CONTINUOUS_HABITAT_KERNEL_CONTRACT,
     robustScopeSelectionPolicy: ROBUST_SCOPE_SELECTION_POLICY,
     rankingReferenceContract: RANKING_REFERENCE_CONTRACT
   };

@@ -414,7 +414,48 @@ node --max-old-space-size=8192 tools\build-zhejiang-prediction-model.js --source
 
 `node tools/build-zhejiang-habitat-features.js --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --expected-snapshot-sha256 92602be9b9c3aeb3d7c6cf966c459710a5a9bf6bc078e604a3805ab05fc0b16a --tiles data/prediction-features/worldcover-2021-v200 --output data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-v1.json`
 
-当前环境访问 ESA 官方 S3 时在 TLS 握手阶段被中断，PowerShell、curl 和 Python/OpenSSL 均未下载到文件；因此尚未生成真实特征、v6 cache 或新 development 结果，也没有用镜像或伪造分类替代。四个官方 TIFF 到位后，先生成/校验特征，再用全新路径执行唯一一次严格 cache 构建、workers=4/1 确定性评分和完整 development 复验。任何门槛失败仍立即 no-go；即使全部通过也必须先冻结代码与参数并在首次 sealed 前暂停。
+该阶段访问 ESA 官方 S3 时曾在 TLS 握手阶段被中断；当时没有用镜像或伪造分类替代。后续下载、v6 结果和 v7 预登记见下文。
+
+#### 2026-07-23 habitat v6 development 结果
+
+四个官方 TIFF 到位后，从新路径完成 coarse habitat v6 strict cache、workers=4/1 候选评分和 evaluation-only development 制品。全程仅使用 development 面板、`testOnly + no-publish`，没有运行 sealed，也没有修改默认离线模型。
+
+- strict cache v6：`data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v6.sqlite`，SHA-256 `fa964ac79d186bff528782f963ba789cb9efdf85d81b530587cafd51cd6bb355`；`quick_check=ok`、freelist 为 0，5 个 outer、20 个 inner、347,436 条 outer score 和 1,385,452 条 inner score 完整，schema 与隐私白名单通过。
+- evaluation-only 制品：`data/prediction-models/zhejiang-v1-20260715-development-habitat-v6.sqlite`，SHA-256 `680e03c99336cb9a2e6f794417139ffb9fadba535e0debdf51c89fc5abc46071`；报告 SHA-256 `365d26c6732974e6bd515756c0bfa6501ad2aaca3ed2529da13c93fed3d6f615`；耗时 11,350.312 秒。
+- workers=4 报告 SHA-256 `961755b2fb686969d64f89bdfad3172b4c86fb020ca7bcd660e9799cd50c53bf`，workers=1 报告 SHA-256 `96fa36a29da45bf00e9e8a59e1c691ca4c3dd70ebecc49f7ccdc2d8af3462734`。删除 `generatedAt` 和 `scoring.workers` 后的规范 JSON SHA-256 均为 `21976b3488e67da821ac49a6ce983727f7b647d2b589d37a621efef29e8289ea`。
+- 时间验证最大逐鸟 ECE 从 v5 的 `0.114921` 降至 `0.046406`，观察者验证最大逐鸟 ECE 为 `0.031759`，两者通过 `0.05`；时间、观察者 Brier Skill 分别为 `+10.9389%`、`+16.2350%`。
+- 空间验证反而退化：Brier Skill 从 v5 的 `+5.01531%` 降至 `+2.70778%`，最大逐鸟 ECE 从 `0.122598` 升至 `0.129072`，超限鸟种从 28 种增至 35 种。白头鹎从 `0.122598` 改善至 `0.105677`，但黑水鸡从 `0.073820` 恶化至 `0.129072`，斑嘴鸭从 `0.052084` 恶化至 `0.111371`；6 种退出超限集合，13 种新进入。
+
+因此 v6 最终为 **development no-go**，唯一固定失败项是 `spatial.species_calibration.maximumEce`。粗粒度 `district → habitat cluster → grid` 把区县内组成差异很大的网格压成一个虚拟类别，改善时间/观察者稳定性却伤害空间迁移；失败后没有启动完整参考范围物化，不得打开 sealed。
+
+#### 连续生境 v7 冻结预登记
+
+v7 不再建立虚拟 habitat 空间单元，而把 WorldCover 组成作为区县与本地 r6 之间的一层连续、可交叉拟合证据。完整机器可读预登记位于 `docs/zhejiang-v1-20260715-continuous-habitat-v7-preregistration.json`；其中没有 `generatedAt`，并绑定当前实现、输入、门槛和预期输出路径。
+
+固定输入和覆盖如下：
+
+- 六个官方 ESA WorldCover 2021 v200 TIFF 为 `N24E117`、`N24E120`、`N27E117`、`N27E120`、`N30E117`、`N30E120`；逐文件 SHA-256 已写入预登记和 tile manifest。下载端返回 404 的 E123 瓦片不伪造、不用镜像替代。
+- 连续特征文件为 `data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json`，文件 SHA-256 `085b134fc86124213c7abf8f0d813ef25489de1754c908ff98e384a1b189d451`，规范 feature-set SHA-256 `b2a3ae75832f7b5bd0830375691a8f727c7214b7cb3e149dfa1fe8236bcb99f5`，规范 tile manifest SHA-256 `628d7cd04eb659540fa1c8e05ad091645023dd812ea96cacbad29a324291b306`。
+- 特征集含 5,743 个 H3 r6，覆盖固定快照全部 2,345 个已观察 r6，缺失为 0；最低有效像元覆盖率 `0.901203`，平均 `0.999952`。非快照的纯海洋/未分类单元可在六 tile 包络内按固定规则删除，但任何快照单元低于 90% 都仍 fail closed。
+- 五维投影固定为 forest=`10`，open=`20/30/60/70/100`，cropland=`40`，urban=`50`，water_wetland=`80/90/95`；五维比例必须守恒为 1。
+
+冻结核 `zhejiang_worldcover_hellinger_kernel_v1` 使用 Hellinger 距离：排除目标 r6，同市候选不少于 8 时只在同市选择，否则回退全省；最多 24 个邻居，最大距离 `0.35`，核带宽 `0.18`，汇总 exposure 上限 `10`，作为区县后中间证据的 prior strength 为 `30`。这些数字只由坐标、城市、WorldCover 比例和冻结 split 缓冲审计，不读取鸟种结果或 sealed 标签。
+
+目标无关预检报告 `data/prediction-models/development-cache/zhejiang-v1-20260715-continuous-habitat-v7-preregister-audit.json` 的 SHA-256 为 `d12726338e374e34a1b9419028b11ab2d983e2a061ba13bf28c011f2566d704f`：
+
+- 固定快照为 87,107 份报告、1,324,993 条观察、589 个公共鸟种键；观察主键重复 0、孤儿观察 0。
+- development 保持 11 市、5 outer 折、12 个锚点，且每个锚点恰好出现一次。
+- 12 个 development 目标全部使用同市邻居，无全省回退；选中邻居数最小 8、中位 24、最大 24，有效邻居数最小 `4.6423`、中位 `15.5116`、最大 `20.3423`；最远邻居距离中位 `0.2189`、最大 `0.3464`，均不超过 `0.35`。
+
+实现和隐私契约同步升级：
+
+- 连续模式的训练行仍一份清单只写一次；`habitat_unit` 恒为 null，r6 直接挂到区县/城市/全省父级。fixture 已验证报告、观察和 r6 汇总证据守恒。
+- evaluation 与模型运行时使用同一邻居选择、同一五维特征和同一证据插入位置；合成 fixture 的 raw probability 在 `1e-12` 内一致。模型产物保存五维公开遥感比例以支持物化，manifest 保存特征、核和物化摘要。
+- 新 strict cache 使用 schema `5`、kind `zhejiang_development_strict_nested_spatial_oof_sufficient_statistics_continuous_habitat_v5`，目标文件为 `data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v7.sqlite`。它只能保存连续生境的 aggregate exposure、detections、strength 和 neighborCount；H3、空间单元 ID、邻居 ID、特征向量、坐标、地点名、报告 ID和观察者均禁止。
+- 候选评分报告 schema 升至 `7`。后续仍按 workers=4、workers=1 顺序评分，只允许删除 `generatedAt` 和 `scoring.workers` 后比较确定性投影。
+- 所有正式门槛不变，尤其 `maximumSpeciesEce=0.05`；不减少时间、空间、观察者折，不抽样鸟种，不放宽 Brier、ECE、Recall@20 或 NDCG。
+
+当前状态停在 v7 长构建之前：尚未创建 v7 cache、评分报告或模型，没有启动第二个任务，没有运行 sealed，没有覆盖默认离线模型。下一步只能从全新 v7 路径启动唯一一次 strict development cache；任一 development 门槛失败即 no-go 并停止，即使全部通过也必须先冻结代码与参数并等待明确同意后才能首次查看 sealed。
 
 ## 天气与 challenger
 

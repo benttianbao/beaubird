@@ -32,10 +32,16 @@ const {
   weekCenterDay
 } = require("../server/prediction/geo");
 const {
+  CONTINUOUS_HABITAT_FEATURE_CONTRACT,
   HABITAT_FEATURE_CONTRACT,
   habitatManifestSummary,
   loadHabitatFeatureSet
 } = require("../server/prediction/habitat-features");
+const {
+  CONTINUOUS_HABITAT_KERNEL_CONTRACT,
+  continuousHabitatVector,
+  selectContinuousHabitatNeighbors
+} = require("../server/prediction/continuous-habitat");
 const { betaInterval, betaQuantile, calibrateProbability, fitBetaCalibration } = require("../server/prediction/math");
 const {
   DEFAULT_PRIOR_STRENGTHS,
@@ -112,6 +118,7 @@ const RANKING_REFERENCE_COMPLETE_FORWARD_LEVELS = Object.freeze([
 ]);
 const PREDICTION_IMPLEMENTATION_FILES = Object.freeze([
   "tools/build-zhejiang-prediction-model.js",
+  "server/prediction/continuous-habitat.js",
   "server/prediction/geo.js",
   "server/prediction/habitat-features.js",
   "server/prediction/location-normalization.js",
@@ -151,6 +158,8 @@ const DEFAULT_OPTIONS = Object.freeze({
   outerCalibrationContextSampleModulo: 10,
   workers: 1,
   workerTaskChunkRecords: 4096,
+  habitatModel: null,
+  continuousHabitatKernel: CONTINUOUS_HABITAT_KERNEL_CONTRACT,
   forwardTopK: 100,
   reverseTopK: 300,
   materializationProfile: "full",
@@ -224,6 +233,8 @@ function mergeOptions(options = {}) {
     unitThresholds: { ...DEFAULT_OPTIONS.unitThresholds, ...(options.unitThresholds || {}) },
     priorStrengths: { ...DEFAULT_OPTIONS.priorStrengths, ...(options.priorStrengths || {}) },
     priorStrengthsByPrevalence: options.priorStrengthsByPrevalence || null,
+    continuousHabitatKernel:
+      options.continuousHabitatKernel || CONTINUOUS_HABITAT_KERNEL_CONTRACT,
     qualityGate: { ...DEFAULT_OPTIONS.qualityGate, ...(options.qualityGate || {}) },
     holdoutEvaluation: { ...DEFAULT_OPTIONS.holdoutEvaluation, ...(options.holdoutEvaluation || {}) }
   };
@@ -297,6 +308,30 @@ function validateBuildSafetyOptions(options) {
   if (failures.length) {
     throw new PredictionBuildError("INVALID_OPTIONS", "构建门槛包含非有限数值。", { failures });
   }
+  if (
+    options.writeSpatialOofCachePath === undefined &&
+    options.habitatModel === CONTINUOUS_HABITAT_KERNEL_CONTRACT.id &&
+    (
+      !options.habitatFeaturesPath ||
+      JSON.stringify(options.continuousHabitatKernel) !==
+        JSON.stringify(CONTINUOUS_HABITAT_KERNEL_CONTRACT)
+    )
+  ) {
+    throw new PredictionBuildError(
+      "CONTINUOUS_HABITAT_BUILD_FORBIDDEN",
+      "连续生境模型必须显式提供 WorldCover v2 特征，并精确匹配冻结核契约。"
+    );
+  }
+  if (
+    options.habitatModel != null &&
+    options.habitatModel !== "cluster-v1" &&
+    options.habitatModel !== CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+  ) {
+    throw new PredictionBuildError(
+      "HABITAT_MODEL_INVALID",
+      `不支持 habitatModel=${options.habitatModel}。`
+    );
+  }
   if (options.writeSpatialOofCachePath !== undefined) {
     const cacheFailures = [];
     const exactJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -309,6 +344,13 @@ function validateBuildSafetyOptions(options) {
       cacheFailures.push("materializationProfile.evaluation_only_required");
     }
     if (!options.habitatFeaturesPath) cacheFailures.push("habitatFeaturesPath.required");
+    if (options.habitatModel !== CONTINUOUS_HABITAT_KERNEL_CONTRACT.id) {
+      cacheFailures.push("habitatModel.continuous_v7_required");
+    }
+    if (
+      JSON.stringify(options.continuousHabitatKernel) !==
+      JSON.stringify(CONTINUOUS_HABITAT_KERNEL_CONTRACT)
+    ) cacheFailures.push("continuousHabitatKernel.must_match_frozen_contract");
     if (!options.spatialSplitManifestPath) cacheFailures.push("spatialSplitManifestPath.required");
     if (options.spatialEvaluationPanel !== "development") {
       cacheFailures.push("spatialEvaluationPanel.explicit_development_required");
@@ -414,6 +456,13 @@ function validateBuildSafetyOptions(options) {
     if (options.sealedSpatialPanelConfirmation) {
       habitatFailures.push("sealedSpatialPanelConfirmation.forbidden");
     }
+    if (
+      options.habitatModel != null &&
+      ![
+        "cluster-v1",
+        CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+      ].includes(String(options.habitatModel))
+    ) habitatFailures.push("habitatModel.invalid");
     if (habitatFailures.length) {
       throw new PredictionBuildError(
         "HABITAT_CHALLENGER_BUILD_FORBIDDEN",
@@ -1037,6 +1086,18 @@ function createArtifactSchema(database) {
       PRIMARY KEY (space_unit_id, season_week, taxon_id)
     ) WITHOUT ROWID;
 
+    CREATE TABLE continuous_habitat_features (
+      h3_r6 TEXT PRIMARY KEY,
+      forest REAL NOT NULL CHECK (forest BETWEEN 0 AND 1),
+      open REAL NOT NULL CHECK (open BETWEEN 0 AND 1),
+      cropland REAL NOT NULL CHECK (cropland BETWEEN 0 AND 1),
+      urban REAL NOT NULL CHECK (urban BETWEEN 0 AND 1),
+      water_wetland REAL NOT NULL CHECK (water_wetland BETWEEN 0 AND 1),
+      CHECK (
+        ABS(forest + open + cropland + urban + water_wetland - 1) <= 0.000001
+      )
+    ) WITHOUT ROWID;
+
     CREATE TABLE calibration_parameters (
       scope TEXT NOT NULL CHECK (scope IN ('species', 'group')),
       scope_id TEXT NOT NULL,
@@ -1600,6 +1661,8 @@ function registerGridUnit(registry, cell, parentId, cityName, districtName) {
 }
 
 function insertTrainingRows(source, artifact, pointStats, locationNormalization, quality, options) {
+  const useContinuousHabitat =
+    options.habitatModel === CONTINUOUS_HABITAT_KERNEL_CONTRACT.id;
   const registry = createUnitRegistry();
   registerAdministrativeUnits(registry, "", "");
   const insertReport = artifact.prepare(
@@ -1664,14 +1727,16 @@ function insertTrainingRows(source, artifact, pointStats, locationNormalization,
           );
         }
         habitatCluster = habitat.habitatCluster;
-        habitatUnitId = registerHabitatUnit(
-          registry,
-          admin.districtId || admin.cityId || admin.provinceId,
-          habitatCluster,
-          current.city_name,
-          current.district_name
-        );
-        registry.includeCoordinate(habitatUnitId, coordinate.longitude, coordinate.latitude);
+        if (!useContinuousHabitat) {
+          habitatUnitId = registerHabitatUnit(
+            registry,
+            admin.districtId || admin.cityId || admin.provinceId,
+            habitatCluster,
+            current.city_name,
+            current.district_name
+          );
+          registry.includeCoordinate(habitatUnitId, coordinate.longitude, coordinate.latitude);
+        }
       }
       registerGridUnit(
         registry,
@@ -1731,7 +1796,7 @@ function insertTrainingRows(source, artifact, pointStats, locationNormalization,
     }
     seenDuplicates.add(duplicateKey);
     if (observer.known) knownObserverReports += 1;
-    if (habitatUnitId) {
+    if (options.habitatFeatureSet) {
       habitatAssignedReports += 1;
       habitatClusters.set(habitatCluster, (habitatClusters.get(habitatCluster) || 0) + 1);
       habitatGridCells.add(r6.h3Index);
@@ -1834,6 +1899,10 @@ function insertTrainingRows(source, artifact, pointStats, locationNormalization,
       knownObserverCoverage: insertedReports ? knownObserverReports / insertedReports : 0,
       habitat: options.habitatFeatureSet
         ? {
+            model: useContinuousHabitat
+              ? CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+              : "cluster-v1",
+            createsVirtualSpaceUnits: !useContinuousHabitat,
             assignedReports: habitatAssignedReports,
             coverage: insertedReports ? habitatAssignedReports / insertedReports : 0,
             distinctGridR6Count: habitatGridCells.size,
@@ -2092,6 +2161,82 @@ function insertSpaceUnits(artifact, registry, summaries) {
     artifact.exec("ROLLBACK");
     throw error;
   }
+}
+
+function insertContinuousHabitatFeatures(artifact, featureSet, habitatModel) {
+  if (habitatModel !== CONTINUOUS_HABITAT_KERNEL_CONTRACT.id) {
+    return {
+      enabled: false,
+      storedCellCount: 0,
+      observedGridR6Count: 0,
+      missingObservedGridR6Count: 0
+    };
+  }
+  if (
+    !featureSet ||
+    featureSet.contract?.id !== CONTINUOUS_HABITAT_FEATURE_CONTRACT.id
+  ) {
+    throw new PredictionBuildError(
+      "CONTINUOUS_HABITAT_FEATURES_REQUIRED",
+      "连续生境模型物化要求绑定 WorldCover 连续特征 v2。"
+    );
+  }
+  const insert = artifact.prepare(`
+    INSERT INTO continuous_habitat_features
+      (h3_r6, forest, open, cropland, urban, water_wetland)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  artifact.exec("BEGIN");
+  try {
+    for (const cell of [...featureSet.cells].sort((left, right) =>
+      left.h3Index.localeCompare(right.h3Index)
+    )) {
+      insert.run(cell.h3Index, ...continuousHabitatVector(cell.classFractions));
+    }
+    artifact.exec("COMMIT");
+  } catch (error) {
+    artifact.exec("ROLLBACK");
+    throw error;
+  }
+  const storedCellCount = Number(
+    artifact.prepare("SELECT COUNT(*) AS count FROM continuous_habitat_features").get().count
+  ) || 0;
+  const observedGridR6Count = Number(
+    artifact.prepare("SELECT COUNT(*) AS count FROM space_units WHERE level = 'grid_r6'").get().count
+  ) || 0;
+  const missingObservedGridR6Count = Number(
+    artifact.prepare(`
+      SELECT COUNT(*) AS count
+      FROM space_units units
+      LEFT JOIN continuous_habitat_features features
+        ON features.h3_r6 = CASE
+          WHEN units.code LIKE 'grid_r6:%' THEN SUBSTR(units.code, 9)
+          ELSE units.code
+        END
+      WHERE units.level = 'grid_r6' AND features.h3_r6 IS NULL
+    `).get().count
+  ) || 0;
+  if (
+    storedCellCount !== Number(featureSet.summary?.cellCount) ||
+    missingObservedGridR6Count !== 0
+  ) {
+    throw new PredictionBuildError(
+      "CONTINUOUS_HABITAT_ARTIFACT_COVERAGE_INCOMPLETE",
+      "连续生境模型产物未完整保存特征集或缺少已观察 H3 r6 网格。",
+      {
+        storedCellCount,
+        expectedCellCount: Number(featureSet.summary?.cellCount) || 0,
+        observedGridR6Count,
+        missingObservedGridR6Count
+      }
+    );
+  }
+  return {
+    enabled: true,
+    storedCellCount,
+    observedGridR6Count,
+    missingObservedGridR6Count
+  };
 }
 
 function insertTaxa(artifact) {
@@ -2591,6 +2736,122 @@ function holdoutContextKey(row) {
   ].join("\u0000");
 }
 
+function prepareContinuousHabitatKernelContexts(
+  artifact,
+  contexts,
+  insertNeededUnit,
+  options
+) {
+  if (options.habitatModel !== CONTINUOUS_HABITAT_KERNEL_CONTRACT.id) {
+    return {
+      enabled: false,
+      contextCount: 0,
+      sameCityContextCount: 0,
+      zhejiangFallbackContextCount: 0,
+      minimumSelectedNeighborCount: 0,
+      maximumSelectedNeighborCount: 0
+    };
+  }
+  if (
+    !options.habitatFeatureSet ||
+    options.habitatFeatureSet.contract?.id !== CONTINUOUS_HABITAT_FEATURE_CONTRACT.id
+  ) {
+    throw new PredictionBuildError(
+      "CONTINUOUS_HABITAT_FEATURES_REQUIRED",
+      "连续生境核要求绑定全省覆盖的 WorldCover v2 特征。"
+    );
+  }
+  const candidateByUnit = new Map();
+  for (const row of artifact.prepare(`
+    SELECT reports.grid_r6_unit, reports.city_unit, COUNT(*) AS report_count
+    FROM training_reports reports
+    JOIN evaluation_training_reports selected USING (report_id)
+    WHERE reports.grid_r6_unit IS NOT NULL
+      AND selected.local_recent = 1
+    GROUP BY reports.grid_r6_unit, reports.city_unit
+    ORDER BY reports.grid_r6_unit, report_count DESC, reports.city_unit
+  `).iterate()) {
+    const unitId = String(row.grid_r6_unit);
+    if (candidateByUnit.has(unitId)) continue;
+    const h3Index = unitId.startsWith("grid_r6:")
+      ? unitId.slice("grid_r6:".length)
+      : "";
+    const feature = options.habitatFeatureSet.cellsByH3.get(h3Index);
+    if (!feature) {
+      throw new PredictionBuildError(
+        "CONTINUOUS_HABITAT_FEATURE_COVERAGE_INCOMPLETE",
+        "连续生境核缺少训练网格特征。",
+        { unitId }
+      );
+    }
+    candidateByUnit.set(unitId, {
+      unitId,
+      cityName: String(row.city_unit || ""),
+      vector: continuousHabitatVector(feature.classFractions)
+    });
+  }
+  const candidates = [...candidateByUnit.values()]
+    .sort((left, right) => left.unitId.localeCompare(right.unitId));
+  if (!candidates.length) {
+    throw new PredictionBuildError(
+      "CONTINUOUS_HABITAT_TRAINING_CELLS_MISSING",
+      "当前训练折没有可用于连续生境迁移的最近五年网格。"
+    );
+  }
+  const selections = [];
+  for (const context of contexts.values()) {
+    const unitId = String(context.grid_r6_unit || "");
+    if (!unitId) continue;
+    const h3Index = unitId.startsWith("grid_r6:")
+      ? unitId.slice("grid_r6:".length)
+      : "";
+    const feature = options.habitatFeatureSet.cellsByH3.get(h3Index);
+    if (!feature) {
+      throw new PredictionBuildError(
+        "CONTINUOUS_HABITAT_FEATURE_COVERAGE_INCOMPLETE",
+        "连续生境核缺少验证网格特征。",
+        { unitId }
+      );
+    }
+    const selection = selectContinuousHabitatNeighbors({
+      targetUnitId: unitId,
+      targetCityName: String(context.city_unit || ""),
+      targetVector: continuousHabitatVector(feature.classFractions),
+      candidates,
+      contract: options.continuousHabitatKernel
+    });
+    if (!selection.neighbors.length) {
+      throw new PredictionBuildError(
+        "CONTINUOUS_HABITAT_NEIGHBORS_MISSING",
+        "连续生境核在固定最大距离内没有可用训练邻居。",
+        { unitId, cityUnit: context.city_unit || null }
+      );
+    }
+    context.continuousHabitat = {
+      scope: selection.scope,
+      neighbors: selection.neighbors.map((neighbor) => ({
+        unitId: neighbor.unitId,
+        weight: neighbor.weight
+      }))
+    };
+    for (const neighbor of context.continuousHabitat.neighbors) {
+      insertNeededUnit.run("grid_r6", neighbor.unitId);
+    }
+    selections.push(selection);
+  }
+  const neighborCounts = selections.map((selection) => selection.neighbors.length);
+  return {
+    enabled: true,
+    contextCount: selections.length,
+    sameCityContextCount:
+      selections.filter((selection) => selection.scope === "same_city").length,
+    zhejiangFallbackContextCount:
+      selections.filter((selection) => selection.scope === "zhejiang_fallback").length,
+    minimumSelectedNeighborCount: neighborCounts.length ? Math.min(...neighborCounts) : 0,
+    maximumSelectedNeighborCount: neighborCounts.length ? Math.max(...neighborCounts) : 0
+  };
+}
+
 function evaluationProbability({
   context,
   taxonId,
@@ -2631,6 +2892,15 @@ function evaluationProbability({
         district: { exposure: 0, detections: 0, strength: 0 }
       }
     : null;
+  const habitatEvidence = {
+    exposure: 0,
+    detections: 0,
+    strength: Number(
+      options.continuousHabitatKernel?.evidencePriorStrength ||
+      CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidencePriorStrength
+    ),
+    neighborCount: context.continuousHabitat?.neighbors?.length || 0
+  };
   let alpha = 1;
   let beta = 1;
   let baselineProbability = null;
@@ -2638,7 +2908,49 @@ function evaluationProbability({
   let baselineBeta = null;
   let deepestLevel = "province";
   let deepestUnitId = context.province_unit || null;
+  let habitatApplied = false;
+  const applyContinuousHabitat = () => {
+    if (
+      habitatApplied ||
+      options.habitatModel !== CONTINUOUS_HABITAT_KERNEL_CONTRACT.id ||
+      !context.continuousHabitat?.neighbors?.length
+    ) return;
+    habitatApplied = true;
+    for (const neighbor of context.continuousHabitat.neighbors) {
+      const exposure = cachedSmooth(
+        `habitat-exposure\u0000${neighbor.unitId}\u0000${context.season_week}\u0000${bandwidthDays}`,
+        exposures.get(neighbor.unitId) || Array(53).fill(0)
+      );
+      const detections = Math.min(
+        exposure,
+        cachedSmooth(
+          `habitat-detection\u0000${neighbor.unitId}\u0000${taxonId}\u0000${context.season_week}\u0000${bandwidthDays}`,
+          hits.get(`${neighbor.unitId}\u0000${taxonId}`) || Array(53).fill(0)
+        )
+      );
+      habitatEvidence.exposure += Number(neighbor.weight) * exposure;
+      habitatEvidence.detections += Number(neighbor.weight) * detections;
+    }
+    habitatEvidence.detections = Math.min(
+      habitatEvidence.exposure,
+      habitatEvidence.detections
+    );
+    const capped = capEffectiveEvidence(
+      habitatEvidence.exposure,
+      habitatEvidence.detections,
+      options.continuousHabitatKernel.evidenceExposureCap
+    );
+    if (capped.exposure <= 0) return;
+    const parentProbability = alpha / (alpha + beta);
+    alpha = parentProbability * habitatEvidence.strength + capped.detections;
+    beta =
+      (1 - parentProbability) * habitatEvidence.strength +
+      Math.max(0, capped.exposure - capped.detections);
+    deepestLevel = "habitat_continuous";
+    deepestUnitId = context.grid_r6_unit || deepestUnitId;
+  };
   for (const [level, column] of Object.entries(HOLDOUT_LEVEL_COLUMNS)) {
+    if (level === "grid_r6") applyContinuousHabitat();
     const unitId = context[column];
     if (!unitId) continue;
     const support = supports.get(unitId);
@@ -2730,7 +3042,8 @@ function evaluationProbability({
     deepestLevel,
     deepestUnitId,
     hasSupportedLocalUnit,
-    adminEvidence
+    adminEvidence,
+    habitatEvidence
   };
 }
 
@@ -2841,6 +3154,12 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
       if (context[column]) insertNeededUnit.run(level, context[column]);
     }
   }
+  const continuousHabitatDiagnostics = prepareContinuousHabitatKernelContexts(
+    artifact,
+    contexts,
+    insertNeededUnit,
+    options
+  );
 
   for (const row of artifact
     .prepare(
@@ -2987,6 +3306,7 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
           baselineProbability: rawScore.baselineProbability,
           deepestLevel: rawScore.deepestLevel,
           hasSupportedLocalUnit: rawScore.hasSupportedLocalUnit,
+          habitatEvidence: rawScore.habitatEvidence,
           ...(collectAdminCapTasks ? { adminEvidence: rawScore.adminEvidence } : {})
         });
       }
@@ -3005,7 +3325,11 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
           evidence.city.strength,
           evidence.district.exposure,
           evidence.district.detections,
-          evidence.district.strength
+          evidence.district.strength,
+          rawScore.habitatEvidence.exposure,
+          rawScore.habitatEvidence.detections,
+          rawScore.habitatEvidence.strength,
+          options.continuousHabitatKernel.evidenceExposureCap
         );
       }
       modelLoss +=
@@ -3197,6 +3521,7 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
     evaluatedWeight,
     evaluatedTaxa: eligibleTaxa.length,
     validationContexts: contexts.size,
+    continuousHabitat: continuousHabitatDiagnostics,
     fallbackLevels: Object.fromEntries([...fallbackLevels.entries()].sort()),
     evaluationModel: "hierarchical_spatiotemporal_oof",
     baselineModel: "province_week"
@@ -4149,6 +4474,8 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
         levels: ["province", "city", "district"],
         applyOnlyWithoutSupportedLocalUnit: true,
         habitatFeatures: habitatManifestSummary(options.habitatFeatureSet),
+        habitatModel: options.habitatModel,
+        continuousHabitatKernel: options.continuousHabitatKernel,
         trainingDataContract: TRAINING_DATA_CONTRACT,
         releaseEvaluationOccurrencePolicy: RELEASE_EVALUATION_OCCURRENCE_POLICY,
         temporalEvaluationWeightingPolicy: TEMPORAL_EVALUATION_WEIGHTING_POLICY,
@@ -5207,7 +5534,13 @@ function materializeLocationPredictions(artifact, options) {
     model.unitCache.set(row.id, {
       id: row.id,
       level: row.level,
+      code: row.code,
+      name: row.name,
       parentId: row.parent_id,
+      cityName: row.city_name,
+      districtName: row.district_name,
+      centroidLongitude: row.centroid_longitude,
+      centroidLatitude: row.centroid_latitude,
       supported: Boolean(row.supported),
       observerCount: row.observer_count,
       supportYears: JSON.parse(row.support_years_json || "[]")
@@ -5713,6 +6046,9 @@ function validateArtifact(artifact, options = {}) {
   const rankingReferenceParameterCount = Number(
     artifact.prepare("SELECT COUNT(*) AS count FROM ranking_reference_parameters").get().count
   ) || 0;
+  const continuousHabitatFeatureCount = Number(
+    artifact.prepare("SELECT COUNT(*) AS count FROM continuous_habitat_features").get().count
+  ) || 0;
   const temporaryTableCount = Number(
     artifact
       .prepare(
@@ -5818,6 +6154,60 @@ function validateArtifact(artifact, options = {}) {
       }
     }
   }
+  if (options.habitatModel === CONTINUOUS_HABITAT_KERNEL_CONTRACT.id) {
+    const expectedFeatureCount = Number(options.habitatFeatureSet?.summary?.cellCount) || 0;
+    const missingObservedGridR6Count = Number(
+      artifact.prepare(`
+        SELECT COUNT(*) AS count
+        FROM space_units units
+        LEFT JOIN continuous_habitat_features features
+          ON features.h3_r6 = CASE
+            WHEN units.code LIKE 'grid_r6:%' THEN SUBSTR(units.code, 9)
+            ELSE units.code
+          END
+        WHERE units.level = 'grid_r6' AND features.h3_r6 IS NULL
+      `).get().count
+    ) || 0;
+    const invalidFeatureCount = Number(
+      artifact.prepare(`
+        SELECT COUNT(*) AS count
+        FROM continuous_habitat_features
+        WHERE ABS(forest + open + cropland + urban + water_wetland - 1) > 0.000001
+      `).get().count
+    ) || 0;
+    const manifestHabitatModel = JSON.parse(
+      artifact.prepare("SELECT value FROM manifest WHERE key = 'habitat_model'").get()?.value || "null"
+    );
+    const manifestKernel = JSON.parse(
+      artifact.prepare("SELECT value FROM manifest WHERE key = 'continuous_habitat_kernel'").get()?.value ||
+        "null"
+    );
+    if (
+      !expectedFeatureCount ||
+      continuousHabitatFeatureCount !== expectedFeatureCount ||
+      missingObservedGridR6Count ||
+      invalidFeatureCount ||
+      manifestHabitatModel !== CONTINUOUS_HABITAT_KERNEL_CONTRACT.id ||
+      JSON.stringify(manifestKernel) !== JSON.stringify(CONTINUOUS_HABITAT_KERNEL_CONTRACT)
+    ) {
+      throw new PredictionBuildError(
+        "CONTINUOUS_HABITAT_ARTIFACT_INVALID",
+        "连续生境模型产物的特征覆盖或冻结核绑定不完整。",
+        {
+          continuousHabitatFeatureCount,
+          expectedFeatureCount,
+          missingObservedGridR6Count,
+          invalidFeatureCount,
+          manifestHabitatModel
+        }
+      );
+    }
+  } else if (continuousHabitatFeatureCount !== 0) {
+    throw new PredictionBuildError(
+      "UNBOUND_CONTINUOUS_HABITAT_FEATURES",
+      "未启用连续生境模型的产物不得携带未绑定的连续特征。"
+    );
+  }
   if (temporaryTableCount || freePages) {
     throw new PredictionBuildError("ARTIFACT_NOT_SANITIZED", "模型制品仍含临时训练表或空闲页。", {
       temporaryTableCount,
@@ -5829,6 +6219,7 @@ function validateArtifact(artifact, options = {}) {
     predictionCount,
     reverseHotspotCount,
     rankingReferenceParameterCount,
+    continuousHabitatFeatureCount,
     freePages,
     materializationProfile: options.materializationProfile || "full"
   };
@@ -5985,12 +6376,20 @@ async function buildPredictionArtifact(options = {}) {
     : await createTrainingSnapshot(resolvedOptions);
   resolvedOptions.sourceSnapshotSha256 = snapshot.sha256;
   if (resolvedOptions.habitatFeaturesPath !== undefined) {
+    const expectedContractId =
+      resolvedOptions.habitatModel === CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+        ? CONTINUOUS_HABITAT_FEATURE_CONTRACT.id
+        : HABITAT_FEATURE_CONTRACT.id;
     resolvedOptions.habitatFeatureSet = loadHabitatFeatureSet(
       resolvedOptions.habitatFeaturesPath,
-      { expectedSnapshotSha256: snapshot.sha256 }
+      {
+        expectedSnapshotSha256: snapshot.sha256,
+        expectedContractId
+      }
     );
     emitProgress(resolvedOptions, "habitat_features_ready", {
-      contractId: HABITAT_FEATURE_CONTRACT.id,
+      contractId: resolvedOptions.habitatFeatureSet.contract.id,
+      habitatModel: resolvedOptions.habitatModel || "cluster-v1",
       fileSha256: resolvedOptions.habitatFeatureSet.fileSha256,
       featureSetSha256: resolvedOptions.habitatFeatureSet.featureSetSha256,
       cellCount: resolvedOptions.habitatFeatureSet.summary.cellCount
@@ -6127,6 +6526,11 @@ async function buildPredictionArtifact(options = {}) {
     emitProgress(resolvedOptions, "occurrence_event_analysis_ready", occurrenceEvents);
     const summaries = aggregateUnitSummaries(artifact, resolvedOptions);
     insertSpaceUnits(artifact, training.registry, summaries);
+    const continuousHabitatMaterialization = insertContinuousHabitatFeatures(
+      artifact,
+      resolvedOptions.habitatFeatureSet,
+      resolvedOptions.habitatModel
+    );
     insertTaxa(artifact);
     aggregateTrainingStatistics(artifact);
     emitProgress(resolvedOptions, "temporal_validation_started");
@@ -6191,11 +6595,28 @@ async function buildPredictionArtifact(options = {}) {
     });
     manifestSet(artifact, "source_contract", sourceContract);
     const inputFeatures = resolvedOptions.habitatFeatureSet
-      ? ["calendar_date", "location", HABITAT_FEATURE_CONTRACT.id]
+      ? ["calendar_date", "location", resolvedOptions.habitatFeatureSet.contract.id]
       : ["calendar_date", "location"];
     const habitatFeatures = habitatManifestSummary(resolvedOptions.habitatFeatureSet);
     manifestSet(artifact, "input_features", inputFeatures);
     manifestSet(artifact, "habitat_features", habitatFeatures);
+    manifestSet(
+      artifact,
+      "habitat_model",
+      resolvedOptions.habitatModel || (resolvedOptions.habitatFeatureSet ? "cluster-v1" : null)
+    );
+    manifestSet(
+      artifact,
+      "continuous_habitat_kernel",
+      resolvedOptions.habitatModel === CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+        ? CONTINUOUS_HABITAT_KERNEL_CONTRACT
+        : null
+    );
+    manifestSet(
+      artifact,
+      "continuous_habitat_materialization",
+      continuousHabitatMaterialization
+    );
     manifestSet(artifact, "weather_features", {
       championIncluded: false,
       reason: "首版避免未来实际天气不可得造成训练-服务偏移；历史天气仅作后续 challenger 可行性分析。"
@@ -6354,6 +6775,8 @@ async function buildPredictionArtifact(options = {}) {
     const validation = validateArtifact(artifact, {
       requireOnlineIndexes: materializationProfile === "full",
       materializationProfile,
+      habitatModel: resolvedOptions.habitatModel,
+      habitatFeatureSet: resolvedOptions.habitatFeatureSet,
       rankingReferenceBinding: resolvedOptions.rankingReferenceBinding || null,
       completeForwardLevels: resolvedOptions.rankingReferenceBinding
         ? RANKING_REFERENCE_COMPLETE_FORWARD_LEVELS
@@ -6388,6 +6811,14 @@ async function buildPredictionArtifact(options = {}) {
         probabilityDefinition: PROBABILITY_DEFINITION,
         inputFeatures,
         habitatFeatures,
+        habitatModel:
+          resolvedOptions.habitatModel ||
+          (resolvedOptions.habitatFeatureSet ? "cluster-v1" : null),
+        continuousHabitatKernel:
+          resolvedOptions.habitatModel === CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+            ? CONTINUOUS_HABITAT_KERNEL_CONTRACT
+            : null,
+        continuousHabitatMaterialization,
         weatherIncluded: false
       },
       source: {
@@ -6414,6 +6845,14 @@ async function buildPredictionArtifact(options = {}) {
         ? rankingReferenceManifestSummary(resolvedOptions.rankingReferenceBinding)
         : null,
       habitatFeatures,
+      habitatModel:
+        resolvedOptions.habitatModel ||
+        (resolvedOptions.habitatFeatureSet ? "cluster-v1" : null),
+      continuousHabitatKernel:
+        resolvedOptions.habitatModel === CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+          ? CONTINUOUS_HABITAT_KERNEL_CONTRACT
+          : null,
+      continuousHabitatMaterialization,
       hyperparameters: {
         recencyHalfLifeYears: resolvedOptions.recencyHalfLifeYears,
         localHistoryYears: resolvedOptions.localHistoryYears,
@@ -6423,6 +6862,13 @@ async function buildPredictionArtifact(options = {}) {
         outerCalibrationContextSampleModulo: resolvedOptions.outerCalibrationContextSampleModulo,
         workers: resolvedOptions.workers,
         workerTaskChunkRecords: resolvedOptions.workerTaskChunkRecords,
+        habitatModel:
+          resolvedOptions.habitatModel ||
+          (resolvedOptions.habitatFeatureSet ? "cluster-v1" : null),
+        continuousHabitatKernel:
+          resolvedOptions.habitatModel === CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+            ? CONTINUOUS_HABITAT_KERNEL_CONTRACT
+            : null,
         unitThresholds: resolvedOptions.unitThresholds,
         priorStrengths: resolvedOptions.priorStrengths,
         qualityGate: resolvedOptions.qualityGate,
@@ -6491,6 +6937,14 @@ async function buildPredictionArtifact(options = {}) {
         ? rankingReferenceManifestSummary(resolvedOptions.rankingReferenceBinding)
         : null,
       habitatFeatures,
+      habitatModel:
+        resolvedOptions.habitatModel ||
+        (resolvedOptions.habitatFeatureSet ? "cluster-v1" : null),
+      continuousHabitatKernel:
+        resolvedOptions.habitatModel === CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+          ? CONTINUOUS_HABITAT_KERNEL_CONTRACT
+          : null,
+      continuousHabitatMaterialization,
       published
     };
   } catch (error) {
@@ -6533,6 +6987,7 @@ function parseCliArguments(argv) {
     else if (argument === "--spatial-panel") options.spatialEvaluationPanel = value();
     else if (argument === "--spatial-parameters") options.spatialParametersPath = value();
     else if (argument === "--habitat-features") options.habitatFeaturesPath = value();
+    else if (argument === "--habitat-model") options.habitatModel = value();
     else if (argument === "--sealed-evaluation-receipt") options.sealedEvaluationReceiptPath = value();
     else if (argument === "--confirm-open-sealed-spatial-panel") options.sealedSpatialPanelConfirmation = value();
     else if (argument === "--write-spatial-oof-cache") options.writeSpatialOofCachePath = value();
@@ -6570,7 +7025,8 @@ function usage() {
     --output data/prediction-models/zhejiang-YYYYMMDD.sqlite \\
     --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json \\
     --spatial-panel development \\
-    --habitat-features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-v1.json \\
+    --habitat-features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json \\
+    --habitat-model ${CONTINUOUS_HABITAT_KERNEL_CONTRACT.id} \\
     --ranking-reference-report data/prediction-models/development-cache/zhejiang-ranking-reference-v3-w4.json \\
     --workers 4 \\
     --test-only \\
@@ -6628,6 +7084,9 @@ function cliResultSummary(result) {
     reverseRows: result.reverse?.insertedRows ?? null,
     rankingReference: result.rankingReference || null,
     habitatFeatures: result.habitatFeatures || null,
+    habitatModel: result.habitatModel || null,
+    continuousHabitatKernel: result.continuousHabitatKernel || null,
+    continuousHabitatMaterialization: result.continuousHabitatMaterialization || null,
     validation: result.validation,
     published: result.published
   };
@@ -6681,12 +7140,15 @@ module.exports = {
   guardCalibrationCandidates,
   inspectSnapshotQuality,
   insertSpaceUnits,
+  insertContinuousHabitatFeatures,
   insertTaxa,
   insertTrainingRows,
   buildReverseHotspots,
   materializeLocationPredictions,
   parseCliArguments,
   predictionImplementationSha256,
+  prepareContinuousHabitatKernelContexts,
+  evaluationProbability,
   publishModelPointer,
   selectTemporalFoldReports,
   usage,

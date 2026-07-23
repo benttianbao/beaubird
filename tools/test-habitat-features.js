@@ -5,6 +5,9 @@ const test = require("node:test");
 const { latLngToCell } = require("h3-js");
 
 const {
+  CONTINUOUS_HABITAT_FEATURE_CONTRACT,
+  CONTINUOUS_HABITAT_FEATURE_KIND,
+  CONTINUOUS_HABITAT_FEATURE_SCHEMA_VERSION,
   HABITAT_FEATURE_CONTRACT,
   HABITAT_FEATURE_KIND,
   HABITAT_FEATURE_SCHEMA_VERSION,
@@ -41,6 +44,18 @@ function featureSet(cells) {
     snapshotSha256: SNAPSHOT_SHA256,
     tileManifestSha256: TILE_MANIFEST_SHA256,
     generationImplementationSha256: "6".repeat(64),
+    cells
+  };
+}
+
+function continuousFeatureSet(cells) {
+  return {
+    schemaVersion: CONTINUOUS_HABITAT_FEATURE_SCHEMA_VERSION,
+    kind: CONTINUOUS_HABITAT_FEATURE_KIND,
+    contract: CONTINUOUS_HABITAT_FEATURE_CONTRACT,
+    snapshotSha256: SNAPSHOT_SHA256,
+    tileManifestSha256: TILE_MANIFEST_SHA256,
+    generationImplementationSha256: "5".repeat(64),
     cells
   };
 }
@@ -128,5 +143,40 @@ test("生境特征对守恒、覆盖、重复 H3 和派生类别全部 fail-clos
       expectedSnapshotSha256: "1".repeat(64)
     }),
     (error) => error.code === "HABITAT_FEATURE_SNAPSHOT_MISMATCH"
+  );
+});
+
+test("连续 v2 特征要求显式契约并可校验训练 H3 全覆盖", () => {
+  const firstH3 = latLngToCell(30.25, 120.15, 6);
+  const secondH3 = latLngToCell(29.87, 121.55, 6);
+  const validated = validateHabitatFeatureSet(continuousFeatureSet([
+    {
+      h3Index: firstH3,
+      coverage: 1,
+      classFractions: fractions({ "10": 0.45, "40": 0.35, "50": 0.2 })
+    },
+    {
+      h3Index: secondH3,
+      coverage: 0.99,
+      classFractions: fractions({ "80": 0.6, "90": 0.2, "40": 0.2 })
+    }
+  ]), {
+    expectedSnapshotSha256: SNAPSHOT_SHA256,
+    expectedContractId: CONTINUOUS_HABITAT_FEATURE_CONTRACT.id,
+    requiredH3Indexes: [secondH3, firstH3]
+  });
+  assert.equal(validated.contract.id, CONTINUOUS_HABITAT_FEATURE_CONTRACT.id);
+  assert.equal(validated.summary.cellCount, 2);
+  assert.throws(
+    () => validateHabitatFeatureSet(continuousFeatureSet(validated.cells), {
+      requiredH3Indexes: [latLngToCell(28.1, 119.1, 6)]
+    }),
+    (error) => error.code === "HABITAT_FEATURE_COVERAGE_INCOMPLETE"
+  );
+  assert.throws(
+    () => validateHabitatFeatureSet(continuousFeatureSet(validated.cells), {
+      expectedContractId: HABITAT_FEATURE_CONTRACT.id
+    }),
+    (error) => error.code === "HABITAT_FEATURE_CONTRACT_MISMATCH"
   );
 });
