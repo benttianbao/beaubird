@@ -32,6 +32,13 @@ const {
   CONTINUOUS_HABITAT_KERNEL_CONTRACT,
   selectContinuousHabitatNeighbors
 } = require("./continuous-habitat");
+const {
+  TERRAIN_FEATURE_CONTRACT
+} = require("./terrain-features");
+const {
+  TERRAIN_SPATIAL_EVIDENCE_CONTRACT,
+  selectTerrainAugmentedNeighbors
+} = require("./terrain-spatial-evidence");
 const { canonicalJson } = require("./spatial-splits");
 class SensitivePredictionModel {
   constructor() {
@@ -267,6 +274,7 @@ class PredictionModel {
     this.spatialCalibrationCache = new Map();
     this.spatialCalibrationEnabled = false;
     this.continuousHabitatEnabled = false;
+    this.terrainSpatialEvidenceEnabled = false;
     this.continuousHabitatCandidates = null;
     this.continuousHabitatNeighborCache = new Map();
     this.continuousHabitatExposureCache = new Map();
@@ -393,6 +401,54 @@ class PredictionModel {
         }
         this.continuousHabitatEnabled = true;
       }
+      const terrainModel = this.manifestMap.get(
+        "terrain_spatial_evidence_model"
+      );
+      if (terrainModel != null) {
+        const terrainFeatures =
+          this.manifestMap.get("terrain_features");
+        const habitatFeatures =
+          this.manifestMap.get("habitat_features");
+        if (
+          !this.continuousHabitatEnabled ||
+          canonicalJson(terrainModel) !==
+            canonicalJson(
+              TERRAIN_SPATIAL_EVIDENCE_CONTRACT
+            ) ||
+          terrainFeatures?.contractId !==
+            TERRAIN_FEATURE_CONTRACT.id ||
+          terrainFeatures?.cellCatalogFileSha256 !==
+            habitatFeatures?.fileSha256 ||
+          terrainFeatures?.cellCatalogFeatureSetSha256 !==
+            habitatFeatures?.featureSetSha256
+        ) {
+          throw new Error(
+            "真实 v11 地形模型缺少有效的冻结地形、WorldCover 或联合邻居契约绑定"
+          );
+        }
+        const terrainFeatureCount = Number(
+          this.database.prepare(
+            "SELECT COUNT(*) AS count FROM terrain_features"
+          ).get().count
+        ) || 0;
+        const availableTerrainFeatureCount = Number(
+          this.database.prepare(
+            "SELECT COUNT(*) AS count FROM terrain_features WHERE available = 1"
+          ).get().count
+        ) || 0;
+        if (
+          !terrainFeatureCount ||
+          terrainFeatureCount !==
+            Number(terrainFeatures.cellCount) ||
+          availableTerrainFeatureCount !==
+            Number(terrainFeatures.availableCellCount)
+        ) {
+          throw new Error(
+            "地形特征表的行数或可用单元数与 manifest 不一致"
+          );
+        }
+        this.terrainSpatialEvidenceEnabled = true;
+      }
       if (this.schemaVersion === SCHEMA_VERSION) {
         const binding = this.manifestMap.get("ranking_reference");
         if (
@@ -455,6 +511,11 @@ class PredictionModel {
       if (this.continuousHabitatEnabled) {
         this.database.prepare("SELECT 1 FROM continuous_habitat_features LIMIT 1").get();
       }
+      if (this.terrainSpatialEvidenceEnabled) {
+        this.database.prepare(
+          "SELECT 1 FROM terrain_features LIMIT 1"
+        ).get();
+      }
       if (this.sensitiveModel) this.sensitiveModel.meta();
       const meta = this.meta();
       return { ok: true, modelVersion: meta.modelVersion, schemaVersion: meta.schemaVersion };
@@ -491,6 +552,11 @@ class PredictionModel {
       rankingReference: this.manifestMap.get("ranking_reference") || null,
       habitatModel: this.manifestMap.get("habitat_model") || null,
       continuousHabitatKernel: this.manifestMap.get("continuous_habitat_kernel") || null,
+      terrainFeatures: this.manifestMap.get("terrain_features") || null,
+      terrainSpatialEvidenceModel:
+        this.manifestMap.get(
+          "terrain_spatial_evidence_model"
+        ) || null,
       temporalBaselineModel: String(this.manifestMap.get("temporal_baseline_model") || ""),
       coverage,
       sensitiveAvailable: Boolean(this.sensitiveModel),
@@ -647,11 +713,25 @@ class PredictionModel {
     const targetH3R6 = String(targetGridUnit.code || "").startsWith("grid_r6:")
       ? String(targetGridUnit.code).slice("grid_r6:".length)
       : String(targetGridUnit.code || "");
-    const targetFeature = this.database.prepare(`
-      SELECT forest, open, cropland, urban, water_wetland
-      FROM continuous_habitat_features
-      WHERE h3_r6 = ?
-    `).get(targetH3R6);
+    const targetFeature = this.terrainSpatialEvidenceEnabled
+      ? this.database.prepare(`
+          SELECT habitat.forest, habitat.open,
+                 habitat.cropland, habitat.urban,
+                 habitat.water_wetland,
+                 terrain.standardized_mean_elevation,
+                 terrain.standardized_elevation_stddev,
+                 terrain.standardized_mean_slope
+          FROM continuous_habitat_features habitat
+          JOIN terrain_features terrain
+            ON terrain.h3_r6 = habitat.h3_r6
+          WHERE habitat.h3_r6 = ?
+        `).get(targetH3R6)
+      : this.database.prepare(`
+          SELECT forest, open, cropland, urban,
+                 water_wetland
+          FROM continuous_habitat_features
+          WHERE h3_r6 = ?
+        `).get(targetH3R6);
     if (!targetFeature) {
       throw new PredictionError(
         "MODEL_UNAVAILABLE",
@@ -659,24 +739,68 @@ class PredictionModel {
         503
       );
     }
+    if (
+      this.terrainSpatialEvidenceEnabled &&
+      [
+        targetFeature.standardized_mean_elevation,
+        targetFeature.standardized_elevation_stddev,
+        targetFeature.standardized_mean_slope
+      ].some((value) => !Number.isFinite(Number(value)))
+    ) {
+      throw new PredictionError(
+        "MODEL_UNAVAILABLE",
+        `地形特征缺少目标网格 ${targetGridUnit.code || targetGridUnit.id}。`,
+        503
+      );
+    }
     if (!this.continuousHabitatCandidates) {
-      this.continuousHabitatCandidates = this.database.prepare(`
-        SELECT units.id AS unit_id, units.city_name,
-               features.forest, features.open, features.cropland,
-               features.urban, features.water_wetland
-        FROM space_units units
-        JOIN continuous_habitat_features features
-          ON features.h3_r6 = CASE
-            WHEN units.code LIKE 'grid_r6:%' THEN SUBSTR(units.code, 9)
-            ELSE units.code
-          END
-        WHERE units.level = 'grid_r6'
-          AND EXISTS (
-            SELECT 1 FROM checklist_exposure exposure
-            WHERE exposure.space_unit_id = units.id
-          )
-        ORDER BY units.id
-      `).all().map((row) => ({
+      const candidateSql =
+        this.terrainSpatialEvidenceEnabled
+          ? `
+            SELECT units.id AS unit_id, units.city_name,
+                   features.forest, features.open,
+                   features.cropland, features.urban,
+                   features.water_wetland,
+                   terrain.standardized_mean_elevation,
+                   terrain.standardized_elevation_stddev,
+                   terrain.standardized_mean_slope
+            FROM space_units units
+            JOIN continuous_habitat_features features
+              ON features.h3_r6 = CASE
+                WHEN units.code LIKE 'grid_r6:%'
+                  THEN SUBSTR(units.code, 9)
+                ELSE units.code
+              END
+            JOIN terrain_features terrain
+              ON terrain.h3_r6 = features.h3_r6
+            WHERE units.level = 'grid_r6'
+              AND EXISTS (
+                SELECT 1 FROM checklist_exposure exposure
+                WHERE exposure.space_unit_id = units.id
+              )
+            ORDER BY units.id
+          `
+          : `
+            SELECT units.id AS unit_id, units.city_name,
+                   features.forest, features.open,
+                   features.cropland, features.urban,
+                   features.water_wetland
+            FROM space_units units
+            JOIN continuous_habitat_features features
+              ON features.h3_r6 = CASE
+                WHEN units.code LIKE 'grid_r6:%'
+                  THEN SUBSTR(units.code, 9)
+                ELSE units.code
+              END
+            WHERE units.level = 'grid_r6'
+              AND EXISTS (
+                SELECT 1 FROM checklist_exposure exposure
+                WHERE exposure.space_unit_id = units.id
+              )
+            ORDER BY units.id
+          `;
+      this.continuousHabitatCandidates = this.database
+        .prepare(candidateSql).all().map((row) => ({
         unitId: row.unit_id,
         cityName: row.city_name,
         vector: [
@@ -685,22 +809,56 @@ class PredictionModel {
           Number(row.cropland),
           Number(row.urban),
           Number(row.water_wetland)
+        ],
+        terrainVector: [
+          Number(row.standardized_mean_elevation),
+          Number(row.standardized_elevation_stddev),
+          Number(row.standardized_mean_slope)
         ]
       }));
     }
-    const selection = selectContinuousHabitatNeighbors({
-      targetUnitId: targetGridUnit.id,
-      targetCityName: targetGridUnit.cityName,
-      targetVector: [
-        Number(targetFeature.forest),
-        Number(targetFeature.open),
-        Number(targetFeature.cropland),
-        Number(targetFeature.urban),
-        Number(targetFeature.water_wetland)
-      ],
-      candidates: this.continuousHabitatCandidates,
-      contract: CONTINUOUS_HABITAT_KERNEL_CONTRACT
-    });
+    const targetHabitatVector = [
+      Number(targetFeature.forest),
+      Number(targetFeature.open),
+      Number(targetFeature.cropland),
+      Number(targetFeature.urban),
+      Number(targetFeature.water_wetland)
+    ];
+    const selection = this.terrainSpatialEvidenceEnabled
+      ? selectTerrainAugmentedNeighbors({
+          targetUnitId: targetGridUnit.id,
+          targetCityName: targetGridUnit.cityName,
+          targetHabitatVector,
+          targetTerrainVector: [
+            Number(
+              targetFeature.standardized_mean_elevation
+            ),
+            Number(
+              targetFeature.standardized_elevation_stddev
+            ),
+            Number(
+              targetFeature.standardized_mean_slope
+            )
+          ],
+          candidates:
+            this.continuousHabitatCandidates.map(
+              (candidate) => ({
+                unitId: candidate.unitId,
+                cityName: candidate.cityName,
+                habitatVector: candidate.vector,
+                terrainVector: candidate.terrainVector
+              })
+            ),
+          contract:
+            TERRAIN_SPATIAL_EVIDENCE_CONTRACT
+        })
+      : selectContinuousHabitatNeighbors({
+          targetUnitId: targetGridUnit.id,
+          targetCityName: targetGridUnit.cityName,
+          targetVector: targetHabitatVector,
+          candidates: this.continuousHabitatCandidates,
+          contract: CONTINUOUS_HABITAT_KERNEL_CONTRACT
+        });
     if (!selection.neighbors.length) {
       throw new PredictionError(
         "MODEL_UNAVAILABLE",

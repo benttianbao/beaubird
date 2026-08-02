@@ -1,0 +1,456 @@
+{
+  "schemaVersion": 1,
+  "kind": "zhejiang_true_terrain_v11_preregistration",
+  "modelVersion": "zhejiang-v1-20260715-development-terrain-v11",
+  "state": "frozen_ready_for_oof",
+  "createdAt": "2026-07-27T00:00:00.000Z",
+  "developmentOnly": true,
+  "evaluationOnlyUntilOofGo": true,
+  "publishEligible": false,
+  "sealedPanelViewed": false,
+  "referenceMaterialized": false,
+  "versionDefinition": {
+    "v10": "last_completed_sqlite_model_build",
+    "trueV11": "single_preregistered_terrain_augmented_neighbor_evidence_candidate",
+    "historicalNoGoEvidence": [
+      {
+        "path": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-profile-calibration-v11.json",
+        "sha256": "d222fafb6749da4b22fc1aa31ceee2e827444ea6cba7a83742b842ff5e926c92",
+        "role": "historical_development_no_go_not_a_complete_model"
+      },
+      {
+        "path": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-landcover-basis-v12.json",
+        "sha256": "31dd781b928179a3c4136afc62c6096c2bbc19f4bcdeb0d1130e42c2800679a0",
+        "role": "historical_development_no_go_not_a_complete_model"
+      }
+    ],
+    "forbiddenNextVersion": "v13"
+  },
+  "frozenInputs": {
+    "snapshot": {
+      "path": "data/prediction-snapshots/zhejiang-v1-20260715.sqlite",
+      "sha256": "92602be9b9c3aeb3d7c6cf966c459710a5a9bf6bc078e604a3805ab05fc0b16a"
+    },
+    "spatialSplits": {
+      "path": "docs/zhejiang-v1-20260715-spatial-splits.json",
+      "sha256": "7deafec542c95b1463c92fe6948831247666a22923921b22890bb24adac9accc",
+      "panel": "development",
+      "manifestHash": "400bcc27bde3bd30f03ef022b9f76175cd6093ea5afc98fcbfccb79bde234e4d"
+    },
+    "worldCover": {
+      "path": "data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json",
+      "sha256": "085b134fc86124213c7abf8f0d813ef25489de1754c908ff98e384a1b189d451",
+      "featureSetSha256": "b2a3ae75832f7b5bd0830375691a8f727c7214b7cb3e149dfa1fe8236bcb99f5",
+      "cellCount": 5743
+    },
+    "defaultModelReadOnlyGuard": {
+      "path": "data/prediction-models/zhejiang-v1-20260715.sqlite",
+      "sha256": "c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582"
+    },
+    "v10ControlReport": {
+      "path": "data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite.report.json",
+      "sha256": "f05a353ecdd5350fff15975ab9f894c1e07ed7c8a5e9f3c99c46faeb4c137b33"
+    }
+  },
+  "demSource": {
+    "provider": "Copernicus Data Space Ecosystem",
+    "dataset": "Copernicus DEM GLO-30",
+    "datasetId": "COP-DEM_GLO-30-DGED",
+    "release": "2024_1",
+    "productType": "digital_surface_model",
+    "officialDatasetUrl": "https://dataspace.copernicus.eu/explore-data/data-collections/copernicus-contributing-missions/collections-description/COP-DEM",
+    "officialDocumentationUrl": "https://documentation.dataspace.copernicus.eu/Data/Others/CCM.html?q=COP-DEM_GLO-30-DGED",
+    "license": "ESA_User_License_and_Copernicus_DEM_mission_specific_annex_with_required_attribution",
+    "attribution": "produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+    "horizontalCrs": "EPSG:4326",
+    "verticalCrs": "EPSG:3855",
+    "verticalUnit": "metre",
+    "gridAlignment": "RasterPixelIsPoint",
+    "sourceSpacingArcSeconds": 1,
+    "tileDegrees": 1,
+    "tilePosts": 3601,
+    "dataType": "float32",
+    "cacheDirectory": "data/prediction-features/copernicus-dem-glo-30-dged-2024_1",
+    "sourceCatalogPath": "data/prediction-features/copernicus-dem-glo-30-dged-2024_1/catalog-v11.json",
+    "sourceCatalogFileSha256": "5b860b28e73730a5cf192b4fbf971454ffc491ed3feed0a409ff0674b37c9375",
+    "sourceCatalogManifestSha256": "784255db378945d82a063cf6b300c1dc5a431bb7ad8997993ef8ac20dd18d6bb",
+    "sourcePublishedTileCount": 26,
+    "sourceUnavailableTileIds": [
+      "N26_00_E121_00"
+    ],
+    "sourceUnavailablePolicy": "do_not_fill_with_glo90_or_zero; cells_below_frozen_sample_support_follow_the_missing_value_policy",
+    "estimatedNativeDownloadBytes": {
+      "minimum": 1349347272,
+      "maximum": 1349347272,
+      "status": "exact_sum_of_26_source_published_dem_geotiff_nodes"
+    },
+    "downloadApproved": true,
+    "downloadPerformed": true,
+    "requiredTileIds": [
+      "N26_00_E119_00",
+      "N26_00_E120_00",
+      "N26_00_E121_00",
+      "N27_00_E117_00",
+      "N27_00_E118_00",
+      "N27_00_E119_00",
+      "N27_00_E120_00",
+      "N27_00_E121_00",
+      "N28_00_E117_00",
+      "N28_00_E118_00",
+      "N28_00_E119_00",
+      "N28_00_E120_00",
+      "N28_00_E121_00",
+      "N29_00_E117_00",
+      "N29_00_E118_00",
+      "N29_00_E119_00",
+      "N29_00_E120_00",
+      "N29_00_E121_00",
+      "N29_00_E122_00",
+      "N30_00_E118_00",
+      "N30_00_E119_00",
+      "N30_00_E120_00",
+      "N30_00_E121_00",
+      "N30_00_E122_00",
+      "N31_00_E119_00",
+      "N31_00_E120_00",
+      "N31_00_E121_00"
+    ],
+    "resolvedFiles": [
+      {
+        "tileId": "N26_00_E119_00",
+        "fileName": "Copernicus_DSM_10_N26_00_E119_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "ddf2621245db03657257008b87e1d610ce5dc6cfdbf84ec78a2fbc4108a8d126"
+      },
+      {
+        "tileId": "N26_00_E120_00",
+        "fileName": "Copernicus_DSM_10_N26_00_E120_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "f55372d1fd967070e7de57fad18a0460daebc872e19beef4f88ee272d0b7bb2f"
+      },
+      {
+        "tileId": "N27_00_E117_00",
+        "fileName": "Copernicus_DSM_10_N27_00_E117_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "d3b9f3c2eee5a74c75722bb3d97db34d94bc63e1c62af528245272fdd75db20a"
+      },
+      {
+        "tileId": "N27_00_E118_00",
+        "fileName": "Copernicus_DSM_10_N27_00_E118_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "bc5af853d2a28dea276ace6e345b6349e2a206d286c0b9a46bfb6bb8ce215e69"
+      },
+      {
+        "tileId": "N27_00_E119_00",
+        "fileName": "Copernicus_DSM_10_N27_00_E119_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "846095e36b1ee1adb80d95ecab4dfdf9f2b55424b51baa932085c38ada355ad6"
+      },
+      {
+        "tileId": "N27_00_E120_00",
+        "fileName": "Copernicus_DSM_10_N27_00_E120_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "a94655b6dbb7a0a81423ac2f42940131a5cea705a015cb8ad4ea76eadc04a291"
+      },
+      {
+        "tileId": "N27_00_E121_00",
+        "fileName": "Copernicus_DSM_10_N27_00_E121_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "782fd9794eba17ca6a687573795e9c3d2477f1cc54f3e74901adb592efb2d694"
+      },
+      {
+        "tileId": "N28_00_E117_00",
+        "fileName": "Copernicus_DSM_10_N28_00_E117_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "4ac0086b7779be8da6a670086fb215930a757c0b8989c43ec35069052a92bca5"
+      },
+      {
+        "tileId": "N28_00_E118_00",
+        "fileName": "Copernicus_DSM_10_N28_00_E118_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "d80247bd3394cd1cc0ab2f318c0d9bc5aaced478505abd7c17ecb57e7ec87918"
+      },
+      {
+        "tileId": "N28_00_E119_00",
+        "fileName": "Copernicus_DSM_10_N28_00_E119_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "eb610581246775aac7c81a5adf2f99245958519cadd721488e92da55b29ff2d7"
+      },
+      {
+        "tileId": "N28_00_E120_00",
+        "fileName": "Copernicus_DSM_10_N28_00_E120_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "9b4244991059a5c1a4b692f30a7d6611fbf79543903442cdc191e2f9bb38e865"
+      },
+      {
+        "tileId": "N28_00_E121_00",
+        "fileName": "Copernicus_DSM_10_N28_00_E121_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "d45e93bd929eb41980f3ebdca6b076d4636ee250e92325408f4e865d7fd53b1a"
+      },
+      {
+        "tileId": "N29_00_E117_00",
+        "fileName": "Copernicus_DSM_10_N29_00_E117_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "a6542c00f2af39978c09bf902b182139b51cc35c533b369cbb3267fe7d575310"
+      },
+      {
+        "tileId": "N29_00_E118_00",
+        "fileName": "Copernicus_DSM_10_N29_00_E118_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "3e6b1e9b15ce42d24561eed3da4e573548bbc146d00cb66211e893aa09ffc24c"
+      },
+      {
+        "tileId": "N29_00_E119_00",
+        "fileName": "Copernicus_DSM_10_N29_00_E119_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "1bd74b447af90a0a89709b323778258d220c178fe7439367cde64b3a7e9d621d"
+      },
+      {
+        "tileId": "N29_00_E120_00",
+        "fileName": "Copernicus_DSM_10_N29_00_E120_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "443c0d6ee58e8bc97f16c8fd50d3e19e2d8e90a2f733a308b03f648f98c9a427"
+      },
+      {
+        "tileId": "N29_00_E121_00",
+        "fileName": "Copernicus_DSM_10_N29_00_E121_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "e0e7d559aa8fe7d4056ea9fc625dd9fdc55071be6d6dec65d47cfa98893e7569"
+      },
+      {
+        "tileId": "N29_00_E122_00",
+        "fileName": "Copernicus_DSM_10_N29_00_E122_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "bbfea4f5840766076b8b53adf65e8230f425c4b3ec867fb18c062bd546be0d35"
+      },
+      {
+        "tileId": "N30_00_E118_00",
+        "fileName": "Copernicus_DSM_10_N30_00_E118_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "9ab705805748f1b0fd985ddf6141da45bf91b0d03fadccd9a1050bb6f88fa779"
+      },
+      {
+        "tileId": "N30_00_E119_00",
+        "fileName": "Copernicus_DSM_10_N30_00_E119_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "e3287634e97757a2c5504cc143a4874fdb26ab2a22768ce8acf3a95e6ce867f2"
+      },
+      {
+        "tileId": "N30_00_E120_00",
+        "fileName": "Copernicus_DSM_10_N30_00_E120_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "eaff8001a20b98a26e957a99338bc4756461277f9e0fa955dc7c9174f083935e"
+      },
+      {
+        "tileId": "N30_00_E121_00",
+        "fileName": "Copernicus_DSM_10_N30_00_E121_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "9381e4056ceed013510cce5ab787c868b679654f74842bef7b0a2f9fff62fd84"
+      },
+      {
+        "tileId": "N30_00_E122_00",
+        "fileName": "Copernicus_DSM_10_N30_00_E122_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "1b87b9b82128c718a9ded937541a08e2f6648b79a324dbfb3c04e071976dfe63"
+      },
+      {
+        "tileId": "N31_00_E119_00",
+        "fileName": "Copernicus_DSM_10_N31_00_E119_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "555de6e52031973e999cdaf96ae89eafc9c1695aaf1ea4ffb6138449ddd50eb7"
+      },
+      {
+        "tileId": "N31_00_E120_00",
+        "fileName": "Copernicus_DSM_10_N31_00_E120_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "7570c35b49e23a98eabddb843eedc4a0027e9df3d04884557c137273108af054"
+      },
+      {
+        "tileId": "N31_00_E121_00",
+        "fileName": "Copernicus_DSM_10_N31_00_E121_00_DEM.tif",
+        "bytes": 51897972,
+        "sha256": "cc902eca14db058bcddde4f2c5ce02f8a51b83ebe9566940f41aff5a3e5deecb"
+      }
+    ],
+    "sourceUnavailableTiles": [
+      {
+        "tileId": "N26_00_E121_00",
+        "status": "not_published_by_source"
+      }
+    ],
+    "tileManifestSha256": "9a7081b2f1fb65eef7e77bac9559170c59d06fe9225b1e725b2319e26f731c3a",
+    "tileManifestFile": "zhejiang-v1-20260715-terrain-h3-r6-v1.json.tiles.json",
+    "tileManifestFileSha256": "3513610dca49637eac286646be384ed629e42b6556d4867715159092c01dca91"
+  },
+  "terrainFeatureContract": {
+    "contractId": "zhejiang_copernicus_dem_glo30_h3_r6_terrain_v1",
+    "contractSha256": "449ae8e083981443e95b777e80439abf09de93868185599051427f00045fe2d1",
+    "outputPath": "data/prediction-features/zhejiang-v1-20260715-terrain-h3-r6-v1.json",
+    "fileSha256": "776c3613de291c586e0897f126e8404557d9dff99b63b81942b63046b5601c9a",
+    "featureSetSha256": "13c146a5a1f9174696d0aaf89c7944ee1e9022b1b486e212aa924a24aa4adee8",
+    "generationImplementationSha256": "f0f6f0d2d1217e02a108e1a7c7d43df540b0785e520df9136c34234ad4ed9237",
+    "features": [
+      "mean_elevation_m",
+      "elevation_stddev_m",
+      "mean_slope_deg"
+    ],
+    "targetIndependent": true,
+    "labelIndependent": true,
+    "sampling": {
+      "method": "deterministic_source_post_center_systematic_sample_within_h3_r6",
+      "stridePosts": 3,
+      "offsetPosts": 1,
+      "tileEdgePolicy": "exclude_outermost_source_post_before_horn_slope",
+      "expectedNominalSpacingMetres": 90
+    },
+    "slope": {
+      "method": "horn_3x3_on_source_posts",
+      "units": "degrees",
+      "horizontalDistance": "wgs84_ellipsoid_meridional_and_prime_vertical_radii_at_sample_latitude",
+      "noDataPolicy": "require_all_nine_posts_finite_and_not_nodata"
+    },
+    "aggregation": {
+      "h3Resolution": 6,
+      "meanElevation": "arithmetic_mean_of_valid_sampled_posts",
+      "elevationStandardDeviation": "population_standard_deviation_of_valid_sampled_posts",
+      "meanSlope": "arithmetic_mean_of_valid_sampled_horn_slopes"
+    },
+    "missingValuePolicy": {
+      "minimumElevationSamples": 32,
+      "minimumSlopeSamples": 32,
+      "rawValues": "null_if_either_minimum_is_not_met",
+      "standardizedVector": [
+        0,
+        0,
+        0
+      ],
+      "missingIndicatorFeature": false
+    },
+    "standardization": {
+      "population": "all_available_cells_in_frozen_5743_cell_public_h3_catalog",
+      "method": "population_mean_and_standard_deviation",
+      "minimumStandardDeviation": 1e-8,
+      "belowMinimumStandardDeviationDenominator": 1,
+      "clip": 6,
+      "fitPerFold": false
+    },
+    "runtimeConsistency": "training_and_service_read_identical_precomputed_h3_r6_rows_and_normalization",
+    "runtimeCoveragePolicy": "terrain_applies_when_the_request_resolves_to_an_existing_materialized_grid_r6_unit; otherwise_the_existing_administrative_fallback_is_unchanged_and_v11_creates_no_synthetic_space_units",
+    "cellCatalogFileSha256": "085b134fc86124213c7abf8f0d813ef25489de1754c908ff98e384a1b189d451",
+    "cellCatalogFeatureSetSha256": "b2a3ae75832f7b5bd0830375691a8f727c7214b7cb3e149dfa1fe8236bcb99f5"
+  },
+  "implementation": {
+    "predictionImplementationSha256": "22060707df73d5714a8df2bf33f624810de192f43ffa83bd185249a230bb98de",
+    "terrainOofCacheGenerationImplementationSha256": "738df00000e6e7ba3f3800520b3ea54e12d78a40c1646ac8ba2d5738de7cc2a9",
+    "terrainOofScorerImplementationSha256": "fe023f98f1283e83cc20d4958e788eae2cc2ec906073c556fb6c69df10203456",
+    "terrainOofScorerFiles": [
+      "tools/score-zhejiang-terrain-oof-v11.js"
+    ]
+  },
+  "candidate": {
+    "candidateCount": 1,
+    "contractId": "zhejiang_worldcover_terrain_neighbor_kernel_v11",
+    "contractSha256": "43ee50d6ce749ae05b1bda2382d4f668cedd0a407cb8f10be1eb4a03cb7fcb61",
+    "integrationPoint": "continuous_habitat_neighbor_selection_and_weight_before_grid_r6_evidence",
+    "control": "zhejiang_worldcover_hellinger_kernel_v1",
+    "habitatEligibilityMaximumHellingerDistance": 0.35,
+    "neighborCount": 24,
+    "minimumSameCityNeighbors": 8,
+    "habitatBandwidth": 0.18,
+    "terrainDistance": "root_mean_square_euclidean_on_three_frozen_standardized_features",
+    "terrainBandwidth": 1,
+    "combinedWeight": "habitat_gaussian_weight_times_terrain_gaussian_weight",
+    "evidenceExposureCap": 10,
+    "evidencePriorStrength": 30,
+    "postHocSpeciesCalibrationAdded": false,
+    "parameterSearch": false
+  },
+  "oofProtocol": {
+    "outerFoldCount": 5,
+    "innerFoldCount": 20,
+    "innerFoldRole": "fresh_strict_nested_completeness_and_diagnostics_only_no_candidate_selection_or_gate_tuning",
+    "reuseOldOofAsCandidateScore": false,
+    "oldV9V10CachesRole": "read_only_control_and_diagnostic_evidence_only",
+    "cachePath": "data/prediction-models/development-cache/zhejiang-v1-20260715-terrain-oof-v11.sqlite",
+    "privacyContract": {
+      "reportIds": false,
+      "observers": false,
+      "coordinates": false,
+      "exactSpatialIdentifiers": false,
+      "neighborIdentifiers": false,
+      "terrainFeatureVectors": false,
+      "names": false,
+      "publicTaxonIds": "retained_only_for_calibration_scope_and_recall_reconstruction",
+      "contextIdentity": "dense_fold_local_ordinal_without_location_mapping",
+      "storedEvidence": "aggregate_control_and_candidate_exposure_detection_strength_neighbor_count_only"
+    }
+  },
+  "controlReproduction": {
+    "absoluteTolerance": 1e-12,
+    "metrics": {
+      "brier": 0.019955265991189266,
+      "baselineBrier": 0.02114865439678302,
+      "brierSkill": 0.05642857380918209,
+      "ece": 0.004081352313500836,
+      "recallAt20": 0.4320007139032661,
+      "recallAt20Delta": 0.05550597893985365,
+      "maximumSpeciesEce": 0.10829956319678036,
+      "maximumGroupEce": 0.0003903312604222002,
+      "evaluatedWeight": 532612.6999222013,
+      "validationContexts": 727
+    }
+  },
+  "qualityGates": {
+    "maximumSpeciesEce": 0.05,
+    "maximumGroupEce": 0.1,
+    "maximumOverallEce": 0.1,
+    "minimumBrierSkillExclusive": 0,
+    "minimumRecallAt20Delta": -0.02,
+    "maximumRelativeBrierDegradationVsV10PerFoldAndPooled": 0.01,
+    "maximumEceDegradationVsV10PerFoldAndPooled": 0.01,
+    "thresholdRelaxationAllowed": false
+  },
+  "forbiddenInputsAndActions": [
+    "realtime_weather",
+    "historical_observed_weather",
+    "free_parameter_search",
+    "label_dependent_feature_generation",
+    "development_result_dependent_binning",
+    "development_result_dependent_thresholds",
+    "development_result_dependent_bandwidths",
+    "development_result_dependent_feature_combinations",
+    "distance_to_coast_in_first_terrain_candidate",
+    "post_hoc_species_calibration_layer",
+    "sealed_panel_access",
+    "reference_materialization",
+    "default_model_overwrite",
+    "publication",
+    "v12_or_v13_autocreation"
+  ],
+  "outputs": {
+    "feature": "data/prediction-features/zhejiang-v1-20260715-terrain-h3-r6-v1.json",
+    "oofCache": "data/prediction-models/development-cache/zhejiang-v1-20260715-terrain-oof-v11.sqlite",
+    "oofEvaluationArtifact": "data/prediction-models/development-cache/zhejiang-v1-20260715-terrain-oof-v11-evaluation.sqlite",
+    "oofDecisionReport": "data/prediction-models/development-cache/zhejiang-v1-20260715-terrain-oof-v11.decision.json",
+    "fullSqliteCandidate": "data/prediction-models/zhejiang-v1-20260715-development-terrain-v11.sqlite"
+  },
+  "phaseGate": {
+    "current": "oof_diagnostic_ready_awaiting_explicit_approval",
+    "oofMayStartOnlyAfter": [
+      "explicit_user_approval",
+      "all_26_source_published_dem_files_and_sha256_are_frozen",
+      "source_catalog_unavailability_for_N26_00_E121_00_is_frozen_without_fallback",
+      "terrain_feature_file_and_sha256_are_frozen",
+      "preregistration_state_is_frozen_ready_for_oof",
+      "read_only_preflight_passes"
+    ],
+    "fullSqliteMayStartOnlyAfter": [
+      "oof_control_reproduces_v10_within_1e-12",
+      "oof_candidate_passes_all_fixed_gates",
+      "explicit_user_approval"
+    ],
+    "failurePolicy": "stop_true_v11_path_and_report_root_cause_without_v12_v13_or_parameter_search"
+  },
+  "frozenAt": "2026-07-31T17:30:17.462Z"
+}

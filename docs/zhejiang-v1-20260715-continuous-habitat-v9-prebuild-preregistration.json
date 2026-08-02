@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "kind": "zhejiang_continuous_habitat_v9_prebuild_preregistration",
+  "status": "frozen_before_read_only_prebuild_diagnostic",
+  "purpose": "Evaluate whether the existing v8 strict development cache supports a safe v9 direction before any new long build.",
+  "diagnosticOnly": true,
+  "implementationSha256": "988ef408e579a91d01661d12fd6d37cb52f9eff404627910a27419b7e482aede",
+  "inputs": {
+    "cachePath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v8.sqlite",
+    "cacheFileSha256": "69c392fcf369e35a27dd9fd2a60efff4c84705cd93236d73d3f535a8f6385be6",
+    "sourceSnapshotPath": "data/prediction-snapshots/zhejiang-v1-20260715.sqlite",
+    "sourceSnapshotSha256": "92602be9b9c3aeb3d7c6cf966c459710a5a9bf6bc078e604a3805ab05fc0b16a",
+    "spatialSplitPath": "docs/zhejiang-v1-20260715-spatial-splits.json",
+    "spatialSplitFileSha256": "7deafec542c95b1463c92fe6948831247666a22923921b22890bb24adac9accc",
+    "spatialSplitManifestHash": "400bcc27bde3bd30f03ef022b9f76175cd6093ea5afc98fcbfccb79bde234e4d",
+    "generationImplementationSha256": "d6203dee3dd8f47abcd4dd86cf943cfbdbc81f41607bcc8325de5430423c8c7f",
+    "predictionImplementationSha256AtGeneration": "b85d7dfc19644ce7f9f8d8e48a2640eb8e932330b987e3ddfcbe3e0fc3698316",
+    "outerFoldCount": 5,
+    "outerRowCount": 347436,
+    "innerFoldCount": 20,
+    "innerRowCount": 1385452
+  },
+  "candidateSet": {
+    "sha256": "2be97a2a88f06a77970e2f1fec4bed78c5550f0a4cedf460d3290212b3393afe",
+    "candidates": [
+      {
+        "id": "cap=5,prior=10",
+        "exposureCap": 5,
+        "priorStrength": 10
+      },
+      {
+        "id": "cap=5,prior=30",
+        "exposureCap": 5,
+        "priorStrength": 30
+      },
+      {
+        "id": "cap=5,prior=60",
+        "exposureCap": 5,
+        "priorStrength": 60
+      },
+      {
+        "id": "cap=10,prior=10",
+        "exposureCap": 10,
+        "priorStrength": 10
+      },
+      {
+        "id": "cap=10,prior=30",
+        "exposureCap": 10,
+        "priorStrength": 30
+      },
+      {
+        "id": "cap=10,prior=60",
+        "exposureCap": 10,
+        "priorStrength": 60
+      },
+      {
+        "id": "cap=20,prior=10",
+        "exposureCap": 20,
+        "priorStrength": 10
+      },
+      {
+        "id": "cap=20,prior=30",
+        "exposureCap": 20,
+        "priorStrength": 30
+      },
+      {
+        "id": "cap=20,prior=60",
+        "exposureCap": 20,
+        "priorStrength": 60
+      },
+      {
+        "id": "cap=40,prior=10",
+        "exposureCap": 40,
+        "priorStrength": 10
+      },
+      {
+        "id": "cap=40,prior=30",
+        "exposureCap": 40,
+        "priorStrength": 30
+      },
+      {
+        "id": "cap=40,prior=60",
+        "exposureCap": 40,
+        "priorStrength": 60
+      }
+    ],
+    "selectionPolicy": {
+      "currentCandidateId": "cap=10,prior=30",
+      "id": "strict_inner_robust_habitat_evidence_grid_v1",
+      "maximumEceDegradation": 0.01,
+      "maximumRelativeBrierDegradation": 0.01,
+      "objectiveOrder": [
+        "minimum_worst_inner_fold_species_ece",
+        "minimum_pooled_inner_species_ece",
+        "minimum_pooled_inner_brier",
+        "minimum_pooled_inner_ece",
+        "candidate_id"
+      ],
+      "productionSelection": "development_outer_oof_exploratory_only_never_freeze_without_new_strict_cache",
+      "requireEveryInnerFoldGuard": true,
+      "selectionEvidence": "four_inner_oof_folds_for_each_outer_fold",
+      "validationEvidence": "one_untouched_outer_fold"
+    }
+  },
+  "structuralCandidatePlan": {
+    "sha256": "d5cacb9585254b26f00aebeab0000dcd130563a1f371de4f69fe0462fe364600",
+    "plan": {
+      "id": "zhejiang_continuous_habitat_v9_structural_candidates_v1",
+      "executionOrder": [
+        "existing_cache_habitat_evidence_grid",
+        "neighbor_policy_ablation_with_current_five_group_features",
+        "feature_contract_ablation_with_selected_neighbor_policy",
+        "combine_only_individually_beneficial_candidates"
+      ],
+      "neighborPolicies": [
+        {
+          "id": "same_city_exclusive_v1",
+          "role": "control",
+          "maximumDistance": 0.35,
+          "kernelBandwidth": 0.18,
+          "maximumNeighbors": 24,
+          "minimumSameCityNeighbors": 8,
+          "rule": "when_same_city_candidates_at_least_8_use_only_same_city_otherwise_use_zhejiang"
+        },
+        {
+          "id": "same_city_min8_fill_zhejiang_v1",
+          "role": "challenger",
+          "maximumDistance": 0.35,
+          "kernelBandwidth": 0.18,
+          "maximumNeighbors": 24,
+          "minimumSameCityNeighbors": 8,
+          "rule": "reserve_up_to_8_nearest_same_city_then_fill_remaining_slots_from_nearest_zhejiang_candidates"
+        },
+        {
+          "id": "dual_channel_same_city_zhejiang_v1",
+          "role": "challenger",
+          "maximumDistance": 0.35,
+          "kernelBandwidth": 0.18,
+          "maximumNeighborsPerChannel": 24,
+          "minimumSameCityNeighbors": 8,
+          "rule": "aggregate_same_city_and_zhejiang_similarity_as_separate_regularized_evidence_channels"
+        }
+      ],
+      "featureContracts": [
+        {
+          "id": "worldcover_five_group_r6_v2",
+          "role": "control",
+          "source": "ESA WorldCover 2021 v200",
+          "dimensions": [
+            "forest",
+            "open",
+            "cropland",
+            "urban",
+            "water_wetland"
+          ],
+          "spatialScales": [
+            "target_r6"
+          ]
+        },
+        {
+          "id": "worldcover_eleven_class_r6_v3",
+          "role": "challenger",
+          "source": "ESA WorldCover 2021 v200",
+          "dimensions": [
+            "tree_cover_10",
+            "shrubland_20",
+            "grassland_30",
+            "cropland_40",
+            "built_up_50",
+            "bare_sparse_60",
+            "snow_ice_70",
+            "permanent_water_80",
+            "herbaceous_wetland_90",
+            "mangroves_95",
+            "moss_lichen_100"
+          ],
+          "spatialScales": [
+            "target_r6"
+          ]
+        },
+        {
+          "id": "worldcover_eleven_class_multiscale_v3",
+          "role": "challenger",
+          "source": "ESA WorldCover 2021 v200",
+          "dimensions": [
+            "eleven_class_target_fraction",
+            "ring1_mean_fraction",
+            "ring1_fraction_variance",
+            "landscape_entropy",
+            "water_land_edge_fraction"
+          ],
+          "spatialScales": [
+            "target_r6",
+            "h3_ring_1"
+          ],
+          "noExternalRasterDependency": true
+        }
+      ],
+      "forbiddenShortcuts": [
+        "quality_gate_relaxation",
+        "taxon_removal",
+        "sealed_panel_access",
+        "hard_district_habitat_virtual_units",
+        "unregistered_free_parameter_search",
+        "full_reference_materialization_before_all_development_gates_pass"
+      ]
+    }
+  },
+  "diagnostic": {
+    "outputPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-continuous-habitat-v9-prebuild-diagnostic.json",
+    "outputMustNotExistBeforeRun": true,
+    "singleRegisteredRun": true,
+    "freezeEligible": false,
+    "existingCacheCanEvaluate": [
+      "habitat_evidence_exposure_cap",
+      "habitat_evidence_prior_strength"
+    ],
+    "existingCacheCannotEvaluate": [
+      "neighbor_policy",
+      "feature_contract",
+      "runtime_integration",
+      "reverse_temporal_ndcg"
+    ]
+  },
+  "qualityThresholds": {
+    "minimumBrierSkill": 0,
+    "maximumEce": 0.1,
+    "maximumSpeciesEce": 0.05,
+    "maximumGroupEce": 0.1,
+    "minimumRecallAt20Delta": -0.02
+  },
+  "stopPolicy": {
+    "sealedForbidden": true,
+    "defaultModelOverwriteForbidden": true,
+    "longBuildRequiresDiagnosticPass": true,
+    "qualityGateRelaxationForbidden": true,
+    "taxonRemovalForbidden": true,
+    "referenceMaterializationForbidden": true,
+    "ifCapPriorFails": "keep_long_build_paused_and_prepare_neighbor_policy_diagnostic_cache",
+    "ifCapPriorPasses": "preregister_runtime_integration_then_regenerate_new_strict_cache"
+  },
+  "protectedState": {
+    "defaultOfflineModelPath": "data/prediction-models/zhejiang-v1-20260715.sqlite",
+    "defaultOfflineModelSha256": "c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582",
+    "sealedPanelViewed": false
+  },
+  "commands": {
+    "unitTest": "node --test tools/test-zhejiang-v9-prebuild.js",
+    "diagnostic": "node tools/audit-zhejiang-continuous-habitat-v9-prebuild.js --cache data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v8.sqlite --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json --preregistration docs/zhejiang-v1-20260715-continuous-habitat-v9-prebuild-preregistration.json --output data/prediction-models/development-cache/zhejiang-v1-20260715-continuous-habitat-v9-prebuild-diagnostic.json"
+  }
+}

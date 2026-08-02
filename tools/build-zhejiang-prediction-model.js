@@ -42,6 +42,42 @@ const {
   continuousHabitatVector,
   selectContinuousHabitatNeighbors
 } = require("../server/prediction/continuous-habitat");
+const {
+  MULTISCALE_SPATIAL_FEATURE_CONTRACT,
+  buildMultiscaleSpatialFeatureProfiles,
+  multiscaleSpatialFeatureContractSha256,
+  multiscaleSpatialFeatureGenerationImplementationSha256
+} = require("../server/prediction/multiscale-spatial-features");
+const {
+  TERRAIN_FEATURE_CONTRACT,
+  loadTerrainFeatureSet,
+  terrainManifestSummary,
+  terrainVector
+} = require("../server/prediction/terrain-features");
+const {
+  TERRAIN_SPATIAL_EVIDENCE_CONTRACT,
+  selectTerrainAugmentedNeighbors,
+  terrainSpatialEvidenceContractSha256
+} = require("../server/prediction/terrain-spatial-evidence");
+const {
+  generationImplementationSha256:
+    terrainOofCacheGenerationImplementationSha256,
+  openTerrainOofCache,
+  writeTerrainOofCache
+} = require("../server/prediction/terrain-oof-cache");
+const {
+  validateOofDecision:
+    validateTerrainOofDecision,
+  terrainOofScorerImplementationSha256,
+  validatePreregistration:
+    validateTerrainPreregistration
+} = require("../server/prediction/terrain-preregistration");
+const {
+  NEIGHBOR_POLICY_DIAGNOSTIC_CONTRACT,
+  aggregateContinuousHabitatNeighborPolicyEvidence,
+  neighborPolicyDiagnosticContractSha256,
+  selectContinuousHabitatNeighborPolicies
+} = require("../server/prediction/continuous-habitat-neighbor-policies");
 const { betaInterval, betaQuantile, calibrateProbability, fitBetaCalibration } = require("../server/prediction/math");
 const {
   DEFAULT_PRIOR_STRENGTHS,
@@ -79,6 +115,19 @@ const {
   spatialOofCacheGenerationImplementationSha256,
   writeSpatialOofCache
 } = require("../server/prediction/spatial-oof-cache");
+const {
+  EXPECTED_NEIGHBOR_POLICY_CACHE_LAYOUT,
+  createNeighborPolicyOofCacheWriter,
+  neighborPolicyOofCacheGenerationImplementationSha256,
+  validateNeighborPolicyCachePreregistration,
+  writeNeighborPolicyOofCache
+} = require("../server/prediction/neighbor-policy-oof-cache");
+const {
+  EXPECTED_SPATIAL_FEATURE_DIAGNOSTIC_CACHE_LAYOUT,
+  spatialFeatureDiagnosticCacheGenerationImplementationSha256,
+  validateSpatialFeatureDiagnosticPreregistration,
+  writeSpatialFeatureDiagnosticCache
+} = require("../server/prediction/spatial-feature-diagnostic-cache");
 
 const PROBABILITY_DEFINITION =
   "P(某鸟在相似日期和地点的一份典型完整 BirdReport 清单中被记录到)，不是生态学绝对存在概率。";
@@ -119,6 +168,14 @@ const RANKING_REFERENCE_COMPLETE_FORWARD_LEVELS = Object.freeze([
 const PREDICTION_IMPLEMENTATION_FILES = Object.freeze([
   "tools/build-zhejiang-prediction-model.js",
   "server/prediction/continuous-habitat.js",
+  "server/prediction/continuous-habitat-neighbor-policies.js",
+  "server/prediction/multiscale-spatial-features.js",
+  "server/prediction/terrain-features.js",
+  "server/prediction/terrain-oof-cache.js",
+  "server/prediction/terrain-preregistration.js",
+  "server/prediction/terrain-spatial-evidence.js",
+  "server/prediction/neighbor-policy-oof-cache.js",
+  "server/prediction/spatial-feature-diagnostic-cache.js",
   "server/prediction/geo.js",
   "server/prediction/habitat-features.js",
   "server/prediction/location-normalization.js",
@@ -159,7 +216,13 @@ const DEFAULT_OPTIONS = Object.freeze({
   workers: 1,
   workerTaskChunkRecords: 4096,
   habitatModel: null,
+  terrainModel: null,
   continuousHabitatKernel: CONTINUOUS_HABITAT_KERNEL_CONTRACT,
+  terrainSpatialEvidenceContract:
+    TERRAIN_SPATIAL_EVIDENCE_CONTRACT,
+  neighborPolicyDiagnosticContract: NEIGHBOR_POLICY_DIAGNOSTIC_CONTRACT,
+  multiscaleSpatialFeatureContract:
+    MULTISCALE_SPATIAL_FEATURE_CONTRACT,
   forwardTopK: 100,
   reverseTopK: 300,
   materializationProfile: "full",
@@ -235,6 +298,15 @@ function mergeOptions(options = {}) {
     priorStrengthsByPrevalence: options.priorStrengthsByPrevalence || null,
     continuousHabitatKernel:
       options.continuousHabitatKernel || CONTINUOUS_HABITAT_KERNEL_CONTRACT,
+    neighborPolicyDiagnosticContract:
+      options.neighborPolicyDiagnosticContract ||
+      NEIGHBOR_POLICY_DIAGNOSTIC_CONTRACT,
+    multiscaleSpatialFeatureContract:
+      options.multiscaleSpatialFeatureContract ||
+      MULTISCALE_SPATIAL_FEATURE_CONTRACT,
+    terrainSpatialEvidenceContract:
+      options.terrainSpatialEvidenceContract ||
+      TERRAIN_SPATIAL_EVIDENCE_CONTRACT,
     qualityGate: { ...DEFAULT_OPTIONS.qualityGate, ...(options.qualityGate || {}) },
     holdoutEvaluation: { ...DEFAULT_OPTIONS.holdoutEvaluation, ...(options.holdoutEvaluation || {}) }
   };
@@ -332,6 +404,220 @@ function validateBuildSafetyOptions(options) {
       `不支持 habitatModel=${options.habitatModel}。`
     );
   }
+  if (
+    options.terrainModel != null &&
+    options.terrainModel !== TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id
+  ) {
+    throw new PredictionBuildError(
+      "TERRAIN_MODEL_INVALID",
+      `不支持 terrainModel=${options.terrainModel}。`
+    );
+  }
+  if (
+    (options.terrainFeaturesPath === undefined) !==
+    (options.terrainModel == null)
+  ) {
+    throw new PredictionBuildError(
+      "TERRAIN_MODEL_BINDING_REQUIRED",
+      "真实 v11 必须同时显式提供冻结 terrainFeaturesPath 和 terrainModel。"
+    );
+  }
+  if (options.terrainFeaturesPath !== undefined) {
+    const terrainFailures = [];
+    if (
+      typeof options.terrainFeaturesPath !== "string" ||
+      !options.terrainFeaturesPath.trim()
+    ) {
+      terrainFailures.push("terrainFeaturesPath.invalid");
+    }
+    if (options.testOnly !== true) {
+      terrainFailures.push("testOnly.required");
+    }
+    if (options.pointerPath) terrainFailures.push("pointerPath.forbidden");
+    if (
+      options.habitatModel !==
+      CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+    ) {
+      terrainFailures.push("habitatModel.continuous_v7_required");
+    }
+    if (!options.habitatFeaturesPath) {
+      terrainFailures.push("habitatFeaturesPath.required");
+    }
+    if (!options.terrainPreregistrationPath) {
+      terrainFailures.push(
+        "terrainPreregistrationPath.required"
+      );
+    }
+    if (!options.terrainControlReportPath) {
+      terrainFailures.push(
+        "terrainControlReportPath.required"
+      );
+    }
+    if (
+      JSON.stringify(options.continuousHabitatKernel) !==
+      JSON.stringify(CONTINUOUS_HABITAT_KERNEL_CONTRACT)
+    ) {
+      terrainFailures.push(
+        "continuousHabitatKernel.must_match_frozen_control"
+      );
+    }
+    if (
+      JSON.stringify(options.terrainSpatialEvidenceContract) !==
+      JSON.stringify(TERRAIN_SPATIAL_EVIDENCE_CONTRACT)
+    ) {
+      terrainFailures.push(
+        "terrainSpatialEvidenceContract.must_match_frozen_contract"
+      );
+    }
+    if (!options.spatialSplitManifestPath) {
+      terrainFailures.push("spatialSplitManifestPath.required");
+    }
+    if (options.spatialEvaluationPanel !== "development") {
+      terrainFailures.push(
+        "spatialEvaluationPanel.explicit_development_required"
+      );
+    }
+    if (
+      options.spatialParametersPath ||
+      options.sealedEvaluationReceiptPath ||
+      options.sealedSpatialPanelConfirmation
+    ) {
+      terrainFailures.push("sealed_or_frozen_parameters.forbidden");
+    }
+    if (options.qualityGate?.requireSpatialHoldout !== true) {
+      terrainFailures.push(
+        "qualityGate.requireSpatialHoldout.required"
+      );
+    }
+    if (
+      options.materializationProfile === "evaluation-only"
+    ) {
+      if (
+        options.writeTerrainOofCachePath === undefined
+      ) {
+        terrainFailures.push(
+          "writeTerrainOofCachePath.required_for_evaluation_only"
+        );
+      }
+      if (options.terrainOofDecisionPath) {
+        terrainFailures.push(
+          "terrainOofDecisionPath.forbidden_before_oof"
+        );
+      }
+      if (options.terrainOofCachePath) {
+        terrainFailures.push(
+          "terrainOofCachePath.forbidden_before_oof"
+        );
+      }
+    } else if (options.materializationProfile === "full") {
+      if (!options.terrainOofDecisionPath) {
+        terrainFailures.push(
+          "terrainOofDecisionPath.required_for_full"
+        );
+      }
+      if (!options.terrainOofCachePath) {
+        terrainFailures.push(
+          "terrainOofCachePath.required_for_full"
+        );
+      }
+      if (
+        options.writeTerrainOofCachePath !== undefined
+      ) {
+        terrainFailures.push(
+          "writeTerrainOofCachePath.forbidden_for_full"
+        );
+      }
+    } else {
+      terrainFailures.push(
+        "materializationProfile.invalid"
+      );
+    }
+    if (terrainFailures.length) {
+      throw new PredictionBuildError(
+        "TERRAIN_V11_BUILD_FORBIDDEN",
+        "真实 v11 地形候选只允许冻结 development、testOnly、no-publish 构建。",
+        { failures: terrainFailures }
+      );
+    }
+  }
+  if (options.writeTerrainOofCachePath !== undefined) {
+    const terrainCacheFailures = [];
+    const exactJson = (left, right) =>
+      JSON.stringify(left) === JSON.stringify(right);
+    if (
+      typeof options.writeTerrainOofCachePath !== "string" ||
+      !options.writeTerrainOofCachePath.trim()
+    ) {
+      terrainCacheFailures.push(
+        "writeTerrainOofCachePath.invalid"
+      );
+    }
+    if (
+      options.terrainModel !==
+      TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id
+    ) terrainCacheFailures.push("terrainModel.required");
+    if (!options.terrainFeaturesPath) {
+      terrainCacheFailures.push(
+        "terrainFeaturesPath.required"
+      );
+    }
+    if (!options.terrainPreregistrationPath) {
+      terrainCacheFailures.push(
+        "terrainPreregistrationPath.required"
+      );
+    }
+    if (!options.terrainControlReportPath) {
+      terrainCacheFailures.push(
+        "terrainControlReportPath.required"
+      );
+    }
+    if (options.testOnly !== true) {
+      terrainCacheFailures.push("testOnly.required");
+    }
+    if (
+      options.materializationProfile !== "evaluation-only"
+    ) {
+      terrainCacheFailures.push(
+        "materializationProfile.evaluation_only_required"
+      );
+    }
+    if (options.pointerPath) {
+      terrainCacheFailures.push("pointerPath.forbidden");
+    }
+    if (
+      options.writeSpatialOofCachePath !== undefined ||
+      options.writeNeighborPolicyOofCachePath !==
+        undefined ||
+      options.writeSpatialFeatureDiagnosticCachePath !==
+        undefined
+    ) {
+      terrainCacheFailures.push(
+        "otherDiagnosticCaches.mutually_exclusive"
+      );
+    }
+    for (const key of [
+      "qualityGate",
+      "holdoutEvaluation",
+      "unitThresholds",
+      "bandwidthCandidates",
+      "priorStrengthMultipliers",
+      "priorStrengths",
+      "novelGridAdminExposureCapsByPrevalence"
+    ]) {
+      if (!exactJson(options[key], DEFAULT_OPTIONS[key])) {
+        terrainCacheFailures.push(
+          `${key}.must_match_frozen_default`
+        );
+      }
+    }
+    if (terrainCacheFailures.length) {
+      throw new PredictionBuildError(
+        "TERRAIN_OOF_CACHE_BUILD_FORBIDDEN",
+        "真实 v11 OOF 只允许冻结 development、evaluation-only、no-publish 的单候选构建。",
+        { failures: terrainCacheFailures }
+      );
+    }
+  }
   if (options.writeSpatialOofCachePath !== undefined) {
     const cacheFailures = [];
     const exactJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -412,6 +698,332 @@ function validateBuildSafetyOptions(options) {
       );
     }
   }
+  if (options.writeNeighborPolicyOofCachePath !== undefined) {
+    const cacheFailures = [];
+    const exactJson = (left, right) =>
+      JSON.stringify(left) === JSON.stringify(right);
+    if (
+      typeof options.writeNeighborPolicyOofCachePath !== "string" ||
+      !options.writeNeighborPolicyOofCachePath.trim()
+    ) {
+      cacheFailures.push("writeNeighborPolicyOofCachePath.invalid");
+    }
+    if (options.writeSpatialOofCachePath !== undefined) {
+      cacheFailures.push("writeSpatialOofCachePath.mutually_exclusive");
+    }
+    if (
+      typeof options.neighborPolicyPreregistrationPath !== "string" ||
+      !options.neighborPolicyPreregistrationPath.trim()
+    ) {
+      cacheFailures.push("neighborPolicyPreregistrationPath.required");
+    }
+    if (options.testOnly !== true) cacheFailures.push("testOnly.required");
+    if (options.sourceIsSnapshot !== true) {
+      cacheFailures.push("sourceIsSnapshot.required");
+    }
+    if (
+      !options.sourcePath ||
+      !options.snapshotPath ||
+      resolve(options.sourcePath) !== resolve(options.snapshotPath)
+    ) {
+      cacheFailures.push("sourcePath.must_equal_snapshotPath");
+    }
+    if (Number(options.workers) !== 4) {
+      cacheFailures.push("workers.must_equal_4");
+    }
+    if (
+      options.workerTaskChunkRecords !==
+      DEFAULT_OPTIONS.workerTaskChunkRecords
+    ) {
+      cacheFailures.push("workerTaskChunkRecords.must_match_frozen_default");
+    }
+    if (options.materializationProfile !== "evaluation-only") {
+      cacheFailures.push("materializationProfile.evaluation_only_required");
+    }
+    if (options.pointerPath) cacheFailures.push("pointerPath.forbidden");
+    if (!options.habitatFeaturesPath) {
+      cacheFailures.push("habitatFeaturesPath.required");
+    }
+    if (options.habitatModel !== CONTINUOUS_HABITAT_KERNEL_CONTRACT.id) {
+      cacheFailures.push("habitatModel.continuous_v7_required");
+    }
+    if (
+      !exactJson(
+        options.continuousHabitatKernel,
+        CONTINUOUS_HABITAT_KERNEL_CONTRACT
+      )
+    ) {
+      cacheFailures.push("continuousHabitatKernel.must_match_frozen_contract");
+    }
+    if (
+      !exactJson(
+        options.neighborPolicyDiagnosticContract,
+        NEIGHBOR_POLICY_DIAGNOSTIC_CONTRACT
+      )
+    ) {
+      cacheFailures.push(
+        "neighborPolicyDiagnosticContract.must_match_frozen_contract"
+      );
+    }
+    if (!options.spatialSplitManifestPath) {
+      cacheFailures.push("spatialSplitManifestPath.required");
+    }
+    if (options.spatialEvaluationPanel !== "development") {
+      cacheFailures.push(
+        "spatialEvaluationPanel.explicit_development_required"
+      );
+    }
+    if (options.spatialParametersPath) {
+      cacheFailures.push("spatialParametersPath.forbidden");
+    }
+    if (options.sealedEvaluationReceiptPath) {
+      cacheFailures.push("sealedEvaluationReceiptPath.forbidden");
+    }
+    if (options.sealedSpatialPanelConfirmation) {
+      cacheFailures.push("sealedSpatialPanelConfirmation.forbidden");
+    }
+    if (options.rankingReferenceReportPath) {
+      cacheFailures.push("rankingReferenceReportPath.forbidden");
+    }
+    if (options.qualityGate?.requireSpatialHoldout !== true) {
+      cacheFailures.push("qualityGate.requireSpatialHoldout.required");
+    }
+    for (const key of [
+      "minimumNormalReports",
+      "minimumCompleteCoverage",
+      "minimumRefreshCoverage",
+      "minimumCoordinateCoverage",
+      "minimumDateCoverage",
+      "pointDriftMeters",
+      "recencyHalfLifeYears",
+      "localHistoryYears",
+      "includeFlaggedCleanReports",
+      "vagrantEventGapDays",
+      "vagrantDominantEventShare",
+      "vagrantEventWeightCap",
+      "priorTuningContextSampleModulo",
+      "outerPriorTuningContextSampleModulo",
+      "outerCalibrationContextSampleModulo"
+    ]) {
+      if (options[key] !== DEFAULT_OPTIONS[key]) {
+        cacheFailures.push(`${key}.must_match_frozen_default`);
+      }
+    }
+    for (const key of [
+      "qualityGate",
+      "holdoutEvaluation",
+      "unitThresholds",
+      "bandwidthCandidates",
+      "priorStrengthMultipliers",
+      "priorStrengths",
+      "novelGridAdminExposureCapsByPrevalence"
+    ]) {
+      if (!exactJson(options[key], DEFAULT_OPTIONS[key])) {
+        cacheFailures.push(`${key}.must_match_frozen_default`);
+      }
+    }
+    if (cacheFailures.length) {
+      throw new PredictionBuildError(
+        "NEIGHBOR_POLICY_OOF_CACHE_BUILD_FORBIDDEN",
+        "邻居策略 OOF 缓存只能由预登记的 development 五折 testOnly evaluation-only 构建生成。",
+        { failures: cacheFailures }
+      );
+    }
+  }
+  if (
+    options.writeSpatialFeatureDiagnosticCachePath !== undefined
+  ) {
+    const cacheFailures = [];
+    const exactJson = (left, right) =>
+      JSON.stringify(left) === JSON.stringify(right);
+    const writesCompanionCache =
+      options.writeNeighborPolicyOofCachePath !== undefined;
+    const reusesCompanionCache =
+      options.companionNeighborPolicyOofCachePath !== undefined;
+    if (
+      typeof options.writeSpatialFeatureDiagnosticCachePath !==
+        "string" ||
+      !options.writeSpatialFeatureDiagnosticCachePath.trim()
+    ) {
+      cacheFailures.push(
+        "writeSpatialFeatureDiagnosticCachePath.invalid"
+      );
+    }
+    if (writesCompanionCache === reusesCompanionCache) {
+      cacheFailures.push(
+        "companionNeighborPolicyOofCachePath.exactly_one_source_required"
+      );
+    }
+    if (
+      reusesCompanionCache &&
+      (
+        typeof options.companionNeighborPolicyOofCachePath !==
+          "string" ||
+        !options.companionNeighborPolicyOofCachePath.trim()
+      )
+    ) {
+      cacheFailures.push(
+        "companionNeighborPolicyOofCachePath.invalid"
+      );
+    }
+    if (
+      reusesCompanionCache &&
+      options.neighborPolicyPreregistrationPath !== undefined
+    ) {
+      cacheFailures.push(
+        "neighborPolicyPreregistrationPath.forbidden_for_existing_companion"
+      );
+    }
+    if (
+      typeof options.spatialFeaturePreregistrationPath !== "string" ||
+      !options.spatialFeaturePreregistrationPath.trim()
+    ) {
+      cacheFailures.push(
+        "spatialFeaturePreregistrationPath.required"
+      );
+    }
+    if (
+      !exactJson(
+        options.multiscaleSpatialFeatureContract,
+        MULTISCALE_SPATIAL_FEATURE_CONTRACT
+      )
+    ) {
+      cacheFailures.push(
+        "multiscaleSpatialFeatureContract.must_match_frozen_contract"
+      );
+    }
+    if (options.testOnly !== true) {
+      cacheFailures.push("testOnly.required");
+    }
+    if (options.sourceIsSnapshot !== true) {
+      cacheFailures.push("sourceIsSnapshot.required");
+    }
+    if (
+      !options.sourcePath ||
+      !options.snapshotPath ||
+      resolve(options.sourcePath) !== resolve(options.snapshotPath)
+    ) {
+      cacheFailures.push("sourcePath.must_equal_snapshotPath");
+    }
+    if (Number(options.workers) !== 4) {
+      cacheFailures.push("workers.must_equal_4");
+    }
+    if (
+      options.workerTaskChunkRecords !==
+      DEFAULT_OPTIONS.workerTaskChunkRecords
+    ) {
+      cacheFailures.push(
+        "workerTaskChunkRecords.must_match_frozen_default"
+      );
+    }
+    if (options.materializationProfile !== "evaluation-only") {
+      cacheFailures.push(
+        "materializationProfile.evaluation_only_required"
+      );
+    }
+    if (options.writeSpatialOofCachePath !== undefined) {
+      cacheFailures.push("writeSpatialOofCachePath.forbidden");
+    }
+    if (!options.habitatFeaturesPath) {
+      cacheFailures.push("habitatFeaturesPath.required");
+    }
+    if (
+      options.habitatModel !==
+      CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
+    ) {
+      cacheFailures.push("habitatModel.continuous_v7_required");
+    }
+    if (
+      !exactJson(
+        options.continuousHabitatKernel,
+        CONTINUOUS_HABITAT_KERNEL_CONTRACT
+      )
+    ) {
+      cacheFailures.push(
+        "continuousHabitatKernel.must_match_frozen_contract"
+      );
+    }
+    if (!options.spatialSplitManifestPath) {
+      cacheFailures.push("spatialSplitManifestPath.required");
+    }
+    if (options.spatialEvaluationPanel !== "development") {
+      cacheFailures.push(
+        "spatialEvaluationPanel.explicit_development_required"
+      );
+    }
+    if (
+      options.spatialParametersPath ||
+      options.sealedEvaluationReceiptPath ||
+      options.sealedSpatialPanelConfirmation
+    ) {
+      cacheFailures.push("sealed_or_frozen_parameters.forbidden");
+    }
+    if (options.pointerPath) {
+      cacheFailures.push("pointerPath.forbidden");
+    }
+    if (options.rankingReferenceReportPath) {
+      cacheFailures.push("rankingReferenceReportPath.forbidden");
+    }
+    if (options.qualityGate?.requireSpatialHoldout !== true) {
+      cacheFailures.push(
+        "qualityGate.requireSpatialHoldout.required"
+      );
+    }
+    for (const key of [
+      "minimumNormalReports",
+      "minimumCompleteCoverage",
+      "minimumRefreshCoverage",
+      "minimumCoordinateCoverage",
+      "minimumDateCoverage",
+      "pointDriftMeters",
+      "recencyHalfLifeYears",
+      "localHistoryYears",
+      "includeFlaggedCleanReports",
+      "vagrantEventGapDays",
+      "vagrantDominantEventShare",
+      "vagrantEventWeightCap",
+      "priorTuningContextSampleModulo",
+      "outerPriorTuningContextSampleModulo",
+      "outerCalibrationContextSampleModulo"
+    ]) {
+      if (options[key] !== DEFAULT_OPTIONS[key]) {
+        cacheFailures.push(
+          `${key}.must_match_frozen_default`
+        );
+      }
+    }
+    for (const key of [
+      "qualityGate",
+      "holdoutEvaluation",
+      "unitThresholds",
+      "bandwidthCandidates",
+      "priorStrengthMultipliers",
+      "priorStrengths",
+      "novelGridAdminExposureCapsByPrevalence"
+    ]) {
+      if (!exactJson(options[key], DEFAULT_OPTIONS[key])) {
+        cacheFailures.push(
+          `${key}.must_match_frozen_default`
+        );
+      }
+    }
+    if (cacheFailures.length) {
+      throw new PredictionBuildError(
+        "SPATIAL_FEATURE_DIAGNOSTIC_CACHE_BUILD_FORBIDDEN",
+        "多尺度空间特征诊断缓存只能绑定同次生成或已校验的只读 development 邻居 OOF 缓存。",
+        { failures: cacheFailures }
+      );
+    }
+  }
+  if (
+    options.companionNeighborPolicyOofCachePath !== undefined &&
+    options.writeSpatialFeatureDiagnosticCachePath === undefined
+  ) {
+    throw new PredictionBuildError(
+      "SPATIAL_FEATURE_DIAGNOSTIC_COMPANION_UNUSED",
+      "只读邻居伴随缓存只能用于生成多尺度空间特征诊断缓存。"
+    );
+  }
   if (options.rankingReferenceReportPath !== undefined) {
     const referenceFailures = [];
     if (
@@ -426,6 +1038,14 @@ function validateBuildSafetyOptions(options) {
       referenceFailures.push("spatialEvaluationPanel.explicit_development_required");
     }
     if (options.writeSpatialOofCachePath) referenceFailures.push("writeSpatialOofCachePath.forbidden");
+    if (options.writeNeighborPolicyOofCachePath) {
+      referenceFailures.push("writeNeighborPolicyOofCachePath.forbidden");
+    }
+    if (options.writeSpatialFeatureDiagnosticCachePath) {
+      referenceFailures.push(
+        "writeSpatialFeatureDiagnosticCachePath.forbidden"
+      );
+    }
     if (options.spatialParametersPath) referenceFailures.push("spatialParametersPath.forbidden");
     if (options.sealedEvaluationReceiptPath) referenceFailures.push("sealedEvaluationReceiptPath.forbidden");
     if (options.sealedSpatialPanelConfirmation) {
@@ -1095,6 +1715,31 @@ function createArtifactSchema(database) {
       water_wetland REAL NOT NULL CHECK (water_wetland BETWEEN 0 AND 1),
       CHECK (
         ABS(forest + open + cropland + urban + water_wetland - 1) <= 0.000001
+      )
+    ) WITHOUT ROWID;
+
+    CREATE TABLE terrain_features (
+      h3_r6 TEXT PRIMARY KEY,
+      available INTEGER NOT NULL CHECK (available IN (0, 1)),
+      elevation_sample_count INTEGER NOT NULL CHECK (elevation_sample_count >= 0),
+      slope_sample_count INTEGER NOT NULL CHECK (slope_sample_count >= 0),
+      mean_elevation_m REAL,
+      elevation_stddev_m REAL,
+      mean_slope_deg REAL,
+      standardized_mean_elevation REAL NOT NULL,
+      standardized_elevation_stddev REAL NOT NULL,
+      standardized_mean_slope REAL NOT NULL,
+      CHECK (
+        (available = 1 AND mean_elevation_m IS NOT NULL
+          AND elevation_stddev_m IS NOT NULL
+          AND mean_slope_deg IS NOT NULL)
+        OR
+        (available = 0 AND mean_elevation_m IS NULL
+          AND elevation_stddev_m IS NULL
+          AND mean_slope_deg IS NULL
+          AND standardized_mean_elevation = 0
+          AND standardized_elevation_stddev = 0
+          AND standardized_mean_slope = 0)
       )
     ) WITHOUT ROWID;
 
@@ -1796,7 +2441,7 @@ function insertTrainingRows(source, artifact, pointStats, locationNormalization,
     }
     seenDuplicates.add(duplicateKey);
     if (observer.known) knownObserverReports += 1;
-    if (options.habitatFeatureSet) {
+    if (r6 && options.habitatFeatureSet) {
       habitatAssignedReports += 1;
       habitatClusters.set(habitatCluster, (habitatClusters.get(habitatCluster) || 0) + 1);
       habitatGridCells.add(r6.h3Index);
@@ -2235,6 +2880,106 @@ function insertContinuousHabitatFeatures(artifact, featureSet, habitatModel) {
     enabled: true,
     storedCellCount,
     observedGridR6Count,
+    missingObservedGridR6Count
+  };
+}
+
+function insertTerrainFeatures(
+  artifact,
+  featureSet,
+  terrainModel
+) {
+  if (terrainModel !== TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id) {
+    return {
+      enabled: false,
+      storedCellCount: 0,
+      availableCellCount: 0,
+      missingObservedGridR6Count: 0
+    };
+  }
+  if (
+    !featureSet ||
+    featureSet.contract?.id !== TERRAIN_FEATURE_CONTRACT.id
+  ) {
+    throw new PredictionBuildError(
+      "TERRAIN_FEATURES_REQUIRED",
+      "真实 v11 模型物化要求绑定冻结 Copernicus DEM H3 r6 特征。"
+    );
+  }
+  const insert = artifact.prepare(`
+    INSERT INTO terrain_features
+      (h3_r6, available, elevation_sample_count, slope_sample_count,
+       mean_elevation_m, elevation_stddev_m, mean_slope_deg,
+       standardized_mean_elevation, standardized_elevation_stddev,
+       standardized_mean_slope)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  artifact.exec("BEGIN");
+  try {
+    for (const cell of [...featureSet.cells].sort((left, right) =>
+      left.h3Index.localeCompare(right.h3Index)
+    )) {
+      insert.run(
+        cell.h3Index,
+        cell.available ? 1 : 0,
+        cell.elevationSampleCount,
+        cell.slopeSampleCount,
+        cell.meanElevationMeters,
+        cell.elevationStdDevMeters,
+        cell.meanSlopeDegrees,
+        ...terrainVector(cell, featureSet)
+      );
+    }
+    artifact.exec("COMMIT");
+  } catch (error) {
+    artifact.exec("ROLLBACK");
+    throw error;
+  }
+  const storedCellCount = Number(
+    artifact.prepare(
+      "SELECT COUNT(*) AS count FROM terrain_features"
+    ).get().count
+  ) || 0;
+  const availableCellCount = Number(
+    artifact.prepare(
+      "SELECT COUNT(*) AS count FROM terrain_features WHERE available = 1"
+    ).get().count
+  ) || 0;
+  const missingObservedGridR6Count = Number(
+    artifact.prepare(`
+      SELECT COUNT(*) AS count
+      FROM space_units units
+      LEFT JOIN terrain_features features
+        ON features.h3_r6 = CASE
+          WHEN units.code LIKE 'grid_r6:%' THEN SUBSTR(units.code, 9)
+          ELSE units.code
+        END
+      WHERE units.level = 'grid_r6' AND features.h3_r6 IS NULL
+    `).get().count
+  ) || 0;
+  if (
+    storedCellCount !== Number(featureSet.summary?.cellCount) ||
+    availableCellCount !==
+      Number(featureSet.summary?.availableCellCount) ||
+    missingObservedGridR6Count !== 0
+  ) {
+    throw new PredictionBuildError(
+      "TERRAIN_ARTIFACT_COVERAGE_INCOMPLETE",
+      "真实 v11 模型产物未完整保存冻结地形 H3 r6 特征。",
+      {
+        storedCellCount,
+        expectedCellCount: Number(featureSet.summary?.cellCount) || 0,
+        availableCellCount,
+        expectedAvailableCellCount:
+          Number(featureSet.summary?.availableCellCount) || 0,
+        missingObservedGridR6Count
+      }
+    );
+  }
+  return {
+    enabled: true,
+    storedCellCount,
+    availableCellCount,
     missingObservedGridR6Count
   };
 }
@@ -2762,6 +3507,22 @@ function prepareContinuousHabitatKernelContexts(
     );
   }
   const candidateByUnit = new Map();
+  const terrainEnabled =
+    options.terrainModel ===
+    TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id;
+  if (
+    terrainEnabled &&
+    (
+      !options.terrainFeatureSet ||
+      options.terrainFeatureSet.contract?.id !==
+        TERRAIN_FEATURE_CONTRACT.id
+    )
+  ) {
+    throw new PredictionBuildError(
+      "TERRAIN_FEATURES_REQUIRED",
+      "真实 v11 空间证据要求绑定冻结 Copernicus DEM H3 r6 特征。"
+    );
+  }
   for (const row of artifact.prepare(`
     SELECT reports.grid_r6_unit, reports.city_unit, COUNT(*) AS report_count
     FROM training_reports reports
@@ -2784,10 +3545,26 @@ function prepareContinuousHabitatKernelContexts(
         { unitId }
       );
     }
+    const terrainFeature = terrainEnabled
+      ? options.terrainFeatureSet.cellsByH3.get(h3Index)
+      : null;
+    if (terrainEnabled && !terrainFeature) {
+      throw new PredictionBuildError(
+        "TERRAIN_FEATURE_COVERAGE_INCOMPLETE",
+        "真实 v11 地形特征缺少训练网格。",
+        { unitId }
+      );
+    }
     candidateByUnit.set(unitId, {
       unitId,
       cityName: String(row.city_unit || ""),
-      vector: continuousHabitatVector(feature.classFractions)
+      vector: continuousHabitatVector(feature.classFractions),
+      terrainVector: terrainEnabled
+        ? terrainVector(
+            terrainFeature,
+            options.terrainFeatureSet
+          )
+        : null
     });
   }
   const candidates = [...candidateByUnit.values()]
@@ -2799,6 +3576,10 @@ function prepareContinuousHabitatKernelContexts(
     );
   }
   const selections = [];
+  const neighborPolicyDiagnosticEnabled =
+    options.writeNeighborPolicyOofCachePath !== undefined;
+  const spatialFeatureDiagnosticEnabled =
+    options.writeSpatialFeatureDiagnosticCachePath !== undefined;
   for (const context of contexts.values()) {
     const unitId = String(context.grid_r6_unit || "");
     if (!unitId) continue;
@@ -2813,13 +3594,56 @@ function prepareContinuousHabitatKernelContexts(
         { unitId }
       );
     }
-    const selection = selectContinuousHabitatNeighbors({
+    const targetVector = continuousHabitatVector(feature.classFractions);
+    const targetTerrainFeature = terrainEnabled
+      ? options.terrainFeatureSet.cellsByH3.get(h3Index)
+      : null;
+    if (terrainEnabled && !targetTerrainFeature) {
+      throw new PredictionBuildError(
+        "TERRAIN_FEATURE_COVERAGE_INCOMPLETE",
+        "真实 v11 地形特征缺少验证网格。",
+        { unitId }
+      );
+    }
+    if (spatialFeatureDiagnosticEnabled) {
+      const profileId =
+        options.multiscaleSpatialFeatureProfiles?.profileByH3?.get(
+          h3Index
+        );
+      if (!profileId) {
+        throw new PredictionBuildError(
+          "MULTISCALE_SPATIAL_FEATURE_PROFILE_MISSING",
+          "验证上下文没有冻结的多尺度空间特征原型。",
+          { unitId }
+        );
+      }
+      context.spatialFeatureDiagnostic = { profileId };
+    }
+    const controlSelection = selectContinuousHabitatNeighbors({
       targetUnitId: unitId,
       targetCityName: String(context.city_unit || ""),
-      targetVector: continuousHabitatVector(feature.classFractions),
+      targetVector,
       candidates,
       contract: options.continuousHabitatKernel
     });
+    const selection = terrainEnabled
+      ? selectTerrainAugmentedNeighbors({
+          targetUnitId: unitId,
+          targetCityName: String(context.city_unit || ""),
+          targetHabitatVector: targetVector,
+          targetTerrainVector: terrainVector(
+            targetTerrainFeature,
+            options.terrainFeatureSet
+          ),
+          candidates: candidates.map((candidate) => ({
+            unitId: candidate.unitId,
+            cityName: candidate.cityName,
+            habitatVector: candidate.vector,
+            terrainVector: candidate.terrainVector
+          })),
+          contract: options.terrainSpatialEvidenceContract
+        })
+      : controlSelection;
     if (!selection.neighbors.length) {
       throw new PredictionBuildError(
         "CONTINUOUS_HABITAT_NEIGHBORS_MISSING",
@@ -2834,7 +3658,68 @@ function prepareContinuousHabitatKernelContexts(
         weight: neighbor.weight
       }))
     };
-    for (const neighbor of context.continuousHabitat.neighbors) {
+    if (terrainEnabled) {
+      context.continuousHabitatControl = {
+        scope: controlSelection.scope,
+        neighbors: controlSelection.neighbors.map((neighbor) => ({
+          unitId: neighbor.unitId,
+          weight: neighbor.weight
+        }))
+      };
+    }
+    if (neighborPolicyDiagnosticEnabled) {
+      const policies = selectContinuousHabitatNeighborPolicies({
+        targetUnitId: unitId,
+        targetCityName: String(context.city_unit || ""),
+        targetVector,
+        candidates
+      });
+      const control = policies.find(
+        (policy) => policy.policyId === "same_city_exclusive_v1"
+      );
+      const controlProjection = control?.channels?.[0]?.neighbors?.map(
+        (neighbor) => ({
+          unitId: neighbor.unitId,
+          weight: neighbor.weight
+        })
+      );
+      if (
+        JSON.stringify(controlProjection) !==
+        JSON.stringify(
+          terrainEnabled
+            ? context.continuousHabitatControl.neighbors
+            : context.continuousHabitat.neighbors
+        )
+      ) {
+        throw new PredictionBuildError(
+          "NEIGHBOR_POLICY_CONTROL_REPRODUCTION_FAILED",
+          "邻居策略 control 未精确复现当前连续生境邻居选择。",
+          { unitId }
+        );
+      }
+      context.continuousHabitatPolicies = policies.map((policy) => ({
+        policyId: policy.policyId,
+        channels: policy.channels.map((channel) => ({
+          channelId: channel.channelId,
+          applicationOrder: channel.applicationOrder,
+          evidenceExposureCap: channel.evidenceExposureCap,
+          evidencePriorStrength: channel.evidencePriorStrength,
+          neighbors: channel.neighbors.map((neighbor) => ({
+            unitId: neighbor.unitId,
+            weight: neighbor.weight
+          }))
+        }))
+      }));
+    }
+    const neededNeighbors = neighborPolicyDiagnosticEnabled
+      ? context.continuousHabitatPolicies.flatMap((policy) =>
+          policy.channels.flatMap((channel) => channel.neighbors)
+        )
+      : [
+          ...context.continuousHabitat.neighbors,
+          ...(context.continuousHabitatControl?.neighbors || [])
+        ];
+    for (const neighbor of neededNeighbors) {
       insertNeededUnit.run("grid_r6", neighbor.unitId);
     }
     selections.push(selection);
@@ -2848,7 +3733,26 @@ function prepareContinuousHabitatKernelContexts(
     zhejiangFallbackContextCount:
       selections.filter((selection) => selection.scope === "zhejiang_fallback").length,
     minimumSelectedNeighborCount: neighborCounts.length ? Math.min(...neighborCounts) : 0,
-    maximumSelectedNeighborCount: neighborCounts.length ? Math.max(...neighborCounts) : 0
+    maximumSelectedNeighborCount: neighborCounts.length
+      ? Math.max(...neighborCounts)
+      : 0,
+    neighborPolicyDiagnosticEnabled,
+    neighborPolicyCount: neighborPolicyDiagnosticEnabled
+      ? NEIGHBOR_POLICY_DIAGNOSTIC_CONTRACT.policies.length
+      : 0,
+    spatialFeatureDiagnosticEnabled,
+    spatialFeatureProfileModelSha256:
+      spatialFeatureDiagnosticEnabled
+        ? options.multiscaleSpatialFeatureProfiles
+            ?.profileModelSha256 || null
+        : null,
+    terrainEnabled,
+    terrainContractId: terrainEnabled
+      ? TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id
+      : null,
+    terrainContractSha256: terrainEnabled
+      ? terrainSpatialEvidenceContractSha256()
+      : null
   };
 }
 
@@ -2863,7 +3767,8 @@ function evaluationProbability({
   options,
   intervalMode = "none",
   smoothedCache = null,
-  captureAdminEvidence = false
+  captureAdminEvidence = false,
+  captureNeighborPolicyEvidence = false
 }) {
   const cachedSmooth = (cacheKey, values) => {
     if (!smoothedCache) return smoothWeekly(values, context.season_week, bandwidthDays);
@@ -2901,8 +3806,40 @@ function evaluationProbability({
     ),
     neighborCount: context.continuousHabitat?.neighbors?.length || 0
   };
+  const terrainControlEnabled = Boolean(
+    options.terrainModel ===
+      TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id &&
+    context.continuousHabitatControl?.neighbors?.length
+  );
+  const terrainControlHabitatEvidence = terrainControlEnabled
+    ? {
+        exposure: 0,
+        detections: 0,
+        strength:
+          CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidencePriorStrength,
+        neighborCount:
+          context.continuousHabitatControl.neighbors.length
+      }
+    : null;
+  const habitatExposureForNeighbor = (unitId) =>
+    cachedSmooth(
+      `habitat-exposure\u0000${unitId}\u0000${context.season_week}\u0000${bandwidthDays}`,
+      exposures.get(unitId) || Array(53).fill(0)
+    );
+  const habitatDetectionsForNeighbor = (unitId) => {
+    const exposure = habitatExposureForNeighbor(unitId);
+    return Math.min(
+      exposure,
+      cachedSmooth(
+        `habitat-detection\u0000${unitId}\u0000${taxonId}\u0000${context.season_week}\u0000${bandwidthDays}`,
+        hits.get(`${unitId}\u0000${taxonId}`) || Array(53).fill(0)
+      )
+    );
+  };
   let alpha = 1;
   let beta = 1;
+  let terrainControlAlpha = 1;
+  let terrainControlBeta = 1;
   let baselineProbability = null;
   let baselineAlpha = null;
   let baselineBeta = null;
@@ -2917,17 +3854,8 @@ function evaluationProbability({
     ) return;
     habitatApplied = true;
     for (const neighbor of context.continuousHabitat.neighbors) {
-      const exposure = cachedSmooth(
-        `habitat-exposure\u0000${neighbor.unitId}\u0000${context.season_week}\u0000${bandwidthDays}`,
-        exposures.get(neighbor.unitId) || Array(53).fill(0)
-      );
-      const detections = Math.min(
-        exposure,
-        cachedSmooth(
-          `habitat-detection\u0000${neighbor.unitId}\u0000${taxonId}\u0000${context.season_week}\u0000${bandwidthDays}`,
-          hits.get(`${neighbor.unitId}\u0000${taxonId}`) || Array(53).fill(0)
-        )
-      );
+      const exposure = habitatExposureForNeighbor(neighbor.unitId);
+      const detections = habitatDetectionsForNeighbor(neighbor.unitId);
       habitatEvidence.exposure += Number(neighbor.weight) * exposure;
       habitatEvidence.detections += Number(neighbor.weight) * detections;
     }
@@ -2935,6 +3863,41 @@ function evaluationProbability({
       habitatEvidence.exposure,
       habitatEvidence.detections
     );
+    if (terrainControlHabitatEvidence) {
+      for (const neighbor of context.continuousHabitatControl.neighbors) {
+        const exposure = habitatExposureForNeighbor(neighbor.unitId);
+        const detections = habitatDetectionsForNeighbor(neighbor.unitId);
+        terrainControlHabitatEvidence.exposure +=
+          Number(neighbor.weight) * exposure;
+        terrainControlHabitatEvidence.detections +=
+          Number(neighbor.weight) * detections;
+      }
+      terrainControlHabitatEvidence.detections = Math.min(
+        terrainControlHabitatEvidence.exposure,
+        terrainControlHabitatEvidence.detections
+      );
+      const cappedControl = capEffectiveEvidence(
+        terrainControlHabitatEvidence.exposure,
+        terrainControlHabitatEvidence.detections,
+        CONTINUOUS_HABITAT_KERNEL_CONTRACT.evidenceExposureCap
+      );
+      if (cappedControl.exposure > 0) {
+        const controlParentProbability =
+          terrainControlAlpha /
+          (terrainControlAlpha + terrainControlBeta);
+        terrainControlAlpha =
+          controlParentProbability *
+            terrainControlHabitatEvidence.strength +
+          cappedControl.detections;
+        terrainControlBeta =
+          (1 - controlParentProbability) *
+            terrainControlHabitatEvidence.strength +
+          Math.max(
+            0,
+            cappedControl.exposure - cappedControl.detections
+          );
+      }
+    }
     const capped = capEffectiveEvidence(
       habitatEvidence.exposure,
       habitatEvidence.detections,
@@ -2997,6 +3960,8 @@ function evaluationProbability({
     if (level === "province") {
       alpha = 1 + detections;
       beta = 1 + Math.max(0, exposure - detections);
+      terrainControlAlpha = alpha;
+      terrainControlBeta = beta;
       baselineProbability = alpha / (alpha + beta);
       baselineAlpha = alpha;
       baselineBeta = beta;
@@ -3013,8 +3978,33 @@ function evaluationProbability({
     );
     alpha = parentProbability * strength + detections;
     beta = (1 - parentProbability) * strength + Math.max(0, exposure - detections);
+    const terrainControlParentProbability =
+      terrainControlAlpha /
+      (terrainControlAlpha + terrainControlBeta);
+    terrainControlAlpha =
+      terrainControlParentProbability * strength + detections;
+    terrainControlBeta =
+      (1 - terrainControlParentProbability) * strength +
+      Math.max(0, exposure - detections);
     deepestLevel = level;
     deepestUnitId = unitId;
+  }
+  let neighborPolicyEvidence = null;
+  if (captureNeighborPolicyEvidence) {
+    if (!Array.isArray(context.continuousHabitatPolicies)) {
+      throw new PredictionBuildError(
+        "NEIGHBOR_POLICY_EVIDENCE_MISSING",
+        "邻居策略诊断行缺少已冻结 policy selection。"
+      );
+    }
+    neighborPolicyEvidence =
+      aggregateContinuousHabitatNeighborPolicyEvidence(
+        context.continuousHabitatPolicies,
+        {
+          exposureForNeighbor: habitatExposureForNeighbor,
+          detectionsForNeighbor: habitatDetectionsForNeighbor
+        }
+      );
   }
   const probability = alpha / (alpha + beta);
   let intervalLower = probability;
@@ -3034,6 +4024,10 @@ function evaluationProbability({
   }
   return {
     probability,
+    terrainControlProbability: terrainControlEnabled
+      ? terrainControlAlpha /
+        (terrainControlAlpha + terrainControlBeta)
+      : probability,
     baselineProbability: baselineProbability ?? probability,
     intervalLower,
     intervalUpper,
@@ -3043,7 +4037,10 @@ function evaluationProbability({
     deepestUnitId,
     hasSupportedLocalUnit,
     adminEvidence,
-    habitatEvidence
+    habitatEvidence,
+    terrainControlHabitatEvidence:
+      terrainControlHabitatEvidence || habitatEvidence,
+    neighborPolicyEvidence
   };
 }
 
@@ -3097,8 +4094,18 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
   const calibrationPoints = new Map();
   const collectAdminCapTasks = Boolean(evaluationOptions.collectAdminCapTasks);
   const collectScoreRows = Boolean(evaluationOptions.collectScoreRows);
+  const collectNeighborPolicyEvidence = Boolean(
+    evaluationOptions.collectNeighborPolicyEvidence
+  );
+  const collectSpatialFeatureContexts = Boolean(
+    evaluationOptions.collectSpatialFeatureContexts
+  );
+  const collectTerrainEvidence = Boolean(
+    evaluationOptions.collectTerrainEvidence
+  );
   const adminCapTasksByPrevalence = new Map();
   const scoreRows = [];
+  const featureContexts = [];
   const contextSampleModulo = Math.max(1, Number(evaluationOptions.contextSampleModulo) || 1);
   const validationRows = artifact
     .prepare(
@@ -3114,7 +4121,15 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
                 reports.grid_r6_unit, reports.grid_r7_unit, reports.point_unit, reports.season_week`
     )
     .all();
-  if (!validationRows.length) return { metrics: null, calibrationPoints, scoreRows, adminCapTasksByPrevalence };
+  if (!validationRows.length) {
+    return {
+      metrics: null,
+      calibrationPoints,
+      scoreRows,
+      featureContexts,
+      adminCapTasksByPrevalence
+    };
+  }
 
   const contexts = new Map();
   const insertNeededUnit = artifact.prepare(
@@ -3200,7 +4215,15 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
       taxon_id: String(row.taxon_id),
       positive_count: Number(row.positive_count) || 0
     }));
-  if (!eligibleTaxa.length) return { metrics: null, calibrationPoints, scoreRows, adminCapTasksByPrevalence };
+  if (!eligibleTaxa.length) {
+    return {
+      metrics: null,
+      calibrationPoints,
+      scoreRows,
+      featureContexts,
+      adminCapTasksByPrevalence
+    };
+  }
 
   const exposures = new Map();
   const hits = new Map();
@@ -3275,6 +4298,21 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
   let contextIndex = 0;
   for (const context of contexts.values()) {
     const currentContextIndex = contextIndex++;
+    if (collectSpatialFeatureContexts) {
+      const profileId =
+        context.spatialFeatureDiagnostic?.profileId;
+      if (!profileId) {
+        throw new PredictionBuildError(
+          "MULTISCALE_SPATIAL_FEATURE_CONTEXT_MISSING",
+          "特征诊断上下文缺少冻结原型。"
+        );
+      }
+      featureContexts.push({
+        contextIndex: currentContextIndex,
+        profileId,
+        seasonWeek: Number(context.season_week)
+      });
+    }
     if (context.exposure <= 0) continue;
     const rows = [];
     for (const taxon of eligibleTaxa) {
@@ -3288,7 +4326,8 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
         supports,
         bandwidthDays,
         options,
-        captureAdminEvidence: collectAdminCapTasks
+        captureAdminEvidence: collectAdminCapTasks,
+        captureNeighborPolicyEvidence: collectNeighborPolicyEvidence
       });
       const calibrator = typeof evaluationOptions.calibratorForTaxon === "function"
         ? evaluationOptions.calibratorForTaxon(taxon)
@@ -3307,7 +4346,20 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
           deepestLevel: rawScore.deepestLevel,
           hasSupportedLocalUnit: rawScore.hasSupportedLocalUnit,
           habitatEvidence: rawScore.habitatEvidence,
-          ...(collectAdminCapTasks ? { adminEvidence: rawScore.adminEvidence } : {})
+          ...(collectTerrainEvidence
+            ? {
+                terrainControlProbability:
+                  rawScore.terrainControlProbability,
+                terrainControlHabitatEvidence:
+                  rawScore.terrainControlHabitatEvidence
+              }
+            : {}),
+          ...(collectAdminCapTasks
+            ? { adminEvidence: rawScore.adminEvidence }
+            : {}),
+          ...(collectNeighborPolicyEvidence
+            ? { neighborPolicyEvidence: rawScore.neighborPolicyEvidence }
+            : {})
         });
       }
       if (collectAdminCapTasks && !rawScore.hasSupportedLocalUnit) {
@@ -3400,7 +4452,15 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
     }
     recallActual += actualTaxa.length;
   }
-  if (!evaluatedWeight) return { metrics: null, calibrationPoints, scoreRows, adminCapTasksByPrevalence };
+  if (!evaluatedWeight) {
+    return {
+      metrics: null,
+      calibrationPoints,
+      scoreRows,
+      featureContexts,
+      adminCapTasksByPrevalence
+    };
+  }
   const brier = modelLoss / evaluatedWeight;
   const baselineBrier = baselineLoss / evaluatedWeight;
   const ece = eceBins.reduce((sum, bin) => {
@@ -3525,7 +4585,7 @@ function evaluatePreparedHoldoutDetails(artifact, bandwidthDays, options, evalua
     fallbackLevels: Object.fromEntries([...fallbackLevels.entries()].sort()),
     evaluationModel: "hierarchical_spatiotemporal_oof",
     baselineModel: "province_week"
-  }, calibrationPoints, scoreRows, adminCapTasksByPrevalence };
+  }, calibrationPoints, scoreRows, featureContexts, adminCapTasksByPrevalence };
 }
 
 function evaluatePreparedHoldout(artifact, bandwidthDays, options) {
@@ -3795,6 +4855,17 @@ function loadOuterTrainingTemporalFold(artifact, validationYear, options) {
 }
 
 function fitNestedCalibratorsForCurrentHoldout(artifact, options) {
+  const terrainCandidateUsesControlSelection =
+    options.terrainModel ===
+    TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id;
+  const nestedSelectionOptions =
+    terrainCandidateUsesControlSelection
+      ? {
+          ...options,
+          terrainModel: null,
+          terrainFeatureSet: null
+        }
+      : options;
   artifact.exec(`
     DELETE FROM evaluation_outer_training_reports;
     DELETE FROM evaluation_outer_validation_reports;
@@ -3828,7 +4899,11 @@ function fitNestedCalibratorsForCurrentHoldout(artifact, options) {
     let bestBandwidthBrier = Infinity;
     const bandwidthValidation = [];
     const bandwidthFolds = selectionYears.map((validationYear) =>
-      loadOuterTrainingTemporalFold(artifact, validationYear, options)
+      loadOuterTrainingTemporalFold(
+        artifact,
+        validationYear,
+        nestedSelectionOptions
+      )
     );
     for (const candidate of options.bandwidthCandidates || [14]) {
       const bandwidthDays = Number(candidate);
@@ -3853,7 +4928,7 @@ function fitNestedCalibratorsForCurrentHoldout(artifact, options) {
     // selected again inside each outer-training partition; inheriting the
     // full-data matrix would leak information from the outer validation set.
     const outerOptions = {
-      ...options,
+      ...nestedSelectionOptions,
       priorStrengthsByPrevalence: null,
       priorTuningContextSampleModulo: Math.max(
         1,
@@ -3931,6 +5006,10 @@ function fitNestedCalibratorsForCurrentHoldout(artifact, options) {
       },
       summary: {
         strategy: "nested_hierarchical_spatiotemporal_oof_within_outer_training",
+        terrainCandidateSelectionPolicy:
+          terrainCandidateUsesControlSelection
+            ? "all_nested_bandwidth_prior_and_calibration_selection_recomputed_on_v10_worldcover_control_then_shared_with_single_terrain_candidate"
+            : null,
         calibrationScoreModel: "hierarchical_spatiotemporal_oof",
         weightingPolicy: TEMPORAL_EVALUATION_WEIGHTING_POLICY,
         foldCount: evaluatedFolds,
@@ -4179,9 +5258,106 @@ function crossFitSpatialCalibrators(folds) {
   };
 }
 
+function compactSpatialCalibrationRow(row) {
+  return {
+    contextIndex: row.contextIndex,
+    taxonId: row.taxonId,
+    positiveCount: row.positiveCount,
+    actualPositive: row.actualPositive,
+    total: row.total,
+    rawProbability: row.rawProbability,
+    baselineProbability: row.baselineProbability,
+    deepestLevel: row.deepestLevel
+  };
+}
+
+function spatialEvidenceConfiguration(summary) {
+  return {
+    bandwidthDays: summary.bandwidthDays,
+    calibrationContextSampleModulo: summary.calibrationContextSampleModulo,
+    calibrationFitYears: summary.calibrationFitYears,
+    calibrationGuardYear: summary.calibrationGuardYear,
+    hyperparameterSelectionYears: summary.hyperparameterSelectionYears,
+    priorStrengthsByPrevalence: summary.priorStrengthsByPrevalence,
+    validationYears: summary.validationYears
+  };
+}
+
+function neighborPolicyCacheQualityThresholds(options) {
+  return {
+    ...options.qualityGate,
+    maximumRelativeBrierDegradation:
+      NESTED_CALIBRATION_GUARD.maximumRelativeBrierDegradation,
+    maximumEceDegradation:
+      NESTED_CALIBRATION_GUARD.maximumEceDegradation
+  };
+}
+
+function neighborPolicyCacheGenerationOptions(options) {
+  return {
+    captureAdminEvidence: true,
+    captureNeighborPolicyEvidence: true,
+    levels: ["province", "city", "district"],
+    applyOnlyWithoutSupportedLocalUnit: true,
+    habitatFeatures: habitatManifestSummary(options.habitatFeatureSet),
+    habitatModel: options.habitatModel,
+    continuousHabitatKernel: options.continuousHabitatKernel,
+    neighborPolicyDiagnosticContract:
+      options.neighborPolicyDiagnosticContract,
+    trainingDataContract: TRAINING_DATA_CONTRACT,
+    releaseEvaluationOccurrencePolicy:
+      RELEASE_EVALUATION_OCCURRENCE_POLICY,
+    temporalEvaluationWeightingPolicy:
+      TEMPORAL_EVALUATION_WEIGHTING_POLICY,
+    coordinateQcEvaluationScope: COORDINATE_QC_EVALUATION_SCOPE,
+    dataCutoffDate: options.dataCutoffDate,
+    includeFlaggedCleanReports: options.includeFlaggedCleanReports,
+    pointDriftMeters: options.pointDriftMeters,
+    recencyHalfLifeYears: options.recencyHalfLifeYears,
+    localHistoryYears: options.localHistoryYears,
+    locationNormalizationVersion: options.locationNormalizationVersion,
+    locationAliasMapSha256: options.locationAliasMapSha256,
+    locationNormalizationAuditSha256:
+      options.locationNormalizationAuditSha256,
+    bandwidthCandidates: options.bandwidthCandidates,
+    priorStrengthMultipliers: options.priorStrengthMultipliers,
+    priorStrengths: options.priorStrengths,
+    priorTuningContextSampleModulo:
+      options.priorTuningContextSampleModulo,
+    outerPriorTuningContextSampleModulo:
+      options.outerPriorTuningContextSampleModulo,
+    outerCalibrationContextSampleModulo:
+      options.outerCalibrationContextSampleModulo,
+    holdoutEvaluation: options.holdoutEvaluation,
+    unitThresholds: options.unitThresholds,
+    workerTaskChunkRecords: options.workerTaskChunkRecords
+  };
+}
+
+function processMemorySnapshot() {
+  const memory = process.memoryUsage();
+  return {
+    heapUsedBytes: memory.heapUsed,
+    heapTotalBytes: memory.heapTotal,
+    rssBytes: memory.rss,
+    externalBytes: memory.external
+  };
+}
+
 async function evaluateSpatialHoldout(artifact, temporal, options) {
   prepareHoldoutTables(artifact);
   const settings = options.holdoutEvaluation;
+  const writeNeighborPolicyCache =
+    options.writeNeighborPolicyOofCachePath !== undefined;
+  const writeSpatialFeatureCache =
+    options.writeSpatialFeatureDiagnosticCachePath !== undefined;
+  const writeTerrainCache =
+    options.writeTerrainOofCachePath !== undefined;
+  const writeStrictCache =
+    options.writeSpatialOofCachePath !== undefined ||
+    writeNeighborPolicyCache ||
+    writeSpatialFeatureCache ||
+    writeTerrainCache;
   const cells = artifact
     .prepare(
       `SELECT grid_r6_unit AS unit_id, COUNT(*) AS checklist_count,
@@ -4238,7 +5414,45 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
         )].sort()
       ]))
     : new Map();
-  const folds = [];
+  const developmentPoolPositiveCounts =
+    writeStrictCache && frozenSplit?.panelName === "development"
+      ? collectDevelopmentPoolPositiveCounts(
+          artifact,
+          developmentReservedIds
+        )
+      : null;
+  const neighborPolicyCacheWriter = writeNeighborPolicyCache
+    ? createNeighborPolicyOofCacheWriter({
+        cachePath: options.writeNeighborPolicyOofCachePath,
+        verifiedSpatialSplit: frozenSplit,
+        sourceSnapshotSha256: options.sourceSnapshotSha256,
+        generationImplementationSha256:
+          neighborPolicyOofCacheGenerationImplementationSha256(),
+        predictionImplementationSha256: options.implementationSha256,
+        baseAdminExposureCapsByPrevalence:
+          options.novelGridAdminExposureCapsByPrevalence,
+        qualityThresholds:
+          neighborPolicyCacheQualityThresholds(options),
+        generationOptions:
+          neighborPolicyCacheGenerationOptions(options),
+        developmentPoolPositiveCounts,
+        expectedLayout: EXPECTED_NEIGHBOR_POLICY_CACHE_LAYOUT,
+        onFoldSetCommitted: (commit) => {
+          emitProgress(options, "neighbor_policy_fold_set_persisted", {
+            ...commit,
+            ...processMemorySnapshot()
+          });
+        }
+      })
+    : null;
+  if (neighborPolicyCacheWriter?.resumed) {
+    emitProgress(options, "neighbor_policy_checkpoint_resumed", {
+      ...neighborPolicyCacheWriter.stats(),
+      ...processMemorySnapshot()
+    });
+  }
+  try {
+    const folds = [];
   for (const evaluationFold of evaluationFolds) {
     const validationAnchors = anchors.filter((anchor) => evaluationFold.anchorIds.includes(anchor.unit_id));
     const excludedIds = frozenSplit
@@ -4272,7 +5486,10 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
       nestedOptions,
       {
         collectAdminCapTasks: adminCapCandidates.length > 0,
-        collectScoreRows: collectFrozenScoreRows
+        collectScoreRows: collectFrozenScoreRows,
+        collectNeighborPolicyEvidence: writeNeighborPolicyCache,
+        collectSpatialFeatureContexts: writeSpatialFeatureCache,
+        collectTerrainEvidence: writeTerrainCache
       }
     );
     const rawMetrics = rawDetails.metrics;
@@ -4294,11 +5511,98 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
             calibratorForTaxon: nestedCalibration.calibratorForTaxon
           }).metrics
       : rawMetrics;
+    const outerCacheScoreCount = rawDetails.scoreRows?.length || 0;
+    if (neighborPolicyCacheWriter) {
+      const compactCalibrationRows = rawDetails.scoreRows.map(
+        compactSpatialCalibrationRow
+      );
+      const outerFoldIdentity = {
+        outerFoldId: evaluationFold.foldId,
+        innerFoldId: 0
+      };
+      if (neighborPolicyCacheWriter.hasFoldSet(outerFoldIdentity)) {
+        const checkpoint = neighborPolicyCacheWriter.foldSetSummary(
+          outerFoldIdentity
+        );
+        if (checkpoint.scoreCount !== outerCacheScoreCount) {
+          throw new PredictionBuildError(
+            "NEIGHBOR_POLICY_CHECKPOINT_OUTER_MISMATCH",
+            "恢复的 outer fold 行数与当前确定性重算不一致。",
+            {
+              outerFoldId: String(evaluationFold.foldId),
+              checkpointScoreCount: checkpoint.scoreCount,
+              recomputedScoreCount: outerCacheScoreCount
+            }
+          );
+        }
+        emitProgress(options, "neighbor_policy_fold_set_reused", {
+          outerFoldId: String(evaluationFold.foldId),
+          innerFoldId: null,
+          scoreCount: checkpoint.scoreCount,
+          ...processMemorySnapshot()
+        });
+      } else {
+        neighborPolicyCacheWriter.appendFoldSet({
+          ...outerFoldIdentity,
+          trainingFoldIds: evaluationFolds
+            .map((fold) => String(fold.foldId))
+            .filter(
+              (foldId) => foldId !== String(evaluationFold.foldId)
+            )
+            .sort(),
+          evidenceConfiguration:
+            spatialEvidenceConfiguration(nestedCalibration.summary),
+          referenceRawMetrics: rawMetrics,
+          scoreRows: rawDetails.scoreRows
+        });
+      }
+      rawDetails.scoreRows = compactCalibrationRows;
+    }
+    if (writeSpatialFeatureCache && !neighborPolicyCacheWriter) {
+      rawDetails.scoreRows = rawDetails.scoreRows.map(
+        compactSpatialCalibrationRow
+      );
+    }
     const strictInnerFolds = [];
-    if (options.writeSpatialOofCachePath !== undefined && frozenSplit?.panelName === "development") {
+    if (writeStrictCache && frozenSplit?.panelName === "development") {
       for (const innerEvaluationFold of evaluationFolds) {
         const innerFoldId = String(innerEvaluationFold.foldId);
         if (innerFoldId === String(evaluationFold.foldId)) continue;
+        const innerFoldIdentity = {
+          outerFoldId: evaluationFold.foldId,
+          innerFoldId
+        };
+        const reusedInnerCheckpoint =
+          neighborPolicyCacheWriter?.hasFoldSet(innerFoldIdentity)
+            ? neighborPolicyCacheWriter.foldSetSummary(
+                innerFoldIdentity
+              )
+            : null;
+        if (reusedInnerCheckpoint) {
+          const checkpoint = reusedInnerCheckpoint;
+          emitProgress(options, "neighbor_policy_fold_set_reused", {
+            outerFoldId: String(evaluationFold.foldId),
+            innerFoldId,
+            scoreCount: checkpoint.scoreCount,
+            ...processMemorySnapshot()
+          });
+          if (!writeSpatialFeatureCache) {
+            strictInnerFolds.push({
+              innerFoldId,
+              trainingFoldIds: checkpoint.trainingFoldIds,
+              evidenceConfiguration:
+                checkpoint.evidenceConfiguration,
+              referenceRawMetrics:
+                checkpoint.referenceRawMetrics,
+              scoreCount: checkpoint.scoreCount,
+              scoreRows: null,
+              featureContexts: []
+            });
+            continue;
+          }
+          // Feature contexts are intentionally absent from the neighbor
+          // checkpoint, so this fold is deterministically replayed.
+        }
         const innerExcludedIds = [...new Set([
           ...excludedIds,
           ...(developmentBuffersByFold.get(innerFoldId) || [])
@@ -4328,7 +5632,15 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
           artifact,
           nestedCalibration.bandwidthDays,
           nestedOptions,
-          { collectAdminCapTasks: true, collectScoreRows: true }
+          {
+            collectAdminCapTasks: true,
+            collectScoreRows: true,
+            collectNeighborPolicyEvidence:
+              writeNeighborPolicyCache && !reusedInnerCheckpoint,
+            collectSpatialFeatureContexts:
+              writeSpatialFeatureCache,
+            collectTerrainEvidence: writeTerrainCache
+          }
         );
         if (!innerRawDetails.metrics || !innerRawDetails.scoreRows?.length) {
           throw new PredictionBuildError(
@@ -4337,24 +5649,62 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
             { outerFoldId: String(evaluationFold.foldId), innerFoldId }
           );
         }
+        const innerTrainingFoldIds = evaluationFolds
+          .map((fold) => String(fold.foldId))
+          .filter(
+            (foldId) =>
+              foldId !== String(evaluationFold.foldId) &&
+              foldId !== innerFoldId
+          )
+          .sort();
+        const innerEvidenceConfiguration =
+          spatialEvidenceConfiguration(nestedCalibration.summary);
+        const innerCacheScoreCount = innerRawDetails.scoreRows.length;
+        if (
+          reusedInnerCheckpoint &&
+          reusedInnerCheckpoint.scoreCount !== innerCacheScoreCount
+        ) {
+          throw new PredictionBuildError(
+            "NEIGHBOR_POLICY_CHECKPOINT_INNER_MISMATCH",
+            "恢复的 inner fold 行数与特征上下文重放不一致。",
+            {
+              outerFoldId: String(evaluationFold.foldId),
+              innerFoldId,
+              checkpointScoreCount:
+                reusedInnerCheckpoint.scoreCount,
+              recomputedScoreCount: innerCacheScoreCount
+            }
+          );
+        }
+        if (neighborPolicyCacheWriter && !reusedInnerCheckpoint) {
+          neighborPolicyCacheWriter.appendFoldSet({
+            outerFoldId: evaluationFold.foldId,
+            innerFoldId,
+            trainingFoldIds: innerTrainingFoldIds,
+            evidenceConfiguration: innerEvidenceConfiguration,
+            referenceRawMetrics: innerRawDetails.metrics,
+            scoreRows: innerRawDetails.scoreRows
+          });
+        }
         strictInnerFolds.push({
           innerFoldId,
-          trainingFoldIds: evaluationFolds
-            .map((fold) => String(fold.foldId))
-            .filter((foldId) => foldId !== String(evaluationFold.foldId) && foldId !== innerFoldId)
-            .sort(),
-          evidenceConfiguration: {
-            bandwidthDays: nestedCalibration.summary.bandwidthDays,
-            calibrationContextSampleModulo: nestedCalibration.summary.calibrationContextSampleModulo,
-            calibrationFitYears: nestedCalibration.summary.calibrationFitYears,
-            calibrationGuardYear: nestedCalibration.summary.calibrationGuardYear,
-            hyperparameterSelectionYears: nestedCalibration.summary.hyperparameterSelectionYears,
-            priorStrengthsByPrevalence: nestedCalibration.summary.priorStrengthsByPrevalence,
-            validationYears: nestedCalibration.summary.validationYears
-          },
+          trainingFoldIds: innerTrainingFoldIds,
+          evidenceConfiguration: innerEvidenceConfiguration,
           referenceRawMetrics: innerRawDetails.metrics,
-          scoreRows: innerRawDetails.scoreRows
+          scoreCount: innerCacheScoreCount,
+          scoreRows:
+            neighborPolicyCacheWriter ||
+            writeSpatialFeatureCache
+            ? null
+            : innerRawDetails.scoreRows,
+          featureContexts: innerRawDetails.featureContexts
         });
+        if (
+          neighborPolicyCacheWriter ||
+          writeSpatialFeatureCache
+        ) {
+          innerRawDetails.scoreRows = null;
+        }
       }
     }
     folds.push({
@@ -4369,16 +5719,11 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
       rawMetrics,
       temporalCalibratedMetrics,
       metrics: temporalCalibratedMetrics,
+      cacheScoreCount: outerCacheScoreCount,
       scoreRows: rawDetails.scoreRows,
+      featureContexts: rawDetails.featureContexts,
       innerFolds: strictInnerFolds
     });
-  }
-  let developmentPoolPositiveCounts = null;
-  if (options.writeSpatialOofCachePath !== undefined && frozenSplit?.panelName === "development") {
-    developmentPoolPositiveCounts = collectDevelopmentPoolPositiveCounts(
-      artifact,
-      developmentReservedIds
-    );
   }
   resetHoldoutTables(artifact);
   const developmentSpatialCalibration = frozenSplit?.panelName === "development"
@@ -4420,8 +5765,79 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
     folds.map((fold) => ({ ...fold, metrics: fold.rawMetrics }))
   );
   const adminCapTuning = aggregateAdminCapTuning(folds);
+  const assertStrictCacheComplete = (cacheKind) => {
+    const expectedFoldCount = Number(frozenSplit?.panel?.folds?.length) || 0;
+    if (
+      frozenSplit?.panelName !== "development" ||
+      expectedFoldCount !== 5 ||
+      folds.length !== expectedFoldCount ||
+      folds.some(
+        (fold) =>
+          !fold.rawMetrics ||
+          !fold.metrics ||
+          !fold.scoreRows?.length ||
+          (
+            (writeNeighborPolicyCache ||
+              writeSpatialFeatureCache) &&
+            fold.cacheScoreCount <= 0
+          ) ||
+          (
+            writeSpatialFeatureCache &&
+            (
+              !fold.featureContexts?.length ||
+              fold.featureContexts.length !==
+                Number(fold.rawMetrics.validationContexts)
+            )
+          )
+      ) ||
+      folds.some(
+        (fold) =>
+          !Array.isArray(fold.innerFolds) ||
+          fold.innerFolds.length !== expectedFoldCount - 1 ||
+          fold.innerFolds.some((innerFold) =>
+            (
+              writeNeighborPolicyCache ||
+                writeSpatialFeatureCache
+                ? innerFold.scoreCount <= 0
+                : !innerFold.scoreRows?.length
+            ) ||
+            (
+              writeSpatialFeatureCache &&
+              (
+                !innerFold.featureContexts?.length ||
+                innerFold.featureContexts.length !==
+                  Number(
+                    innerFold.referenceRawMetrics
+                      ?.validationContexts
+                  )
+              )
+            )
+          )
+      ) ||
+      !rawMetrics ||
+      !metrics
+    ) {
+      throw new PredictionBuildError(
+        "STRICT_OOF_CACHE_INCOMPLETE",
+        "严格 OOF 缓存要求冻结 development 面板的五折与 20 个 inner 折全部完成。",
+        {
+          cacheKind,
+          expectedFoldCount,
+          actualFoldCount: folds.length,
+          successfulFoldCount: folds.filter(
+            (fold) =>
+              fold.rawMetrics && fold.metrics && fold.scoreRows?.length
+          ).length
+        }
+      );
+    }
+  };
   let oofCache = null;
+  let neighborPolicyOofCache = null;
+  let spatialFeatureDiagnosticCache = null;
+  let terrainOofCache = null;
   if (options.writeSpatialOofCachePath !== undefined) {
+    assertStrictCacheComplete("spatial_oof_cache");
     const expectedFoldCount = Number(frozenSplit?.panel?.folds?.length) || 0;
     if (
       frozenSplit?.panelName !== "development" ||
@@ -4501,8 +5917,195 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
       developmentPoolPositiveCounts
     });
   }
+  if (writeNeighborPolicyCache) {
+    assertStrictCacheComplete("neighbor_policy_oof_cache");
+    if (neighborPolicyCacheWriter) {
+      neighborPolicyOofCache = neighborPolicyCacheWriter.finalize();
+    } else {
+      neighborPolicyOofCache = await writeNeighborPolicyOofCache({
+      cachePath: options.writeNeighborPolicyOofCachePath,
+      folds: folds.map((fold) => ({
+        foldId: fold.foldId,
+        scoreRows: fold.scoreRows,
+        evidenceConfiguration: {
+          bandwidthDays: fold.nestedCalibration.bandwidthDays,
+          calibrationContextSampleModulo:
+            fold.nestedCalibration.calibrationContextSampleModulo,
+          calibrationFitYears: fold.nestedCalibration.calibrationFitYears,
+          calibrationGuardYear: fold.nestedCalibration.calibrationGuardYear,
+          hyperparameterSelectionYears:
+            fold.nestedCalibration.hyperparameterSelectionYears,
+          priorStrengthsByPrevalence:
+            fold.nestedCalibration.priorStrengthsByPrevalence,
+          validationYears: fold.nestedCalibration.validationYears
+        },
+        referenceRawMetrics: fold.rawMetrics,
+        innerFolds: fold.innerFolds
+      })),
+      verifiedSpatialSplit: frozenSplit,
+      sourceSnapshotSha256: options.sourceSnapshotSha256,
+      generationImplementationSha256:
+        neighborPolicyOofCacheGenerationImplementationSha256(),
+      predictionImplementationSha256: options.implementationSha256,
+      baseAdminExposureCapsByPrevalence:
+        options.novelGridAdminExposureCapsByPrevalence,
+      qualityThresholds: {
+        ...options.qualityGate,
+        maximumRelativeBrierDegradation:
+          NESTED_CALIBRATION_GUARD.maximumRelativeBrierDegradation,
+        maximumEceDegradation:
+          NESTED_CALIBRATION_GUARD.maximumEceDegradation
+      },
+      generationOptions: {
+        captureAdminEvidence: true,
+        captureNeighborPolicyEvidence: true,
+        levels: ["province", "city", "district"],
+        applyOnlyWithoutSupportedLocalUnit: true,
+        habitatFeatures: habitatManifestSummary(options.habitatFeatureSet),
+        habitatModel: options.habitatModel,
+        continuousHabitatKernel: options.continuousHabitatKernel,
+        neighborPolicyDiagnosticContract:
+          options.neighborPolicyDiagnosticContract,
+        trainingDataContract: TRAINING_DATA_CONTRACT,
+        releaseEvaluationOccurrencePolicy:
+          RELEASE_EVALUATION_OCCURRENCE_POLICY,
+        temporalEvaluationWeightingPolicy:
+          TEMPORAL_EVALUATION_WEIGHTING_POLICY,
+        coordinateQcEvaluationScope: COORDINATE_QC_EVALUATION_SCOPE,
+        dataCutoffDate: options.dataCutoffDate,
+        includeFlaggedCleanReports: options.includeFlaggedCleanReports,
+        pointDriftMeters: options.pointDriftMeters,
+        recencyHalfLifeYears: options.recencyHalfLifeYears,
+        localHistoryYears: options.localHistoryYears,
+        locationNormalizationVersion: options.locationNormalizationVersion,
+        locationAliasMapSha256: options.locationAliasMapSha256,
+        locationNormalizationAuditSha256:
+          options.locationNormalizationAuditSha256,
+        bandwidthCandidates: options.bandwidthCandidates,
+        priorStrengthMultipliers: options.priorStrengthMultipliers,
+        priorStrengths: options.priorStrengths,
+        priorTuningContextSampleModulo:
+          options.priorTuningContextSampleModulo,
+        outerPriorTuningContextSampleModulo:
+          options.outerPriorTuningContextSampleModulo,
+        outerCalibrationContextSampleModulo:
+          options.outerCalibrationContextSampleModulo,
+        holdoutEvaluation: options.holdoutEvaluation,
+        unitThresholds: options.unitThresholds,
+        workerTaskChunkRecords: options.workerTaskChunkRecords
+      },
+      developmentPoolPositiveCounts,
+      expectedLayout: EXPECTED_NEIGHBOR_POLICY_CACHE_LAYOUT
+      });
+    }
+  }
+  if (writeSpatialFeatureCache) {
+    assertStrictCacheComplete(
+      "spatial_feature_diagnostic_cache"
+    );
+    const companionNeighborCachePath =
+      options.companionNeighborPolicyOofCachePath ||
+      options.writeNeighborPolicyOofCachePath;
+    if (
+      options.writeNeighborPolicyOofCachePath !== undefined &&
+      !neighborPolicyOofCache?.fileSha256
+    ) {
+      throw new PredictionBuildError(
+        "SPATIAL_FEATURE_DIAGNOSTIC_COMPANION_MISSING",
+        "写入特征诊断缓存前，配套邻居缓存必须已经完成并通过 SHA 校验。"
+      );
+    }
+    const featureFoldSets = folds.flatMap((fold) => [
+      {
+        outerFoldId: fold.foldId,
+        innerFoldId: null,
+        scoreCount: fold.cacheScoreCount,
+        contexts: fold.featureContexts
+      },
+      ...fold.innerFolds.map((innerFold) => ({
+        outerFoldId: fold.foldId,
+        innerFoldId: innerFold.innerFoldId,
+        scoreCount: innerFold.scoreCount,
+        contexts: innerFold.featureContexts
+      }))
+    ]);
+    spatialFeatureDiagnosticCache =
+      writeSpatialFeatureDiagnosticCache({
+        cachePath:
+          options.writeSpatialFeatureDiagnosticCachePath,
+        companionNeighborCachePath:
+          companionNeighborCachePath,
+        foldSets: featureFoldSets,
+        profileModel:
+          options.multiscaleSpatialFeatureProfiles,
+        verifiedSpatialSplit: frozenSplit,
+        sourceSnapshotSha256: options.sourceSnapshotSha256,
+        sourceFeatureFileSha256:
+          options.habitatFeatureSet.fileSha256,
+        sourceFeatureSetSha256:
+          options.habitatFeatureSet.featureSetSha256,
+        generationImplementationSha256:
+          spatialFeatureDiagnosticCacheGenerationImplementationSha256(),
+        predictionImplementationSha256:
+          options.implementationSha256,
+        expectedLayout:
+          EXPECTED_SPATIAL_FEATURE_DIAGNOSTIC_CACHE_LAYOUT
+      });
+    emitProgress(
+      options,
+      "spatial_feature_diagnostic_cache_ready",
+      spatialFeatureDiagnosticCache
+    );
+  }
+  if (writeTerrainCache) {
+    assertStrictCacheComplete("terrain_oof_cache");
+    terrainOofCache = writeTerrainOofCache({
+      cachePath: options.writeTerrainOofCachePath,
+      folds: folds.map((fold) => ({
+        foldId: fold.foldId,
+        scoreRows: fold.scoreRows,
+        evidenceConfiguration:
+          spatialEvidenceConfiguration(
+            fold.nestedCalibration
+          ),
+        innerFolds: fold.innerFolds
+      })),
+      verifiedSpatialSplit: frozenSplit,
+      sourceSnapshotSha256: options.sourceSnapshotSha256,
+      habitatFeatures: habitatManifestSummary(
+        options.habitatFeatureSet
+      ),
+      terrainFeatures: terrainManifestSummary(
+        options.terrainFeatureSet
+      ),
+      preregistrationFileSha256:
+        options.terrainPreregistrationFileSha256,
+      controlReportFileSha256:
+        options.terrainControlReportFileSha256,
+      generationImplementationSha256:
+        terrainOofCacheGenerationImplementationSha256(),
+      predictionImplementationSha256:
+        options.implementationSha256,
+      qualityThresholds: {
+        ...options.qualityGate,
+        maximumRelativeBrierDegradation:
+          NESTED_CALIBRATION_GUARD
+            .maximumRelativeBrierDegradation,
+        maximumEceDegradation:
+          NESTED_CALIBRATION_GUARD
+            .maximumEceDegradation,
+        controlAbsoluteTolerance: 1e-12
+      }
+    });
+    emitProgress(
+      options,
+      "terrain_oof_cache_ready",
+      terrainOofCache
+    );
+  }
   for (const fold of folds) {
     delete fold.scoreRows;
+    delete fold.featureContexts;
     delete fold.innerFolds;
   }
   return {
@@ -4527,8 +6130,17 @@ async function evaluateSpatialHoldout(artifact, temporal, options) {
     adminCapTuning,
     spatialCalibration,
     oofCache,
+    neighborPolicyOofCache,
+    spatialFeatureDiagnosticCache,
+    terrainOofCache,
     folds
-  };
+    };
+  } catch (error) {
+    if (neighborPolicyCacheWriter) {
+      neighborPolicyCacheWriter.abort();
+    }
+    throw error;
+  }
 }
 
 function evaluateObserverHoldout(artifact, temporal, options) {
@@ -6049,6 +7661,9 @@ function validateArtifact(artifact, options = {}) {
   const continuousHabitatFeatureCount = Number(
     artifact.prepare("SELECT COUNT(*) AS count FROM continuous_habitat_features").get().count
   ) || 0;
+  const terrainFeatureCount = Number(
+    artifact.prepare("SELECT COUNT(*) AS count FROM terrain_features").get().count
+  ) || 0;
   const temporaryTableCount = Number(
     artifact
       .prepare(
@@ -6208,6 +7823,97 @@ function validateArtifact(artifact, options = {}) {
       "未启用连续生境模型的产物不得携带未绑定的连续特征。"
     );
   }
+  if (
+    options.terrainModel ===
+    TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id
+  ) {
+    const expectedFeatureCount =
+      Number(options.terrainFeatureSet?.summary?.cellCount) || 0;
+    const expectedAvailableFeatureCount =
+      Number(
+        options.terrainFeatureSet?.summary?.availableCellCount
+      ) || 0;
+    const availableFeatureCount = Number(
+      artifact.prepare(
+        "SELECT COUNT(*) AS count FROM terrain_features WHERE available = 1"
+      ).get().count
+    ) || 0;
+    const missingObservedGridR6Count = Number(
+      artifact.prepare(`
+        SELECT COUNT(*) AS count
+        FROM space_units units
+        LEFT JOIN terrain_features features
+          ON features.h3_r6 = CASE
+            WHEN units.code LIKE 'grid_r6:%' THEN SUBSTR(units.code, 9)
+            ELSE units.code
+          END
+        WHERE units.level = 'grid_r6' AND features.h3_r6 IS NULL
+      `).get().count
+    ) || 0;
+    const invalidFeatureCount = Number(
+      artifact.prepare(`
+        SELECT COUNT(*) AS count
+        FROM terrain_features
+        WHERE standardized_mean_elevation NOT BETWEEN -6 AND 6
+           OR standardized_elevation_stddev NOT BETWEEN -6 AND 6
+           OR standardized_mean_slope NOT BETWEEN -6 AND 6
+           OR (
+             available = 0
+             AND elevation_sample_count >= ?
+             AND slope_sample_count >= ?
+           )
+      `).get(
+        TERRAIN_FEATURE_CONTRACT.minimumAvailableSampleCount,
+        TERRAIN_FEATURE_CONTRACT.minimumAvailableSampleCount
+      ).count
+    ) || 0;
+    const manifestTerrainFeatures = JSON.parse(
+      artifact.prepare(
+        "SELECT value FROM manifest WHERE key = 'terrain_features'"
+      ).get()?.value || "null"
+    );
+    const manifestTerrainModel = JSON.parse(
+      artifact.prepare(
+        "SELECT value FROM manifest WHERE key = 'terrain_spatial_evidence_model'"
+      ).get()?.value || "null"
+    );
+    const expectedTerrainFeatures = terrainManifestSummary(
+      options.terrainFeatureSet
+    );
+    if (
+      !expectedFeatureCount ||
+      terrainFeatureCount !== expectedFeatureCount ||
+      availableFeatureCount !== expectedAvailableFeatureCount ||
+      missingObservedGridR6Count ||
+      invalidFeatureCount ||
+      JSON.stringify(manifestTerrainFeatures) !==
+        JSON.stringify(expectedTerrainFeatures) ||
+      JSON.stringify(manifestTerrainModel) !==
+        JSON.stringify(TERRAIN_SPATIAL_EVIDENCE_CONTRACT)
+    ) {
+      throw new PredictionBuildError(
+        "TERRAIN_ARTIFACT_INVALID",
+        "真实 v11 SQLite 制品的地形特征覆盖、冻结绑定或运行时契约不完整。",
+        {
+          terrainFeatureCount,
+          expectedFeatureCount,
+          availableFeatureCount,
+          expectedAvailableFeatureCount,
+          missingObservedGridR6Count,
+          invalidFeatureCount,
+          manifestTerrainContractId:
+            manifestTerrainFeatures?.contractId || null,
+          manifestTerrainModelId:
+            manifestTerrainModel?.id || null
+        }
+      );
+    }
+  } else if (terrainFeatureCount !== 0) {
+    throw new PredictionBuildError(
+      "UNBOUND_TERRAIN_FEATURES",
+      "未启用真实 v11 地形模型的制品不得携带未绑定的地形特征。"
+    );
+  }
   if (temporaryTableCount || freePages) {
     throw new PredictionBuildError("ARTIFACT_NOT_SANITIZED", "模型制品仍含临时训练表或空闲页。", {
       temporaryTableCount,
@@ -6220,6 +7926,7 @@ function validateArtifact(artifact, options = {}) {
     reverseHotspotCount,
     rankingReferenceParameterCount,
     continuousHabitatFeatureCount,
+    terrainFeatureCount,
     freePages,
     materializationProfile: options.materializationProfile || "full"
   };
@@ -6298,11 +8005,22 @@ async function buildPredictionArtifact(options = {}) {
       `${reportPath}.sha256`,
       resolvedOptions.sourcePath,
       resolvedOptions.snapshotPath,
+      resolvedOptions.terrainFeaturesPath,
       resolvedOptions.spatialSplitManifestPath,
       resolvedOptions.spatialParametersPath,
       resolvedOptions.sealedEvaluationReceiptPath,
       resolvedOptions.rankingReferenceReportPath,
       resolvedOptions.writeSpatialOofCachePath,
+      resolvedOptions.writeNeighborPolicyOofCachePath,
+      resolvedOptions.companionNeighborPolicyOofCachePath,
+      resolvedOptions.neighborPolicyPreregistrationPath,
+      resolvedOptions.writeSpatialFeatureDiagnosticCachePath,
+      resolvedOptions.spatialFeaturePreregistrationPath,
+      resolvedOptions.writeTerrainOofCachePath,
+      resolvedOptions.terrainPreregistrationPath,
+      resolvedOptions.terrainControlReportPath,
+      resolvedOptions.terrainOofCachePath,
+      resolvedOptions.terrainOofDecisionPath,
       resolvedOptions.pointerPath
     ].filter(Boolean).map(normalizePath);
     if (reservedPaths.includes(normalizePath(habitatFeaturesPath))) {
@@ -6312,6 +8030,190 @@ async function buildPredictionArtifact(options = {}) {
       );
     }
     resolvedOptions.habitatFeaturesPath = habitatFeaturesPath;
+  }
+  if (resolvedOptions.terrainFeaturesPath !== undefined) {
+    const normalizePath = (path) => {
+      const absolute = resolve(path);
+      return process.platform === "win32"
+        ? absolute.toLowerCase()
+        : absolute;
+    };
+    const terrainFeaturesPath = resolve(
+      resolvedOptions.terrainFeaturesPath
+    );
+    const reportPath =
+      resolvedOptions.reportPath || `${outputPath}.report.json`;
+    const reservedPaths = [
+      outputPath,
+      `${outputPath}.sha256`,
+      `${outputPath}.building-${process.pid}`,
+      reportPath,
+      `${reportPath}.sha256`,
+      resolvedOptions.sourcePath,
+      resolvedOptions.snapshotPath,
+      resolvedOptions.habitatFeaturesPath,
+      resolvedOptions.spatialSplitManifestPath,
+      resolvedOptions.spatialParametersPath,
+      resolvedOptions.sealedEvaluationReceiptPath,
+      resolvedOptions.rankingReferenceReportPath,
+      resolvedOptions.writeSpatialOofCachePath,
+      resolvedOptions.writeNeighborPolicyOofCachePath,
+      resolvedOptions.writeSpatialFeatureDiagnosticCachePath,
+      resolvedOptions.writeTerrainOofCachePath,
+      resolvedOptions.terrainPreregistrationPath,
+      resolvedOptions.terrainControlReportPath,
+      resolvedOptions.terrainOofCachePath,
+      resolvedOptions.terrainOofDecisionPath,
+      resolvedOptions.pointerPath
+    ].filter(Boolean).map(normalizePath);
+    if (reservedPaths.includes(normalizePath(terrainFeaturesPath))) {
+      throw new PredictionBuildError(
+        "TERRAIN_FEATURE_PATH_CONFLICT",
+        "地形特征输入不得与任何冻结输入、缓存、模型、报告或发布指针共用路径。"
+      );
+    }
+    resolvedOptions.terrainFeaturesPath = terrainFeaturesPath;
+  }
+  if (
+    resolvedOptions.writeTerrainOofCachePath !== undefined
+  ) {
+    const normalizePath = (path) => {
+      const absolute = resolve(path);
+      return process.platform === "win32"
+        ? absolute.toLowerCase()
+        : absolute;
+    };
+    const cachePath = resolve(
+      resolvedOptions.writeTerrainOofCachePath
+    );
+    const preregistrationPath = resolve(
+      resolvedOptions.terrainPreregistrationPath
+    );
+    const controlReportPath = resolve(
+      resolvedOptions.terrainControlReportPath
+    );
+    const cachePaths = [
+      cachePath,
+      `${cachePath}.sha256`
+    ].map(normalizePath);
+    const reportPath = resolve(
+      resolvedOptions.reportPath ||
+        `${outputPath}.report.json`
+    );
+    const reservedPaths = [
+      resolvedOptions.sourcePath,
+      resolvedOptions.snapshotPath,
+      resolvedOptions.habitatFeaturesPath,
+      resolvedOptions.terrainFeaturesPath,
+      resolvedOptions.spatialSplitManifestPath,
+      preregistrationPath,
+      controlReportPath,
+      outputPath,
+      `${outputPath}.sha256`,
+      `${outputPath}.building-${process.pid}`,
+      reportPath,
+      `${reportPath}.sha256`,
+      resolvedOptions.pointerPath
+    ].filter(Boolean).map(normalizePath);
+    if (
+      cachePaths.some((path) =>
+        reservedPaths.includes(path)
+      )
+    ) {
+      throw new PredictionBuildError(
+        "TERRAIN_OOF_CACHE_PATH_CONFLICT",
+        "地形 OOF 缓存及其 SHA sidecar 不得覆盖输入、模型或报告。"
+      );
+    }
+    if (
+      existsSync(cachePath) ||
+      existsSync(`${cachePath}.sha256`)
+    ) {
+      throw new PredictionBuildError(
+        "TERRAIN_OOF_CACHE_OUTPUT_EXISTS",
+        `地形 OOF 缓存或 SHA sidecar 已存在：${cachePath}`
+      );
+    }
+    for (const [kind, path] of [
+      ["preregistration", preregistrationPath],
+      ["controlReport", controlReportPath]
+    ]) {
+      if (!existsSync(path)) {
+        throw new PredictionBuildError(
+          "TERRAIN_OOF_INPUT_MISSING",
+          `地形 OOF ${kind} 不存在：${path}`
+        );
+      }
+    }
+    resolvedOptions.writeTerrainOofCachePath =
+      cachePath;
+    resolvedOptions.terrainPreregistrationPath =
+      preregistrationPath;
+    resolvedOptions.terrainControlReportPath =
+      controlReportPath;
+    resolvedOptions.terrainPreregistrationFileSha256 =
+      sha256File(preregistrationPath);
+    resolvedOptions.terrainControlReportFileSha256 =
+      sha256File(controlReportPath);
+  }
+  if (
+    resolvedOptions.terrainFeaturesPath !== undefined &&
+    resolvedOptions.writeTerrainOofCachePath === undefined
+  ) {
+    const preregistrationPath = resolve(
+      resolvedOptions.terrainPreregistrationPath
+    );
+    const controlReportPath = resolve(
+      resolvedOptions.terrainControlReportPath
+    );
+    const decisionPath = resolve(
+      resolvedOptions.terrainOofDecisionPath
+    );
+    const terrainOofCachePath = resolve(
+      resolvedOptions.terrainOofCachePath
+    );
+    for (const [kind, path] of [
+      ["preregistration", preregistrationPath],
+      ["controlReport", controlReportPath],
+      ["oofCache", terrainOofCachePath],
+      ["oofCacheSidecar", `${terrainOofCachePath}.sha256`],
+      ["oofDecision", decisionPath],
+      ["oofDecisionSidecar", `${decisionPath}.sha256`]
+    ]) {
+      if (!existsSync(path)) {
+        throw new PredictionBuildError(
+          "TERRAIN_FULL_BUILD_INPUT_MISSING",
+          `完整真实 v11 SQLite 构建缺少 ${kind}：${path}`
+        );
+      }
+    }
+    const decisionFileSha256 = sha256File(decisionPath);
+    const decisionSidecarSha256 = readFileSync(
+      `${decisionPath}.sha256`,
+      "utf8"
+    ).trim().split(/\s+/)[0]?.toLowerCase();
+    if (
+      decisionFileSha256 !== decisionSidecarSha256
+    ) {
+      throw new PredictionBuildError(
+        "TERRAIN_OOF_DECISION_SHA_MISMATCH",
+        "真实 v11 OOF 决策报告 SHA sidecar 不匹配。"
+      );
+    }
+    resolvedOptions.terrainPreregistrationPath =
+      preregistrationPath;
+    resolvedOptions.terrainControlReportPath =
+      controlReportPath;
+    resolvedOptions.terrainOofCachePath =
+      terrainOofCachePath;
+    resolvedOptions.terrainOofDecisionPath =
+      decisionPath;
+    resolvedOptions.terrainPreregistrationFileSha256 =
+      sha256File(preregistrationPath);
+    resolvedOptions.terrainControlReportFileSha256 =
+      sha256File(controlReportPath);
+    resolvedOptions.terrainOofDecisionFileSha256 =
+      decisionFileSha256;
   }
   if (resolvedOptions.rankingReferenceReportPath !== undefined) {
     const rankingReportPath = resolve(resolvedOptions.rankingReferenceReportPath);
@@ -6370,6 +8272,154 @@ async function buildPredictionArtifact(options = {}) {
     }
     resolvedOptions.writeSpatialOofCachePath = cachePath;
   }
+  if (resolvedOptions.writeNeighborPolicyOofCachePath !== undefined) {
+    const normalizePath = (path) => {
+      const normalized = resolve(path);
+      return process.platform === "win32"
+        ? normalized.toLowerCase()
+        : normalized;
+    };
+    const cachePath = resolve(
+      resolvedOptions.writeNeighborPolicyOofCachePath
+    );
+    const preregistrationPath = resolve(
+      resolvedOptions.neighborPolicyPreregistrationPath
+    );
+    const cachePaths = [cachePath, `${cachePath}.sha256`].map(normalizePath);
+    const reportPath = resolve(
+      resolvedOptions.reportPath || `${outputPath}.report.json`
+    );
+    const reservedPaths = [
+      resolvedOptions.sourcePath,
+      resolvedOptions.snapshotPath,
+      resolvedOptions.habitatFeaturesPath,
+      resolvedOptions.spatialSplitManifestPath,
+      preregistrationPath,
+      resolvedOptions.writeSpatialFeatureDiagnosticCachePath,
+      resolvedOptions.spatialFeaturePreregistrationPath,
+      resolvedOptions.companionNeighborPolicyOofCachePath,
+      outputPath,
+      `${outputPath}.sha256`,
+      `${outputPath}.building-${process.pid}`,
+      reportPath,
+      `${reportPath}.sha256`,
+      resolvedOptions.pointerPath
+    ].filter(Boolean).map(normalizePath);
+    if (cachePaths.some((path) => reservedPaths.includes(path))) {
+      throw new PredictionBuildError(
+        "NEIGHBOR_POLICY_OOF_CACHE_PATH_CONFLICT",
+        "邻居策略缓存及其 SHA sidecar 不得覆盖任何输入、模型或报告。"
+      );
+    }
+    if (
+      existsSync(cachePath) ||
+      existsSync(`${cachePath}.sha256`)
+    ) {
+      throw new PredictionBuildError(
+        "NEIGHBOR_POLICY_OOF_CACHE_OUTPUT_EXISTS",
+        `邻居策略缓存或其 SHA sidecar 已存在：${cachePath}`
+      );
+    }
+    if (!existsSync(preregistrationPath)) {
+      throw new PredictionBuildError(
+        "NEIGHBOR_POLICY_PREREGISTRATION_MISSING",
+        `邻居策略缓存预登记不存在：${preregistrationPath}`
+      );
+    }
+    resolvedOptions.writeNeighborPolicyOofCachePath = cachePath;
+    resolvedOptions.neighborPolicyPreregistrationPath =
+      preregistrationPath;
+  }
+  if (
+    resolvedOptions.writeSpatialFeatureDiagnosticCachePath !==
+      undefined
+  ) {
+    const normalizePath = (path) => {
+      const normalized = resolve(path);
+      return process.platform === "win32"
+        ? normalized.toLowerCase()
+        : normalized;
+    };
+    const cachePath = resolve(
+      resolvedOptions.writeSpatialFeatureDiagnosticCachePath
+    );
+    const preregistrationPath = resolve(
+      resolvedOptions.spatialFeaturePreregistrationPath
+    );
+    const companionCachePath = resolve(
+      resolvedOptions.companionNeighborPolicyOofCachePath ||
+        resolvedOptions.writeNeighborPolicyOofCachePath
+    );
+    const companionSidecarPath =
+      `${companionCachePath}.sha256`;
+    if (
+      resolvedOptions.companionNeighborPolicyOofCachePath !==
+        undefined &&
+      (
+        !existsSync(companionCachePath) ||
+        !existsSync(companionSidecarPath)
+      )
+    ) {
+      throw new PredictionBuildError(
+        "SPATIAL_FEATURE_DIAGNOSTIC_COMPANION_MISSING",
+        `只读邻居伴随缓存或 SHA sidecar 不存在：${companionCachePath}`
+      );
+    }
+    const cachePaths = [cachePath, `${cachePath}.sha256`].map(
+      normalizePath
+    );
+    const reportPath = resolve(
+      resolvedOptions.reportPath || `${outputPath}.report.json`
+    );
+    const reservedPaths = [
+      resolvedOptions.sourcePath,
+      resolvedOptions.snapshotPath,
+      resolvedOptions.habitatFeaturesPath,
+      resolvedOptions.spatialSplitManifestPath,
+      companionCachePath,
+      companionSidecarPath,
+      resolvedOptions.neighborPolicyPreregistrationPath,
+      preregistrationPath,
+      outputPath,
+      `${outputPath}.sha256`,
+      `${outputPath}.building-${process.pid}`,
+      reportPath,
+      `${reportPath}.sha256`,
+      resolvedOptions.pointerPath
+    ].filter(Boolean).map(normalizePath);
+    if (cachePaths.some((path) => reservedPaths.includes(path))) {
+      throw new PredictionBuildError(
+        "SPATIAL_FEATURE_DIAGNOSTIC_CACHE_PATH_CONFLICT",
+        "特征诊断缓存及其 SHA sidecar 不得覆盖任何输入、邻居缓存、模型或报告。"
+      );
+    }
+    if (
+      existsSync(cachePath) ||
+      existsSync(`${cachePath}.sha256`)
+    ) {
+      throw new PredictionBuildError(
+        "SPATIAL_FEATURE_DIAGNOSTIC_CACHE_OUTPUT_EXISTS",
+        `特征诊断缓存或 SHA sidecar 已存在：${cachePath}`
+      );
+    }
+    if (!existsSync(preregistrationPath)) {
+      throw new PredictionBuildError(
+        "SPATIAL_FEATURE_DIAGNOSTIC_PREREGISTRATION_MISSING",
+        `多尺度空间特征预登记不存在：${preregistrationPath}`
+      );
+    }
+    resolvedOptions.writeSpatialFeatureDiagnosticCachePath =
+      cachePath;
+    resolvedOptions.spatialFeaturePreregistrationPath =
+      preregistrationPath;
+    if (
+      resolvedOptions.companionNeighborPolicyOofCachePath !==
+      undefined
+    ) {
+      resolvedOptions.companionNeighborPolicyOofCachePath =
+        companionCachePath;
+    }
+  }
   mkdirSync(dirname(outputPath), { recursive: true });
   const snapshot = resolvedOptions.sourceIsSnapshot
     ? { snapshotPath: resolve(resolvedOptions.sourcePath), sha256: sha256File(resolvedOptions.sourcePath) }
@@ -6394,6 +8444,213 @@ async function buildPredictionArtifact(options = {}) {
       featureSetSha256: resolvedOptions.habitatFeatureSet.featureSetSha256,
       cellCount: resolvedOptions.habitatFeatureSet.summary.cellCount
     });
+    if (
+      resolvedOptions.writeSpatialFeatureDiagnosticCachePath !==
+        undefined
+    ) {
+      resolvedOptions.multiscaleSpatialFeatureProfiles =
+        buildMultiscaleSpatialFeatureProfiles(
+          resolvedOptions.habitatFeatureSet
+        );
+      emitProgress(
+        resolvedOptions,
+        "multiscale_spatial_feature_profiles_ready",
+        {
+          contractId: MULTISCALE_SPATIAL_FEATURE_CONTRACT.id,
+          contractSha256:
+            multiscaleSpatialFeatureContractSha256(),
+          generationImplementationSha256:
+            multiscaleSpatialFeatureGenerationImplementationSha256(),
+          profileModelSha256:
+            resolvedOptions.multiscaleSpatialFeatureProfiles
+              .profileModelSha256,
+          ...resolvedOptions.multiscaleSpatialFeatureProfiles.summary
+        }
+      );
+    }
+  }
+  if (resolvedOptions.terrainFeaturesPath !== undefined) {
+    if (
+      !resolvedOptions.habitatFeatureSet ||
+      resolvedOptions.habitatFeatureSet.contract?.id !==
+        CONTINUOUS_HABITAT_FEATURE_CONTRACT.id
+    ) {
+      throw new PredictionBuildError(
+        "TERRAIN_HABITAT_CONTROL_REQUIRED",
+        "真实 v11 地形候选必须绑定同一冻结 WorldCover v2 control 特征集。"
+      );
+    }
+    resolvedOptions.terrainFeatureSet = loadTerrainFeatureSet(
+      resolvedOptions.terrainFeaturesPath,
+      {
+        expectedSnapshotSha256: snapshot.sha256,
+        expectedCellCatalogFileSha256:
+          resolvedOptions.habitatFeatureSet.fileSha256,
+        expectedCellCatalogFeatureSetSha256:
+          resolvedOptions.habitatFeatureSet.featureSetSha256,
+        requiredH3Indexes:
+          resolvedOptions.habitatFeatureSet.cellsByH3.keys()
+      }
+    );
+    if (
+      resolvedOptions.terrainFeatureSet.summary.cellCount !==
+      resolvedOptions.habitatFeatureSet.summary.cellCount
+    ) {
+      throw new PredictionBuildError(
+        "TERRAIN_FEATURE_CATALOG_MISMATCH",
+        "地形 H3 r6 目录与冻结 WorldCover v2 目录不完全一致。"
+      );
+    }
+    emitProgress(resolvedOptions, "terrain_features_ready", {
+      contractId: resolvedOptions.terrainFeatureSet.contract.id,
+      terrainModel: resolvedOptions.terrainModel,
+      fileSha256: resolvedOptions.terrainFeatureSet.fileSha256,
+      featureSetSha256:
+        resolvedOptions.terrainFeatureSet.featureSetSha256,
+      ...resolvedOptions.terrainFeatureSet.summary
+    });
+    let preregistration;
+    try {
+      preregistration = JSON.parse(
+        readFileSync(
+          resolvedOptions.terrainPreregistrationPath,
+          "utf8"
+        )
+      );
+    } catch (error) {
+      throw new PredictionBuildError(
+        "TERRAIN_PREREGISTRATION_READ_FAILED",
+        `无法读取真实 v11 地形预登记：${error.message}`
+      );
+    }
+    resolvedOptions.terrainPreregistration =
+      preregistration;
+    validateTerrainPreregistration(
+      preregistration,
+      {
+        requireFrozen: true,
+        terrainFeatureSet:
+          resolvedOptions.terrainFeatureSet,
+        preregistrationFileSha256:
+          resolvedOptions
+            .terrainPreregistrationFileSha256,
+        controlReportFileSha256:
+          resolvedOptions
+            .terrainControlReportFileSha256,
+        implementation: {
+          predictionImplementationSha256:
+            resolvedOptions.implementationSha256,
+          terrainOofCacheGenerationImplementationSha256:
+            terrainOofCacheGenerationImplementationSha256(),
+          terrainOofScorerImplementationSha256:
+            terrainOofScorerImplementationSha256()
+        }
+      }
+    );
+    if (
+      resolvedOptions.terrainOofDecisionPath
+    ) {
+      let decision;
+      try {
+        decision = JSON.parse(
+          readFileSync(
+            resolvedOptions.terrainOofDecisionPath,
+            "utf8"
+          )
+        );
+      } catch (error) {
+        throw new PredictionBuildError(
+          "TERRAIN_OOF_DECISION_READ_FAILED",
+          `无法读取真实 v11 OOF 决策：${error.message}`
+        );
+      }
+      const spatialSplitFileSha256 = sha256File(
+        resolvedOptions.spatialSplitManifestPath
+      );
+      const terrainOofCache = openTerrainOofCache({
+        cachePath: resolvedOptions.terrainOofCachePath,
+        expectedSnapshotSha256: snapshot.sha256,
+        expectedSpatialSplitFileSha256:
+          spatialSplitFileSha256,
+        expectedTerrainFeatureFileSha256:
+          resolvedOptions.terrainFeatureSet.fileSha256
+      });
+      try {
+        const cacheBindingFailures = [];
+        if (
+          terrainOofCache.metadata
+            .preregistrationFileSha256 !==
+          resolvedOptions
+            .terrainPreregistrationFileSha256
+        ) {
+          cacheBindingFailures.push(
+            "preregistrationFileSha256"
+          );
+        }
+        if (
+          terrainOofCache.metadata
+            .controlReportFileSha256 !==
+          resolvedOptions
+            .terrainControlReportFileSha256
+        ) {
+          cacheBindingFailures.push(
+            "controlReportFileSha256"
+          );
+        }
+        if (
+          terrainOofCache.metadata
+            .predictionImplementationSha256 !==
+          resolvedOptions.implementationSha256
+        ) {
+          cacheBindingFailures.push(
+            "predictionImplementationSha256"
+          );
+        }
+        if (
+          terrainOofCache.metadata
+            .generationImplementationSha256 !==
+          terrainOofCacheGenerationImplementationSha256()
+        ) {
+          cacheBindingFailures.push(
+            "generationImplementationSha256"
+          );
+        }
+        if (cacheBindingFailures.length) {
+          throw new PredictionBuildError(
+            "TERRAIN_OOF_CACHE_BINDING_MISMATCH",
+            "The terrain OOF cache does not match the frozen v11 inputs.",
+            { failures: cacheBindingFailures }
+          );
+        }
+        validateTerrainOofDecision(decision, {
+          cacheFileSha256: terrainOofCache.fileSha256,
+          snapshotSha256: snapshot.sha256,
+          spatialSplitFileSha256,
+          terrainFeatureFileSha256:
+            resolvedOptions.terrainFeatureSet.fileSha256,
+          terrainFeatureSetSha256:
+            resolvedOptions.terrainFeatureSet
+              .featureSetSha256,
+          preregistrationFileSha256:
+            resolvedOptions
+              .terrainPreregistrationFileSha256,
+          controlReportFileSha256:
+            resolvedOptions
+              .terrainControlReportFileSha256,
+          predictionImplementationSha256:
+            resolvedOptions.implementationSha256,
+          terrainOofCacheGenerationImplementationSha256:
+            terrainOofCacheGenerationImplementationSha256(),
+          terrainOofScorerImplementationSha256:
+            terrainOofScorerImplementationSha256()
+        });
+        resolvedOptions.terrainOofCacheFileSha256 =
+          terrainOofCache.fileSha256;
+      } finally {
+        terrainOofCache.close();
+      }
+      resolvedOptions.terrainOofDecision = decision;
+    }
   }
   if (resolvedOptions.spatialSplitManifestPath) {
     resolvedOptions.verifiedSpatialSplit = verifySpatialSplitManifest({
@@ -6404,7 +8661,13 @@ async function buildPredictionArtifact(options = {}) {
     });
   }
   if (
-    resolvedOptions.writeSpatialOofCachePath !== undefined &&
+    (
+      resolvedOptions.writeSpatialOofCachePath !== undefined ||
+      resolvedOptions.writeNeighborPolicyOofCachePath !== undefined ||
+      resolvedOptions.writeSpatialFeatureDiagnosticCachePath !==
+        undefined ||
+      resolvedOptions.writeTerrainOofCachePath !== undefined
+    ) &&
     (
       resolvedOptions.verifiedSpatialSplit?.panelName !== "development" ||
       Number(resolvedOptions.verifiedSpatialSplit?.panel?.folds?.length) !== 5
@@ -6431,6 +8694,90 @@ async function buildPredictionArtifact(options = {}) {
         sourceSnapshotSha256: snapshot.sha256,
         spatialSplitFileSha256: resolvedOptions.verifiedSpatialSplit.fileSha256,
         spatialSplitManifestHash: resolvedOptions.verifiedSpatialSplit.manifestHash
+      }
+    );
+  }
+  if (resolvedOptions.writeNeighborPolicyOofCachePath !== undefined) {
+    const preregistration = JSON.parse(
+      readFileSync(
+        resolvedOptions.neighborPolicyPreregistrationPath,
+        "utf8"
+      )
+    );
+    validateNeighborPolicyCachePreregistration(preregistration, {
+      sourceSnapshotSha256: snapshot.sha256,
+      verifiedSpatialSplit: resolvedOptions.verifiedSpatialSplit,
+      habitatFeatureSet: resolvedOptions.habitatFeatureSet,
+      predictionImplementationSha256:
+        resolvedOptions.implementationSha256,
+      qualityThresholds: {
+        ...resolvedOptions.qualityGate,
+        maximumRelativeBrierDegradation:
+          NESTED_CALIBRATION_GUARD.maximumRelativeBrierDegradation,
+        maximumEceDegradation:
+          NESTED_CALIBRATION_GUARD.maximumEceDegradation
+      },
+      modelOutputPath: outputPath,
+      cacheOutputPath:
+        resolvedOptions.writeNeighborPolicyOofCachePath,
+      modelVersion: resolvedOptions.modelVersion
+    });
+    emitProgress(resolvedOptions, "neighbor_policy_preregistration_ready", {
+      path: resolvedOptions.neighborPolicyPreregistrationPath,
+      contractSha256: neighborPolicyDiagnosticContractSha256(),
+      cacheGenerationImplementationSha256:
+        neighborPolicyOofCacheGenerationImplementationSha256()
+    });
+  }
+  if (
+    resolvedOptions.writeSpatialFeatureDiagnosticCachePath !==
+      undefined
+  ) {
+    const preregistration = JSON.parse(
+      readFileSync(
+        resolvedOptions.spatialFeaturePreregistrationPath,
+        "utf8"
+      )
+    );
+    validateSpatialFeatureDiagnosticPreregistration(
+      preregistration,
+      {
+        sourceSnapshotSha256: snapshot.sha256,
+        verifiedSpatialSplit:
+          resolvedOptions.verifiedSpatialSplit,
+        habitatFeatureSet: resolvedOptions.habitatFeatureSet,
+        profileModel:
+          resolvedOptions.multiscaleSpatialFeatureProfiles,
+        predictionImplementationSha256:
+          resolvedOptions.implementationSha256,
+        modelOutputPath: outputPath,
+        companionNeighborCachePath:
+          resolvedOptions
+            .companionNeighborPolicyOofCachePath ||
+          resolvedOptions.writeNeighborPolicyOofCachePath,
+        companionMode:
+          resolvedOptions
+            .companionNeighborPolicyOofCachePath !== undefined
+            ? "existing_read_only"
+            : "same_run_output",
+        featureCacheOutputPath:
+          resolvedOptions.writeSpatialFeatureDiagnosticCachePath,
+        modelVersion: resolvedOptions.modelVersion
+      }
+    );
+    emitProgress(
+      resolvedOptions,
+      "spatial_feature_preregistration_ready",
+      {
+        path:
+          resolvedOptions.spatialFeaturePreregistrationPath,
+        contractSha256:
+          multiscaleSpatialFeatureContractSha256(),
+        profileModelSha256:
+          resolvedOptions.multiscaleSpatialFeatureProfiles
+            .profileModelSha256,
+        cacheGenerationImplementationSha256:
+          spatialFeatureDiagnosticCacheGenerationImplementationSha256()
       }
     );
   }
@@ -6531,6 +8878,11 @@ async function buildPredictionArtifact(options = {}) {
       resolvedOptions.habitatFeatureSet,
       resolvedOptions.habitatModel
     );
+    const terrainMaterialization = insertTerrainFeatures(
+      artifact,
+      resolvedOptions.terrainFeatureSet,
+      resolvedOptions.terrainModel
+    );
     insertTaxa(artifact);
     aggregateTrainingStatistics(artifact);
     emitProgress(resolvedOptions, "temporal_validation_started");
@@ -6594,10 +8946,20 @@ async function buildPredictionArtifact(options = {}) {
       summary: normalizationReport.summary
     });
     manifestSet(artifact, "source_contract", sourceContract);
-    const inputFeatures = resolvedOptions.habitatFeatureSet
-      ? ["calendar_date", "location", resolvedOptions.habitatFeatureSet.contract.id]
-      : ["calendar_date", "location"];
+    const inputFeatures = [
+      "calendar_date",
+      "location",
+      ...(resolvedOptions.habitatFeatureSet
+        ? [resolvedOptions.habitatFeatureSet.contract.id]
+        : []),
+      ...(resolvedOptions.terrainFeatureSet
+        ? [resolvedOptions.terrainFeatureSet.contract.id]
+        : [])
+    ];
     const habitatFeatures = habitatManifestSummary(resolvedOptions.habitatFeatureSet);
+    const terrainFeatures = terrainManifestSummary(
+      resolvedOptions.terrainFeatureSet
+    );
     manifestSet(artifact, "input_features", inputFeatures);
     manifestSet(artifact, "habitat_features", habitatFeatures);
     manifestSet(
@@ -6616,6 +8978,44 @@ async function buildPredictionArtifact(options = {}) {
       artifact,
       "continuous_habitat_materialization",
       continuousHabitatMaterialization
+    );
+    manifestSet(artifact, "terrain_features", terrainFeatures);
+    manifestSet(
+      artifact,
+      "terrain_spatial_evidence_model",
+      resolvedOptions.terrainModel ===
+        TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id
+        ? TERRAIN_SPATIAL_EVIDENCE_CONTRACT
+        : null
+    );
+    manifestSet(
+      artifact,
+      "terrain_materialization",
+      terrainMaterialization
+    );
+    manifestSet(
+      artifact,
+      "terrain_oof_decision_binding",
+      resolvedOptions.terrainOofDecision
+        ? {
+            path:
+              resolvedOptions.terrainOofDecisionPath,
+            fileSha256:
+              resolvedOptions
+                .terrainOofDecisionFileSha256,
+            cacheFileSha256:
+              resolvedOptions.terrainOofDecision
+                .inputs.cacheFileSha256,
+            preregistrationFileSha256:
+              resolvedOptions.terrainOofDecision
+                .inputs.preregistrationFileSha256,
+            decision:
+              resolvedOptions.terrainOofDecision.decision,
+            goForFullSqliteBuild: true,
+            goForPublication: false,
+            sealedPanelViewed: false
+          }
+        : null
     );
     manifestSet(artifact, "weather_features", {
       championIncluded: false,
@@ -6777,6 +9177,8 @@ async function buildPredictionArtifact(options = {}) {
       materializationProfile,
       habitatModel: resolvedOptions.habitatModel,
       habitatFeatureSet: resolvedOptions.habitatFeatureSet,
+      terrainModel: resolvedOptions.terrainModel,
+      terrainFeatureSet: resolvedOptions.terrainFeatureSet,
       rankingReferenceBinding: resolvedOptions.rankingReferenceBinding || null,
       completeForwardLevels: resolvedOptions.rankingReferenceBinding
         ? RANKING_REFERENCE_COMPLETE_FORWARD_LEVELS
@@ -6819,6 +9221,14 @@ async function buildPredictionArtifact(options = {}) {
             ? CONTINUOUS_HABITAT_KERNEL_CONTRACT
             : null,
         continuousHabitatMaterialization,
+        terrainFeatures,
+        terrainModel: resolvedOptions.terrainModel || null,
+        terrainSpatialEvidenceContract:
+          resolvedOptions.terrainModel ===
+          TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id
+            ? TERRAIN_SPATIAL_EVIDENCE_CONTRACT
+            : null,
+        terrainMaterialization,
         weatherIncluded: false
       },
       source: {
@@ -6853,6 +9263,26 @@ async function buildPredictionArtifact(options = {}) {
           ? CONTINUOUS_HABITAT_KERNEL_CONTRACT
           : null,
       continuousHabitatMaterialization,
+      terrainFeatures,
+      terrainModel: resolvedOptions.terrainModel || null,
+      terrainSpatialEvidenceContract:
+        resolvedOptions.terrainModel ===
+        TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id
+          ? TERRAIN_SPATIAL_EVIDENCE_CONTRACT
+          : null,
+      terrainMaterialization,
+      terrainOofDecision: resolvedOptions.terrainOofDecision
+        ? {
+            path:
+              resolvedOptions.terrainOofDecisionPath,
+            fileSha256:
+              resolvedOptions
+                .terrainOofDecisionFileSha256,
+            decision: "Go",
+            goForFullSqliteBuild: true,
+            goForPublication: false
+          }
+        : null,
       hyperparameters: {
         recencyHalfLifeYears: resolvedOptions.recencyHalfLifeYears,
         localHistoryYears: resolvedOptions.localHistoryYears,
@@ -6868,6 +9298,12 @@ async function buildPredictionArtifact(options = {}) {
         continuousHabitatKernel:
           resolvedOptions.habitatModel === CONTINUOUS_HABITAT_KERNEL_CONTRACT.id
             ? CONTINUOUS_HABITAT_KERNEL_CONTRACT
+            : null,
+        terrainModel: resolvedOptions.terrainModel || null,
+        terrainSpatialEvidenceContract:
+          resolvedOptions.terrainModel ===
+          TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id
+            ? TERRAIN_SPATIAL_EVIDENCE_CONTRACT
             : null,
         unitThresholds: resolvedOptions.unitThresholds,
         priorStrengths: resolvedOptions.priorStrengths,
@@ -6945,6 +9381,26 @@ async function buildPredictionArtifact(options = {}) {
           ? CONTINUOUS_HABITAT_KERNEL_CONTRACT
           : null,
       continuousHabitatMaterialization,
+      terrainFeatures,
+      terrainModel: resolvedOptions.terrainModel || null,
+      terrainSpatialEvidenceContract:
+        resolvedOptions.terrainModel ===
+        TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id
+          ? TERRAIN_SPATIAL_EVIDENCE_CONTRACT
+          : null,
+      terrainMaterialization,
+      terrainOofDecision: resolvedOptions.terrainOofDecision
+        ? {
+            path:
+              resolvedOptions.terrainOofDecisionPath,
+            fileSha256:
+              resolvedOptions
+                .terrainOofDecisionFileSha256,
+            decision: "Go",
+            goForFullSqliteBuild: true,
+            goForPublication: false
+          }
+        : null,
       published
     };
   } catch (error) {
@@ -6988,9 +9444,51 @@ function parseCliArguments(argv) {
     else if (argument === "--spatial-parameters") options.spatialParametersPath = value();
     else if (argument === "--habitat-features") options.habitatFeaturesPath = value();
     else if (argument === "--habitat-model") options.habitatModel = value();
+    else if (argument === "--terrain-features") {
+      options.terrainFeaturesPath = value();
+    }
+    else if (argument === "--terrain-model") {
+      options.terrainModel = value();
+    }
+    else if (argument === "--write-terrain-oof-cache") {
+      options.writeTerrainOofCachePath = value();
+    }
+    else if (argument === "--terrain-preregistration") {
+      options.terrainPreregistrationPath = value();
+    }
+    else if (argument === "--terrain-control-report") {
+      options.terrainControlReportPath = value();
+    }
+    else if (argument === "--terrain-oof-decision") {
+      options.terrainOofDecisionPath = value();
+    }
+    else if (argument === "--terrain-oof-cache") {
+      options.terrainOofCachePath = value();
+    }
     else if (argument === "--sealed-evaluation-receipt") options.sealedEvaluationReceiptPath = value();
     else if (argument === "--confirm-open-sealed-spatial-panel") options.sealedSpatialPanelConfirmation = value();
     else if (argument === "--write-spatial-oof-cache") options.writeSpatialOofCachePath = value();
+    else if (argument === "--write-neighbor-policy-oof-cache") {
+      options.writeNeighborPolicyOofCachePath = value();
+    }
+    else if (argument === "--neighbor-policy-preregistration") {
+      options.neighborPolicyPreregistrationPath = value();
+    }
+    else if (
+      argument === "--companion-neighbor-policy-oof-cache"
+    ) {
+      options.companionNeighborPolicyOofCachePath = value();
+    }
+    else if (
+      argument === "--write-spatial-feature-diagnostic-cache"
+    ) {
+      options.writeSpatialFeatureDiagnosticCachePath = value();
+    }
+    else if (
+      argument === "--spatial-feature-preregistration"
+    ) {
+      options.spatialFeaturePreregistrationPath = value();
+    }
     else if (argument === "--ranking-reference-report") options.rankingReferenceReportPath = value();
     else if (argument === "--forward-top-k") options.forwardTopK = Number(value());
     else if (argument === "--workers") options.workers = Number(value());
@@ -7027,6 +9525,13 @@ function usage() {
     --spatial-panel development \\
     --habitat-features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json \\
     --habitat-model ${CONTINUOUS_HABITAT_KERNEL_CONTRACT.id} \\
+    --terrain-features data/prediction-features/zhejiang-v1-20260715-terrain-h3-r6-v1.json \\
+    --terrain-model ${TERRAIN_SPATIAL_EVIDENCE_CONTRACT.id} \\
+    --write-terrain-oof-cache data/prediction-models/development-cache/zhejiang-v1-20260715-terrain-oof-v11.sqlite \\
+    --terrain-preregistration docs/zhejiang-v1-20260715-terrain-v11-preregistration.json \\
+    --terrain-control-report data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite.report.json \\
+    --terrain-oof-cache data/prediction-models/development-cache/zhejiang-v1-20260715-terrain-oof-v11.sqlite \\
+    --terrain-oof-decision data/prediction-models/development-cache/zhejiang-v1-20260715-terrain-oof-v11.decision.json \\
     --ranking-reference-report data/prediction-models/development-cache/zhejiang-ranking-reference-v3-w4.json \\
     --workers 4 \\
     --test-only \\
@@ -7079,6 +9584,14 @@ function cliResultSummary(result) {
       spatial: cliMetricSummary(result.releaseQuality?.spatial?.metrics),
       observer: cliMetricSummary(result.releaseQuality?.observer?.metrics)
     },
+    neighborPolicyOofCache:
+      result.releaseQuality?.spatial?.neighborPolicyOofCache || null,
+    spatialFeatureDiagnosticCache:
+      result.releaseQuality?.spatial
+        ?.spatialFeatureDiagnosticCache || null,
+    terrainOofCache:
+      result.releaseQuality?.spatial?.terrainOofCache ||
+      null,
     occurrenceEventCandidates: result.occurrenceEvents?.candidateTaxa ?? null,
     forwardRows: result.forward?.insertedRows ?? null,
     reverseRows: result.reverse?.insertedRows ?? null,
@@ -7087,6 +9600,14 @@ function cliResultSummary(result) {
     habitatModel: result.habitatModel || null,
     continuousHabitatKernel: result.continuousHabitatKernel || null,
     continuousHabitatMaterialization: result.continuousHabitatMaterialization || null,
+    terrainFeatures: result.terrainFeatures || null,
+    terrainModel: result.terrainModel || null,
+    terrainSpatialEvidenceContract:
+      result.terrainSpatialEvidenceContract || null,
+    terrainMaterialization:
+      result.terrainMaterialization || null,
+    terrainOofDecision:
+      result.terrainOofDecision || null,
     validation: result.validation,
     published: result.published
   };
@@ -7123,24 +9644,28 @@ module.exports = {
   TRAINING_DATA_CONTRACT,
   PredictionBuildError,
   analyzeOccurrenceEvents,
+  aggregateHoldoutMetrics,
   aggregateTrainingStatistics,
   aggregateUnitSummaries,
   assertTrainingSourceContract,
   buildPredictionArtifact,
   cliResultSummary,
   collectDevelopmentPoolPositiveCounts,
+  compactSpatialCalibrationRow,
   createArtifactSchema,
   createUnitRegistry,
   createTrainingSnapshot,
   crossFitSpatialCalibrators,
   evaluateCachedSpatialRows,
   evaluateObserverHoldout,
+  evaluationProbability,
   evaluateReleaseQuality,
   evaluateSpatialHoldout,
   guardCalibrationCandidates,
   inspectSnapshotQuality,
   insertSpaceUnits,
   insertContinuousHabitatFeatures,
+  insertTerrainFeatures,
   insertTaxa,
   insertTrainingRows,
   buildReverseHotspots,

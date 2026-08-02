@@ -1,0 +1,226 @@
+{
+  "schemaVersion": 1,
+  "kind": "zhejiang_spatial_landcover_basis_v12_preregistration",
+  "modelLineage": "zhejiang-v1-20260715",
+  "preregistrationPath": "docs/zhejiang-v1-20260715-spatial-landcover-basis-v12-preregistration.json",
+  "purpose": "Test one falsifiable hypothesis after the v11 Development No-Go: replace fold-confounded categorical profile calibration with a shared continuous public land-cover basis.",
+  "developmentOnly": true,
+  "diagnosticOnly": true,
+  "contract": {
+    "sha256": "27dcc1a50dda64efda889a1e0d761b081b4bfc06f2e20b73ef224a7da0808f85",
+    "value": {
+      "id": "zhejiang_public_profile_landcover_basis_residual_v1",
+      "hypothesis": "The v11 categorical profile failure is caused by fold-confounded unseen profile levels; a shared continuous public land-cover basis can generalize across frozen profiles and reduce worst-species ECE without degrading Brier or pooled ECE.",
+      "control": "existing_species_or_prevalence_group_beta_calibration",
+      "candidate": "species_specific_ridge_logistic_residual_on_public_profile_landcover_basis",
+      "eligibleSpeciesMinimumOuterTrainingPositiveCount": 200,
+      "sourceFeatureContractId": "zhejiang_worldcover_h3_r6_multiscale_profiles_v1",
+      "sourceProfileModelSha256": "896848ec676c31f9aeed9117801b9e66a722b7f579b792c8047fc5312b0795e4",
+      "basis": {
+        "source": "frozen_public_profile_centroids_only",
+        "features": [
+          {
+            "id": "local_forest",
+            "worldcoverClassCodes": [
+              10
+            ]
+          },
+          {
+            "id": "local_human_modified",
+            "worldcoverClassCodes": [
+              40,
+              50
+            ]
+          },
+          {
+            "id": "local_aquatic",
+            "worldcoverClassCodes": [
+              80,
+              90,
+              95
+            ]
+          }
+        ],
+        "standardization": "public_cell_count_weighted_population_over_all_frozen_profiles",
+        "minimumStandardDeviation": 1e-8,
+        "standardizedClip": 4,
+        "exactContextFeatureVectorForbidden": true
+      },
+      "residualCalibration": {
+        "offset": "logit_of_cross_fitted_control_beta_probability",
+        "coefficients": [
+          "intercept",
+          "local_forest",
+          "local_human_modified",
+          "local_aquatic"
+        ],
+        "ridge": 10,
+        "maximumIterations": 50,
+        "maximumAbsoluteCoefficient": 2,
+        "convergenceTolerance": 1e-7,
+        "crossFit": "leave_one_development_outer_fold_out",
+        "residualTraining": "strict_inner_oof_control_predictions_excluding_heldout_outer",
+        "guardScope": "species_across_all_heldout_outer_folds",
+        "maximumRelativeBrierDegradation": 0.01,
+        "maximumEceDegradation": 0.01
+      },
+      "selection": {
+        "requireEveryFoldGuard": true,
+        "requirePooledGuard": true,
+        "requireStrictWorstSpeciesEceImprovement": true,
+        "requireAllFrozenSpatialQualityGates": true
+      },
+      "seasonFeatureEnabled": false,
+      "privacy": "public_taxon_id_and_public_profile_centroid_basis_aggregates_only_no_context_or_location_identity"
+    }
+  },
+  "implementation": {
+    "scorerImplementationSha256": "9c2c4bc506511f984f875f8d8b366578cb02e1eac10eb94eb11eafaa1c183d57",
+    "preflightImplementationSha256": "80727f30fd62acc377397da5bca336c48a63dec998649b9671eb88a29e99d0b0"
+  },
+  "inputs": {
+    "sourceSnapshotPath": "data/prediction-snapshots/zhejiang-v1-20260715.sqlite",
+    "sourceSnapshotSha256": "92602be9b9c3aeb3d7c6cf966c459710a5a9bf6bc078e604a3805ab05fc0b16a",
+    "spatialSplitPath": "docs/zhejiang-v1-20260715-spatial-splits.json",
+    "spatialSplitFileSha256": "7deafec542c95b1463c92fe6948831247666a22923921b22890bb24adac9accc",
+    "spatialSplitManifestHash": "400bcc27bde3bd30f03ef022b9f76175cd6093ea5afc98fcbfccb79bde234e4d",
+    "featurePath": "data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json",
+    "featureFileSha256": "085b134fc86124213c7abf8f0d813ef25489de1754c908ff98e384a1b189d451",
+    "featureSetSha256": "b2a3ae75832f7b5bd0830375691a8f727c7214b7cb3e149dfa1fe8236bcb99f5",
+    "neighborCachePath": "data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite",
+    "neighborCacheSha256": "dc1b6a23ab408f101a6c301fe2da4e7b492aa8046a15f325cb7406aa2103015e",
+    "neighborCacheGenerationImplementationSha256": "226eba391fee4d6b8b2fc9282b14d138a1ce24cd6bce0c48484ebd42f61e10f1",
+    "featureCachePath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-feature-diagnostic-v10.sqlite",
+    "featureCacheSha256": "deb5af1b59581aee265013dc5526be61bbdb1196b08ae4409e6c6e074097fcdd",
+    "v10ReportPath": "data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite.report.json",
+    "v10ReportSha256": "f05a353ecdd5350fff15975ab9f894c1e07ed7c8a5e9f3c99c46faeb4c137b33",
+    "v11ReportPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-profile-calibration-v11.json",
+    "v11ReportSha256": "d222fafb6749da4b22fc1aa31ceee2e827444ea6cba7a83742b842ff5e926c92",
+    "defaultModelPath": "data/prediction-models/zhejiang-v1-20260715.sqlite",
+    "defaultModelSha256": "c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582"
+  },
+  "basis": {
+    "basisModelSha256": "da8d7c1158f5e6e2a05eef46817d64e75cf27348e8144197f534bc326582d001",
+    "publicCellCount": 5743,
+    "featureIds": [
+      "local_forest",
+      "local_human_modified",
+      "local_aquatic"
+    ],
+    "means": [
+      0.592190195708,
+      0.158469500178,
+      0.199698765316
+    ],
+    "standardDeviations": [
+      0.349587252805,
+      0.19792062662,
+      0.347981480587
+    ]
+  },
+  "v10Finding": {
+    "releaseQualityPassed": false,
+    "failure": "spatial.species_calibration.maximumEce",
+    "maximumSpeciesEce": 0.10829956319678036,
+    "maximumSpeciesEceThreshold": 0.05
+  },
+  "v11Finding": {
+    "runtimeIntegrationEligible": false,
+    "controlMaximumSpeciesEce": 0.10829956319678026,
+    "candidateMaximumSpeciesEce": 0.11273245808796035,
+    "maximumSpeciesEceDelta": 0.004432894891180095,
+    "failedFold": "1",
+    "failedFoldRelativeBrierDegradation": 0.012839649593558223,
+    "categoricalProfileFoldDistribution": {
+      "profile_13": [
+        "1"
+      ],
+      "profile_16": [
+        "2"
+      ],
+      "profile_04": [
+        "1",
+        "4"
+      ],
+      "profile_14": [
+        "2",
+        "5"
+      ],
+      "profile_15": [
+        "1",
+        "3",
+        "4"
+      ],
+      "profile_18": [
+        "3",
+        "5"
+      ]
+    },
+    "interpretation": "Categorical profiles are fold-confounded and cannot be cross-fitted when a held-out profile level is absent from the other outer folds. Increasing profile count would make this support problem worse."
+  },
+  "qualityThresholds": {
+    "minimumBrierSkill": 0,
+    "maximumEce": 0.1,
+    "maximumSpeciesEce": 0.05,
+    "maximumGroupEce": 0.1,
+    "minimumRecallAt20Delta": -0.02,
+    "maximumRelativeBrierDegradation": 0.01,
+    "maximumEceDegradation": 0.01
+  },
+  "decisionPolicy": {
+    "controlMustExactlyReproduceV10SpatialMetrics": true,
+    "candidateMustPassEveryFoldGuard": true,
+    "candidateMustPassPooledGuard": true,
+    "candidateMustStrictlyImproveWorstSpeciesEce": true,
+    "candidateMustPassAllFrozenSpatialQualityGates": true,
+    "ifPass": "stop_after_diagnostic_and_prepare_separate_frozen_runtime_integration_with_full_development_revalidation",
+    "ifFail": "stop_landcover_basis_path_and_reassess_spatial_generalization_without_opening_sealed"
+  },
+  "privacyContract": {
+    "allowed": [
+      "public_taxon_id",
+      "public_profile_id",
+      "public_profile_centroid_basis",
+      "outer_fold_id",
+      "aggregate_metrics",
+      "aggregate_scope_guard"
+    ],
+    "forbidden": [
+      "report_id",
+      "observer",
+      "coordinate",
+      "h3",
+      "space_unit_id",
+      "point_id",
+      "location_name",
+      "context_index",
+      "exact_context_feature_vector"
+    ],
+    "contextIdentityPersistedInOutput": false
+  },
+  "changeControl": {
+    "diagnosticOnly": true,
+    "developmentOnly": true,
+    "qualityThresholdsChanged": false,
+    "sealedDataRead": false,
+    "defaultModelModified": false,
+    "runtimeIntegrationForbidden": true,
+    "referenceMaterializationForbidden": true
+  },
+  "stopPolicy": {
+    "singleDiagnosticRunOnly": true,
+    "sealedForbidden": true,
+    "runtimeIntegrationForbiddenUntilSeparatePreregistration": true,
+    "noFreeParameterSearch": true,
+    "noRidgeSweep": true,
+    "noBasisFeatureSweep": true
+  },
+  "outputs": {
+    "preflightPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-landcover-basis-v12-preflight.json",
+    "diagnosticPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-landcover-basis-v12.json"
+  },
+  "commands": {
+    "preflight": "node tools/preflight-zhejiang-spatial-landcover-basis.js --neighbor-cache data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite --feature-cache data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-feature-diagnostic-v10.sqlite --v10-report data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite.report.json --v11-report data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-profile-calibration-v11.json --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json --preregistration docs/zhejiang-v1-20260715-spatial-landcover-basis-v12-preregistration.json --default-model data/prediction-models/zhejiang-v1-20260715.sqlite --output data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-landcover-basis-v12-preflight.json",
+    "candidateScoring": "node tools/score-zhejiang-spatial-landcover-basis.js --neighbor-cache data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite --feature-cache data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-feature-diagnostic-v10.sqlite --v10-report data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite.report.json --v11-report data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-profile-calibration-v11.json --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json --preregistration docs/zhejiang-v1-20260715-spatial-landcover-basis-v12-preregistration.json --output data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-landcover-basis-v12.json"
+  }
+}

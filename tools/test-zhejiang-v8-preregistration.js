@@ -32,13 +32,12 @@ const {
 const {
   habitatFeatureGenerationImplementationSha256
 } = require("./build-zhejiang-habitat-features");
-const { tileFileName } = require("./download-worldcover-tiles");
 
 const projectRoot = resolve(__dirname, "..");
 const preregistrationPath = resolve(
   projectRoot,
   "docs",
-  "zhejiang-v1-20260715-continuous-habitat-v7-preregistration.json"
+  "zhejiang-v1-20260715-continuous-habitat-v8-preregistration.json"
 );
 
 function kernelContractSha256() {
@@ -47,10 +46,16 @@ function kernelContractSha256() {
     .digest("hex");
 }
 
-test("v7 preregistration remains frozen after the v8 runtime-only fix", () => {
+test("v8 preregistration binds the runtime-only fix and unchanged executable contracts", () => {
   const preregistration = JSON.parse(readFileSync(preregistrationPath, "utf8"));
   assert.equal(preregistration.generatedAt, undefined);
   assert.equal(preregistration.status, "frozen_before_long_development_build");
+  assert.equal(preregistration.changeControl.scope, "runtime_null_guard_only");
+  assert.equal(preregistration.changeControl.modelParametersChanged, false);
+  assert.equal(preregistration.changeControl.inputDataChanged, false);
+  assert.equal(preregistration.changeControl.validationFoldsChanged, false);
+  assert.equal(preregistration.changeControl.qualityThresholdsChanged, false);
+  assert.equal(preregistration.changeControl.sealedDataRead, false);
   assert.deepEqual(
     preregistration.continuousHabitatKernel,
     CONTINUOUS_HABITAT_KERNEL_CONTRACT
@@ -67,7 +72,7 @@ test("v7 preregistration remains frozen after the v8 runtime-only fix", () => {
   );
   assert.equal(
     preregistration.implementation.predictionImplementationSha256,
-    "80182cb706c3199658932b45d40323cc61773554952081a7bb1abc3ea721fe63"
+    "b85d7dfc19644ce7f9f8d8e48a2640eb8e932330b987e3ddfcbe3e0fc3698316"
   );
   assert.notEqual(
     preregistration.implementation.predictionImplementationSha256,
@@ -75,7 +80,7 @@ test("v7 preregistration remains frozen after the v8 runtime-only fix", () => {
   );
   assert.equal(
     preregistration.implementation.cacheGenerationImplementationSha256,
-    "2cd5c2d3c39c40540feb2ed3d004e5cac5cc127fdbe8c25aadf4eb0c9b1ab380"
+    "d6203dee3dd8f47abcd4dd86cf943cfbdbc81f41607bcc8325de5430423c8c7f"
   );
   assert.notEqual(
     preregistration.implementation.cacheGenerationImplementationSha256,
@@ -101,6 +106,7 @@ test("v7 preregistration remains frozen after the v8 runtime-only fix", () => {
     preregistration.bindings.featureGenerationImplementationSha256,
     habitatFeatureGenerationImplementationSha256()
   );
+  assert.equal(preregistration.stopPolicy.v8Unavailable, "pause_all_further_builds");
   assert.equal(preregistration.stopPolicy.sealedForbiddenDuringThisPlan, true);
   assert.equal(
     preregistration.stopPolicy.defaultOfflineModelOverwriteForbidden,
@@ -108,7 +114,7 @@ test("v7 preregistration remains frozen after the v8 runtime-only fix", () => {
   );
 });
 
-test("available fixed inputs match every preregistered SHA binding", () => {
+test("v8 fixed inputs match every preregistered SHA binding", () => {
   const preregistration = JSON.parse(readFileSync(preregistrationPath, "utf8"));
   const inputs = [
     [
@@ -129,7 +135,11 @@ test("available fixed inputs match every preregistered SHA binding", () => {
     ],
     [
       "targetIndependentPreflightAuditSha256",
-      "data/prediction-models/development-cache/zhejiang-v1-20260715-continuous-habitat-v7-preregister-audit.json"
+      preregistration.bindings.targetIndependentPreflightAuditPath
+    ],
+    [
+      "defaultOfflineModelSha256",
+      "data/prediction-models/zhejiang-v1-20260715.sqlite"
     ]
   ];
   for (const [binding, relativePath] of inputs) {
@@ -163,14 +173,5 @@ test("available fixed inputs match every preregistered SHA binding", () => {
       preregistration.bindings.featureGenerationImplementationSha256
     );
     assert.equal(features.summary.cellCount, preregistration.featureCoverage.featureH3R6Count);
-  }
-  for (const tile of preregistration.officialWorldCoverTiles) {
-    const tilePath = resolve(
-      projectRoot,
-      "data/prediction-features/worldcover-2021-v200",
-      tileFileName(tile.tileId)
-    );
-    if (!existsSync(tilePath)) continue;
-    assert.equal(sha256File(tilePath), tile.fileSha256, tile.tileId);
   }
 });

@@ -457,6 +457,106 @@ v7 不再建立虚拟 habitat 空间单元，而把 WorldCover 组成作为区�
 
 当前状态停在 v7 长构建之前：尚未创建 v7 cache、评分报告或模型，没有启动第二个任务，没有运行 sealed，没有覆盖默认离线模型。下一步只能从全新 v7 路径启动唯一一次 strict development cache；任一 development 门槛失败即 no-go 并停止，即使全部通过也必须先冻结代码与参数并等待明确同意后才能首次查看 sealed。
 
+#### 2026-07-24 v7 构建失败与 v8 最小修复预登记
+
+v7 唯一一次 strict development 构建通过特征加载和快照质量门后，在 `training_rows_started` 阶段退出，错误为 `Cannot read properties of null (reading 'h3Index')`。没有生成 v7 模型、cache、报告或 SHA sidecar，默认离线模型 SHA-256 仍为 `c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582`，也没有运行 sealed。
+
+根因是连续生境实现把生境统计计数条件从“已生成空间网格”放宽成了“已加载生境特征”。固定快照中保留了坐标不可用于浙江网格的报告；这些报告应继续进入省/市/区县回退和鸟种证据，但其 `r6` 为 null，旧条件随后无保护访问 `r6.h3Index`。v8 只把计数条件收紧为同时存在 `r6` 和特征集，并增加无效坐标报告仍完整保留行政层证据的回归测试。
+
+v8 不更改快照、split、WorldCover 特征、连续生境核参数、候选鸟种、验证折或任何质量门槛，也不复用或覆盖 v7 路径。完整机器可读预登记位于 `docs/zhejiang-v1-20260715-continuous-habitat-v8-preregistration.json`；新的 strict cache、workers=4/1 报告、evaluation-only 模型和有条件参考物化全部使用独立 v8 路径。若 v8 仍不可用，立即暂停后续构建；无论结果如何都不得打开 sealed。
+
+#### 2026-07-24 continuous habitat v8 development 结果
+
+v8 按预登记从全新路径完成唯一一次 evaluation-only development 构建、strict cache 生成以及 workers=4/1 顺序评分。构建耗时 16,798.495 秒，全程仅使用 development 面板、`testOnly + evaluation-only + no-publish`，没有运行 sealed，也没有修改默认离线模型。
+
+- evaluation-only 模型：`data/prediction-models/zhejiang-v1-20260715-development-continuous-habitat-v8.sqlite`，SHA-256 `707f70dce18b261779e7440067b285a35cc3678394ab596950f925b257781699`；报告 SHA-256 `54878c56b362ec6447c4282a58e2a3836edaf5943902d7ef0687965b22cd426f`。`quick_check=ok`、freelist 为 0、外键违规为 0，保留 589 个公共鸟种与 5,743 个连续生境特征单元；正向预测、反向热点和 ranking-reference 参数均为 0。
+- strict cache v8：`data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-oof-v8.sqlite`，SHA-256 `69c392fcf369e35a27dd9fd2a60efff4c84705cd93236d73d3f535a8f6385be6`。schema 5、kind、快照/split/特征/实现绑定、隐私白名单和 sidecar 均通过；5 个 outer、20 个 inner、347,436 条 outer score 和 1,385,452 条 inner score 完整。
+- workers=4 报告 SHA-256 `40efecfca0870ab89c4bbf79e5e0dbe49ba94b2426d2d3d75493074fa0103b58`；workers=1 报告 SHA-256 `6f3d446675faf2fd37d510c1b4f378b3dd82a934f31cdeb8a1c38590e8c2056f`。两个原始 JSON 的差异路径只有 `generatedAt` 和 `scoring.workers`；仅删除这两项后的规范 JSON SHA-256 均为 `cd8c8077ce208c40d9a0942506b9fff174f318536d2c34462b7bafea801ab562`。
+- 时间、空间、观察者的总体 Brier Skill 分别为 `+11.30595%`、`+5.64286%`、`+16.28532%`，总体 ECE 分别为 `0.002045`、`0.004081`、`0.001085`，Recall@20 delta 分别为 `+6.08714pp`、`+5.55060pp`、`+8.89733pp`。这些总体指标均通过冻结门槛。
+- 正式 strict-nested 评分的空间 Brier Skill 为 `+4.00350%`、总体 ECE 为 `0.005171`、Recall@20 delta 为 `+4.37266pp`；但最大逐鸟 ECE 为 `0.108389`，最差作用域为 `taxon_id=4356`，超过固定上限 `0.05`。唯一失败项为 `spatial.species_calibration.maximumEce`，且 workers=4/1 结论完全一致。
+- 与同一正式评分口径相比，最大逐鸟空间 ECE 从 v5 的 `0.122598`、v6 的 `0.129072` 改善到 v8 的 `0.108389`，空间 Brier Skill 从 v5 的 `+3.63558%`、v6 的 `+1.34939%` 改善到 v8 的 `+4.00350%`，但改善不足以通过不可放宽的逐鸟校准门槛。
+- 地点规范化继续守恒：岚山水库 `16431` 与 `211370` 映射到同一 `space_unit_id`，`170472` 保持独立；连续模式没有创建虚拟 habitat 空间单元。固定快照仍为 87,107 份报告、1,324,993 条观察和 589 个公共鸟种键，观察主键重复与孤儿观察均为 0。
+
+因此 v8 最终为 **development no-go**。按预登记停止所有后续构建：没有启动 `zhejiang-v1-20260715-development-continuous-habitat-v8-reference.sqlite` 的完整参考物化，没有查看 sealed；默认离线模型 SHA-256 仍为 `c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582`。
+
+#### 2026-07-24 v9 构建前只读诊断与后续候选冻结
+
+v8 no-go 后没有直接启动 v9 长构建。先把可由现有 v8 strict cache 无偏复算的 12 组 `habitat exposure cap × prior strength` 候选冻结为 `cap={5,10,20,40} × prior={10,30,60}`，并将邻居策略与特征契约作为后续结构候选单独登记。完整机器可读预登记位于 `docs/zhejiang-v1-20260715-continuous-habitat-v9-prebuild-preregistration.json`；候选集 SHA-256 为 `2be97a2a88f06a77970e2f1fec4bed78c5550f0a4cedf460d3290212b3393afe`，结构候选计划 SHA-256 为 `d5cacb9585254b26f00aebeab0000dcd130563a1f371de4f69fe0462fe364600`。
+
+诊断器只读取 v8 development cache，拒绝自由参数、sealed 参数和已有输出覆盖；报告隐私白名单禁止报告 ID、观察者、坐标、H3、空间单元/邻居 ID、特征向量和地点名称。当前 `cap=10,prior=30` 在 347,436 条 outer 与 1,385,452 条 inner 评分行上逐行复现 v8 `rawProbability`，最大绝对差为 0。
+
+唯一登记诊断输出为 `data/prediction-models/development-cache/zhejiang-v1-20260715-continuous-habitat-v9-prebuild-diagnostic.json`，SHA-256 为 `0242799941d591600796ed25a412ce7d0e3d55bf31763190ccfbe1e78146dabf`。结果如下：
+
+- 五个 outer 折的 inner 选择分别为 `cap=5,prior=30`、`cap=5,prior=30`、`cap=5,prior=30`、`cap=5,prior=10`、`cap=5,prior=30`；嵌套汇总 Brier Skill 为 `+4.10629%`、总体 ECE 为 `0.006670`、Recall@20 delta 为 `+4.51544pp`。
+- 嵌套汇总最大逐鸟 ECE 为 `0.109513`，有 38 个逐鸟作用域超过 `0.05`，最差为 `taxon_id=4866` 白头鹎；唯一失败项仍为 `spatial.species_calibration.maximumEce`。
+- 全 development OOF 的探索性稳健选择为 `cap=5,prior=30`，但它不可冻结：最大逐鸟 ECE 为 `0.110576`，比当前 `cap=10,prior=30` 的 `0.108389` 更差。12 个候选全部未通过逐鸟门槛；最低 pooled 最大逐鸟 ECE `0.107811` 来自未通过逐折保护门的 `cap=20,prior=10`，而合格候选中当前参数仍是 pooled 逐鸟 ECE 最低者。
+- 在探索候选 cap=5 下，outer 1–4 的全部上下文均达到证据上限，outer 5 也有 `83.21%` 达到上限。这说明继续细调单一全局 cap/prior 只是在压缩已经饱和的证据，无法解释以空间折混合误差为主的残差。
+
+因此构建前结论为 **long-build no-go**，`freezeEligible=false`。后续只允许先准备新的隐私安全邻居策略诊断 cache：以当前五组 WorldCover 特征为控制变量，比较“同市独占”“同市至少 8 个后补全省邻居”“同市/全省双通道”三种已冻结策略；只有结构候选在新的 strict nested development cache 上通过全部固定门槛，才可另行预登记 runtime 集成和长构建。当前不组合新特征、不物化 reference、不查看 sealed、不覆盖默认离线模型；默认模型 SHA-256 复核仍为 `c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582`。
+
+#### 2026-07-24 邻居策略诊断缓存构建前准备
+
+邻居策略诊断缓存已经完成可执行准备，但尚未启动长构建。机器可读冻结登记位于 `docs/zhejiang-v1-20260715-neighbor-policy-oof-v9-preregistration.json`，只读预检位于 `data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-preflight.json`，预检 SHA-256 为 `bd349e5295c9ae11605f16f65c75c1f09144d8fada272606eba40d50c22cb27d`。预检结论为 `readyForExplicitApproval=true`、`longBuildStarted=false`、`sealedPanelViewed=false`、`defaultModelModified=false`。
+
+- 可执行策略严格冻结为三种：`same_city_exclusive_v1` 控制策略、`same_city_min8_fill_zhejiang_v1` 单通道补全策略、`dual_channel_same_city_zhejiang_v1` 双通道策略。候选仍使用同一五组 WorldCover r6 特征、Hellinger 距离 `0.35`、bandwidth `0.18`、cap `10` 和 prior `30`，没有引入新特征或自由参数。契约 SHA-256 为 `511940f7e1013162f888900d6f9500a67fdfd5fa62fa3e9c39b261e63bf78262`。
+- 新 companion cache 使用 schema 1、kind `zhejiang_development_strict_nested_neighbor_policy_sufficient_statistics_v1`。固定布局为 5 个 outer、20 个 inner、347,436 条 outer score、1,385,452 条 inner score、共 1,732,888 条 score；每条 score 固定四个策略通道证据，共 6,931,552 条邻居检测聚合。任一数量不符会在缓存发布前 fail closed。
+- 缓存只保存匿名折内上下文序号、公共鸟种 ID、基础行政证据和策略通道的聚合 exposure/detections/neighborCount/weightSum/cap/prior；不保存报告 ID、观察者、坐标、H3、空间单元或邻居 ID、特征向量和地点名称。写入后必须通过固定表/列白名单、外键检查、`quick_check=ok`、`freelist_count=0`、SHA sidecar 和只读重开校验。
+- 控制策略必须逐行复现当前连续生境 `rawProbability`，容差固定为 `1e-12`。每个 outer 只用其余四个 inner 选择策略，再在 untouched outer 上验证；Brier 相对恶化不得超过 1%，ECE 恶化不得超过 `0.01`。只有探索性全 development 选择为 challenger 且嵌套与汇总固定空间门槛全部通过，才允许提出 runtime 集成预登记；报告本身始终 `diagnosticOnly=true`、`freezeEligible=false`。
+- 生成实现 SHA-256 为 `fb9fad37f20dc34b26cfe785d6cb5a6e606d3ab69e22ba4951bc9ea705871eaf`，缓存生成契约 SHA-256 为 `b1bb56cdbc8f70b7bc6370ed5c6b413ff61f2f0557b8c5e0ab0d1db01a82b7ee`，独立评分器 SHA-256 为 `98294c790dc725b08ffaefd06907b8352f31d780b531974f316ad912dd030621`。50 项相关核心、历史冻结、预检、确定性、隐私和评分回归测试全部通过。
+- 冻结目标模型、构建报告、缓存、日志和候选评分报告均不存在；系统进程命令行复核没有发现相同目标的在途构建。默认离线模型 SHA-256 仍为 `c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582`。
+
+当前唯一下一步是等待明确批准，再按预登记命令启动一次 workers=4 的长耗时 development cache 构建。批准前不得启动；启动前仍须再次检查重复进程和目标不存在。缓存完成后才能运行登记的独立评分器；评分失败则停止邻居策略路径并准备冻结的特征契约诊断，不能放宽门槛、删鸟种、物化 reference 或查看 sealed。
+
+#### 2026-07-24 v9 内存失败与流式缓存修复
+
+获批的单次 v9 构建在 `spatial_holdout_started` 阶段运行约 3 小时 55 分钟后退出。Node 24 x64 的默认 V8 heap limit 为约 4.19 GiB，失败前 GC 日志显示 old-space 已达到约 4.08–4.10 GiB，最终错误为 `JavaScript heap out of memory`。正式模型、报告、邻居策略缓存、SHA sidecar 和候选评分均未发布，默认模型 SHA-256 仍为 `c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582`。
+
+根因不是机器物理内存不足，而是原实现把 5 个 outer 与 20 个 inner 的完整 `scoreRows`、四通道邻居证据和约 6,931,552 条 detection 对象全部保留到最后，再一次性写入 SQLite。修复后，邻居策略缓存使用独立流式 writer：每个 fold set 在单独事务中规范化并写入稳定的 `.building-stream-v1` SQLite，提交后立即释放完整评分行；SQLite staging 使用 WAL、`synchronous=NORMAL` 与 `temp_store=FILE`。checkpoint sidecar 绑定快照、split、实现、契约、阈值、生成选项、预期布局和 development 正例计数；进程异常中断后，只有全部绑定完全一致才可重开 staging，并跳过已经原子提交的 inner fold。25 个 fold set 全部提交后才允许写 metadata、执行 WAL checkpoint、切换 DELETE journal、VACUUM、外键/quick-check/freelist 校验、生成 SHA sidecar并原子发布。缺少任一 fold、行数不符或完整性失败都禁止发布。
+
+空间交叉校准不再持有完整邻居证据。outer fold 在落盘后只保留 `contextIndex/taxonId/positiveCount/actualPositive/total/rawProbability/baselineProbability/deepestLevel` 八个字段；inner fold 完成事务写入后不再保留 `scoreRows`。每次 fold set 提交都会记录 heap、RSS、external memory 与累计行数，供下一次预检和长构建监控使用。
+
+本次代码变化使历史 v9 预登记的 prediction/cache-generation implementation SHA 必然失配；这是防止原命令被直接重跑的 fail-closed 行为。旧登记保持原样作为失败尝试记录。再次长构建前必须建立新的 v9-r1 登记、重新生成预检，并根据短程内存剖析冻结 workers 与 Node heap 上限；当前修复不会自动启动长构建，但新的同身份构建在异常中断后可以复用已提交的 fold checkpoint。
+
+#### 2026-07-25 v9-r1 登记与构建启动
+
+v9-r1 保持 v9 的输入、五折划分、邻居策略候选、模型参数和质量门槛不变，只登记流式事务、身份绑定检查点、紧凑校准行与运行时内存边界。新预登记为 `docs/zhejiang-v1-20260715-neighbor-policy-oof-v9-r1-preregistration.json`，SHA-256 为 `1b0eedb270ea8e65637cdd70f53037150527d77d55332f1516dd88e7e37510b1`；运行时冻结为 `workers=4`、Node old-space 上限 8192 MiB。旧 v9 staging 明确禁止复用。
+
+相关 56 项回归在 2048 MiB old-space 约束下全部通过。新预检输出为 `data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r1-preflight.json`，SHA-256 为 `d80f7345708539ee133ccc6a67344984cd11d6ebdbcd5abc42650180c5dec398`，结论为 `readyForExplicitApproval=true`、`longBuildStarted=false`、`sealedPanelViewed=false`、`defaultModelModified=false`。唯一登记构建于 2026-07-25 00:59:58（Asia/Shanghai）启动，初始 PID 为 30352；启动检查已通过 quality gate，stderr 为空，默认模型保持不变。
+
+#### 2026-07-27 v10 多尺度空间特征诊断结果
+
+v10 按冻结登记完成唯一一次 evaluation-only development 构建。模型 SHA-256 为 `0754e5cc0cba380cdcc865058d4f9c4300c95b6dadec7bfac5d75b9b901a5014`，报告 SHA-256 为 `f05a353ecdd5350fff15975ab9f894c1e07ed7c8a5e9f3c99c46faeb4c137b33`，多尺度特征诊断缓存 SHA-256 为 `deb5af1b59581aee265013dc5526be61bbdb1196b08ae4409e6c6e074097fcdd`。模型与缓存均通过 sidecar、`quick_check=ok`、`freelist_count=0` 和外键校验；缓存固定为 25 个 fold set、19 个公开原型和 3,635 个匿名上下文。
+
+正式结论仍为 **Development No-Go**，唯一失败项是 `spatial.species_calibration.maximumEce`。最大逐鸟种 ECE 为 `0.10829956319678036`，超过固定上限 `0.05`，共有 32 个逐鸟种 scope 超限；spatial Brier Skill `+5.64286%`、overall ECE `0.004081`、Recall@20 delta `+5.55060pp` 均通过。v10 不改变预测策略，因此正式指标与 v9-r2 相同；其作用是生成目标无关、隐私安全的空间上下文。
+
+outer 的 727 个匿名上下文只落入 6 个公开原型。`profile_14` 覆盖 296 个上下文和约 47.85% 评估权重，并在多个最差鸟种上贡献主要残差；同一鸟种在不同原型间还存在反向偏差。这支持测试原型条件校准，但不授权直接集成或查看 sealed。
+
+#### 2026-07-27 v11 原型条件校准构建前准备
+
+v11 只冻结一个可证伪假设：正例数至少 200 的鸟种按 `taxon × frozen public profile` 交叉拟合 Beta calibration，其余鸟种继续使用原 prevalence group；不加入季节项，不改变邻居策略、特征原型、验证折或任何质量门槛。control 必须在 `1e-12` 内复现 v10 正式空间指标；candidate 必须同时通过每折与 pooled 非退化保护、严格改善最大逐鸟种 ECE，并通过全部冻结 spatial 门槛。
+
+机器可读登记为 `docs/zhejiang-v1-20260715-spatial-profile-calibration-v11-preregistration.json`，说明文档为 `docs/zhejiang-v1-20260715-spatial-profile-calibration-v11.md`。6 项行为、真实哈希、No-Go 绑定、命令和隐私测试全部通过；只读预检 `data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-profile-calibration-v11-preflight.json` 通过，SHA-256 为 `c5c79cb54c36c5d137178fff20d4347e002c103abdcdf9880e9b49989d2ef648`，`outputsAbsent=true`、`sealedPanelViewed=false`，默认模型 SHA 保持 `c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582`。
+
+该段记录的是评分前状态；候选随后已按唯一冻结命令运行一次，终态见下节。准备阶段以及正式诊断均没有集成 runtime、构建完整模型、物化 reference 或查看 sealed。
+
+#### 2026-07-27 v11 原型条件校准诊断结果
+
+v11 唯一候选评分已按冻结命令完成，诊断报告为 `data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-profile-calibration-v11.json`，SHA-256 为 `d222fafb6749da4b22fc1aa31ceee2e827444ea6cba7a83742b842ff5e926c92`，sidecar 匹配。该运行仅使用 development OOF 与冻结公开空间原型，没有查看 sealed、修改默认模型、集成 runtime 或物化 reference。
+
+候选将正例数至少 200 的鸟种细分为 `taxon × public profile` Beta 校准。pooled Brier Skill 从 control 的 `+5.64286%` 提升到 `+6.56271%`，但最大逐鸟种 ECE 从 `0.10829956319678026` 恶化到 `0.11273245808796035`，仍远高于固定上限 `0.05`；outer fold 1 的 Brier 相对恶化 `1.28396%`，也超过每折上限 `1%`。957 个候选 scope 通过保护，1,252 个被拒绝。
+
+因此 v11 正式结论为 **Development No-Go**，`runtimeIntegrationEligible=false`。按预登记停止空间原型条件校准路径，后续若继续只能重新评估特征分辨率并建立新的冻结假设；不得重复覆盖 v11 诊断、放宽质量门槛、查看 sealed 或修改默认模型。默认模型 SHA-256 仍为 `c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582`。
+
+#### 2026-07-27 v12 连续公开地表基底诊断
+
+v11 使用的6个离散公开原型与 outer fold 高度混杂，其中 `profile_13` 和 `profile_16` 分别只出现在单一 outer fold。v12 因此停止独立的 `taxon × profile` 校准，将全部冻结公开原型质心投影为 forest、human-modified、aquatic 三个连续基底，并使用严格 inner OOF control 预测为每个 outer 拟合 ridge=10 的鸟种残差。没有进行 ridge、基底或参数扫描。
+
+唯一诊断报告为 `data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-landcover-basis-v12.json`，SHA-256 为 `31dd781b928179a3c4136afc62c6096c2bbc19f4bcdeb0d1130e42c2800679a0`，sidecar 匹配。候选的 pooled Brier Skill 为 `+6.25591%`、overall ECE 为 `0.003548`，五个 outer fold 保护全部通过；234 个物种 scope 被接受、134 个被拒绝。
+
+最大逐鸟种 ECE 最终仍为 `0.10829956319678026`，没有严格优于 control。最差物种 `taxon_id=4866` 的未保护连续基底修正把 ECE 降到 `0.10580628234831281`，但同时令该物种 Brier 恶化 `6.65730%`，超过固定上限 `1%`，因此 scope 保护正确回退到 control。v12 结论为 **Development No-Go**，`runtimeIntegrationEligible=false`。
+
+该结果排除了“只需把离散 profile 改成连续 WorldCover 组成并调整校准”的路径。后续若继续，必须补充服务时稳定可得、目标无关并能解释空间外推的特征，例如冻结的地形或气候常态；不得继续调整校准强度、放宽门槛、查看 sealed、物化 reference 或修改默认模型。默认模型 SHA-256 仍为 `c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582`。
+
 ## 天气与 challenger
 
 浙江历史天气可以从 CMA、ERA5-Land 或 NASA POWER 等来源补充，但首版 champion 不纳入天气。原因是查询未来十二个月季节窗口时无法获得未来实况天气，直接用历史实况训练会造成训练—服务偏移。后续天气模型只能作为独立 challenger，并使用查询时真实可得的气候常态、预报或滞后特征。

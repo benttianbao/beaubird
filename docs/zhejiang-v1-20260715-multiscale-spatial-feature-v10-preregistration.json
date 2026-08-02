@@ -1,0 +1,252 @@
+{
+  "schemaVersion": 1,
+  "kind": "zhejiang_multiscale_spatial_feature_diagnostic_preregistration_v1",
+  "status": "frozen_before_development_feature_diagnostic_cache_build",
+  "purpose": "Freeze a target-independent multiscale WorldCover feature contract and a privacy-safe context cache for diagnosing the v9-r2 spatial species-calibration no-go.",
+  "modelVersion": "zhejiang-v1-20260715-development-multiscale-spatial-feature-v10",
+  "preregistrationPath": "docs/zhejiang-v1-20260715-multiscale-spatial-feature-v10-preregistration.json",
+  "runtime": {
+    "nodeMaxOldSpaceSizeMb": 8192,
+    "workers": 4,
+    "hostPhysicalMemoryGiB": 32,
+    "companionMode": "existing_read_only",
+    "longBuildStarted": false
+  },
+  "implementation": {
+    "predictionImplementationSha256": "621c1e8288329c6988adb013253ae9bf42a06b2043aba92114047d5912d7cc74",
+    "multiscaleFeatureGenerationImplementationSha256": "0995e8e27903bd0a66fcccf5fd7e8f882487bfa0c6846b4787e1443c44fea5b8",
+    "cacheGenerationImplementationSha256": "3b22953053024a5b6cedac61c91a0cf5f4442f7d87149bb0c08a65926ac5823c",
+    "preflightImplementationSha256": "dad1a347f96de5a3fa1919321196bf5f6ec41fc925e31814e1350f57254b6c86"
+  },
+  "contract": {
+    "sha256": "d8a4d9bc382afc240e40cc787e12f6a7c3655f82c51ffae70cc0421ce7d9e78e",
+    "value": {
+      "id": "zhejiang_worldcover_h3_r6_multiscale_profiles_v1",
+      "schemaVersion": 1,
+      "sourceFeatureContractId": "zhejiang_esa_worldcover_h3_r6_continuous_v2",
+      "sourceDataset": "ESA WorldCover 2021 v200",
+      "targetIndependent": true,
+      "labelIndependent": true,
+      "h3Resolution": 6,
+      "classCodes": [
+        10,
+        20,
+        30,
+        40,
+        50,
+        60,
+        70,
+        80,
+        90,
+        95,
+        100
+      ],
+      "scales": [
+        {
+          "id": "local",
+          "ringDistance": 0,
+          "expectedCellCount": 1,
+          "aggregation": "target_cell_fraction"
+        },
+        {
+          "id": "ring_1",
+          "ringDistance": 1,
+          "expectedCellCount": 6,
+          "aggregation": "coverage_weighted_mean_over_available_exact_ring_cells"
+        },
+        {
+          "id": "ring_2",
+          "ringDistance": 2,
+          "expectedCellCount": 12,
+          "aggregation": "coverage_weighted_mean_over_available_exact_ring_cells"
+        }
+      ],
+      "featureOrder": [
+        "local.worldcover_10",
+        "local.worldcover_20",
+        "local.worldcover_30",
+        "local.worldcover_40",
+        "local.worldcover_50",
+        "local.worldcover_60",
+        "local.worldcover_70",
+        "local.worldcover_80",
+        "local.worldcover_90",
+        "local.worldcover_95",
+        "local.worldcover_100",
+        "ring_1.worldcover_10",
+        "ring_1.worldcover_20",
+        "ring_1.worldcover_30",
+        "ring_1.worldcover_40",
+        "ring_1.worldcover_50",
+        "ring_1.worldcover_60",
+        "ring_1.worldcover_70",
+        "ring_1.worldcover_80",
+        "ring_1.worldcover_90",
+        "ring_1.worldcover_95",
+        "ring_1.worldcover_100",
+        "ring_2.worldcover_10",
+        "ring_2.worldcover_20",
+        "ring_2.worldcover_30",
+        "ring_2.worldcover_40",
+        "ring_2.worldcover_50",
+        "ring_2.worldcover_60",
+        "ring_2.worldcover_70",
+        "ring_2.worldcover_80",
+        "ring_2.worldcover_90",
+        "ring_2.worldcover_95",
+        "ring_2.worldcover_100",
+        "local.entropy",
+        "ring_1.entropy",
+        "ring_2.entropy",
+        "contrast.local_to_ring_1_hellinger",
+        "contrast.local_to_ring_2_hellinger",
+        "availability.ring_1",
+        "availability.ring_2"
+      ],
+      "derivedFeatures": {
+        "entropy": "normalized_shannon_entropy_over_11_worldcover_classes",
+        "contrast": "hellinger_distance_between_local_and_ring_composition",
+        "availability": "available_feature_cells_divided_by_expected_ring_cells"
+      },
+      "standardization": {
+        "population": "all_cells_in_frozen_public_worldcover_feature_set",
+        "method": "population_mean_and_standard_deviation",
+        "minimumStandardDeviation": 1e-8,
+        "standardizedClip": 6
+      },
+      "profiling": {
+        "algorithm": "deterministic_farthest_seed_kmeans_then_small_cluster_merge_v1",
+        "requestedProfileCount": 24,
+        "maximumIterations": 30,
+        "distance": "squared_euclidean_on_standardized_features",
+        "minimumPublicCellsPerProfile": 32,
+        "tieBreak": "lexicographic_h3_then_original_cluster_index"
+      },
+      "temporalContext": {
+        "cacheField": "season_week",
+        "allowedRange": [
+          0,
+          52
+        ],
+        "spatialProfileMustRemainSeasonIndependent": true
+      },
+      "cacheRepresentation": {
+        "exactH3": false,
+        "exactCoordinates": false,
+        "exactPerContextFeatureVector": false,
+        "storedPerContext": [
+          "profile_id",
+          "season_week"
+        ],
+        "storedPerProfile": [
+          "public_cell_count",
+          "standardized_centroid"
+        ]
+      }
+    }
+  },
+  "inputs": {
+    "sourceSnapshotPath": "data/prediction-snapshots/zhejiang-v1-20260715.sqlite",
+    "sourceSnapshotSha256": "92602be9b9c3aeb3d7c6cf966c459710a5a9bf6bc078e604a3805ab05fc0b16a",
+    "spatialSplitPath": "docs/zhejiang-v1-20260715-spatial-splits.json",
+    "spatialSplitFileSha256": "7deafec542c95b1463c92fe6948831247666a22923921b22890bb24adac9accc",
+    "spatialSplitManifestHash": "400bcc27bde3bd30f03ef022b9f76175cd6093ea5afc98fcbfccb79bde234e4d",
+    "featurePath": "data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json",
+    "featureFileSha256": "085b134fc86124213c7abf8f0d813ef25489de1754c908ff98e384a1b189d451",
+    "featureSetSha256": "b2a3ae75832f7b5bd0830375691a8f727c7214b7cb3e149dfa1fe8236bcb99f5",
+    "featureGenerationImplementationSha256": "3a729659d8f97ec89b1bc2a4b15330ddf9fa08bdde73715eea30d29388e54c82",
+    "tileManifestSha256": "628d7cd04eb659540fa1c8e05ad091645023dd812ea96cacbad29a324291b306"
+  },
+  "companion": {
+    "mode": "existing_read_only",
+    "path": "data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite",
+    "cacheKind": "zhejiang_development_strict_nested_neighbor_policy_sufficient_statistics_v1",
+    "fileSha256": "dc1b6a23ab408f101a6c301fe2da4e7b492aa8046a15f325cb7406aa2103015e",
+    "immutableReadOnly": true
+  },
+  "profileModel": {
+    "profileModelSha256": "896848ec676c31f9aeed9117801b9e66a722b7f579b792c8047fc5312b0795e4",
+    "publicCellCount": 5743,
+    "featureCount": 40,
+    "requestedProfileCount": 24,
+    "retainedProfileCount": 19,
+    "minimumPublicCellCount": 32,
+    "maximumPublicCellCount": 1685
+  },
+  "expectedLayout": {
+    "foldSetCount": 25,
+    "outerFoldCount": 5,
+    "innerFoldCount": 20,
+    "outerContextRows": 727,
+    "innerContextRows": 2908,
+    "totalContextRows": 3635
+  },
+  "privacyContract": {
+    "contextIdentity": "companion_neighbor_cache_fold_set_and_dense_ordinal_without_location_mapping",
+    "seasonWeek": true,
+    "profileId": "target_independent_public_worldcover_profile_with_minimum_support",
+    "minimumPublicCellsPerProfile": 32,
+    "reportIds": false,
+    "publicTaxonIds": false,
+    "observers": false,
+    "coordinates": false,
+    "exactSpatialIdentifiers": false,
+    "neighborIdentifiers": false,
+    "exactPerContextFeatureVectors": false,
+    "names": false
+  },
+  "outputs": {
+    "modelPath": "data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite",
+    "buildReportPath": "data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite.report.json",
+    "featureCachePath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-feature-diagnostic-v10.sqlite",
+    "stdoutPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-feature-diagnostic-v10-build.stdout.log",
+    "stderrPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-feature-diagnostic-v10-build.stderr.log",
+    "modelMustNotExistBeforeRun": true,
+    "featureCacheMustNotExistBeforeRun": true,
+    "testOnly": true,
+    "evaluationOnly": true,
+    "noPublish": true
+  },
+  "qualityThresholds": {
+    "minimumTimeFolds": 3,
+    "minimumCalibrationFolds": 2,
+    "minimumSpatialFolds": 3,
+    "minimumObserverFolds": 3,
+    "requireFinalHoldout": true,
+    "requireSpatialHoldout": true,
+    "requireObserverHoldout": true,
+    "minimumBrierSkill": 0,
+    "maximumEce": 0.1,
+    "maximumSpeciesEce": 0.05,
+    "maximumGroupEce": 0.1,
+    "minimumRecallAt20Delta": -0.02,
+    "minimumReverseNdcgLift": 0.05
+  },
+  "changeControl": {
+    "developmentOnly": true,
+    "diagnosticOnly": true,
+    "qualityThresholdsChanged": false,
+    "sealedDataRead": false,
+    "defaultModelModified": false,
+    "referenceMaterializationForbidden": true
+  },
+  "protectedState": {
+    "defaultModelPath": "data/prediction-models/zhejiang-v1-20260715.sqlite",
+    "defaultModelSha256": "c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582",
+    "sealedPanelViewed": false
+  },
+  "stopPolicy": {
+    "sealedForbidden": true,
+    "defaultModelOverwriteForbidden": true,
+    "qualityGateRelaxationForbidden": true,
+    "taxonRemovalForbidden": true,
+    "referenceMaterializationForbidden": true,
+    "longBuildRequiresExplicitApproval": true,
+    "featureCacheDoesNotAuthorizeModelPolicyChange": true
+  },
+  "commands": {
+    "unitTest": "node --test tools/test-multiscale-spatial-features.js tools/test-zhejiang-spatial-feature-diagnostic-cache.js tools/test-zhejiang-prediction-model.js",
+    "preflight": "node tools/preflight-zhejiang-spatial-feature-diagnostic-cache.js --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json --companion-neighbor-cache data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite --feature-preregistration docs/zhejiang-v1-20260715-multiscale-spatial-feature-v10-preregistration.json --default-model data/prediction-models/zhejiang-v1-20260715.sqlite --output data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-feature-diagnostic-v10-preflight.json",
+    "cacheBuild": "node --max-old-space-size=8192 tools/build-zhejiang-prediction-model.js --source data/prediction-snapshots/zhejiang-v1-20260715.sqlite --source-is-snapshot --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --output data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite --model-version zhejiang-v1-20260715-development-multiscale-spatial-feature-v10 --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json --spatial-panel development --habitat-features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json --habitat-model zhejiang_worldcover_hellinger_kernel_v1 --companion-neighbor-policy-oof-cache data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite --write-spatial-feature-diagnostic-cache data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-feature-diagnostic-v10.sqlite --spatial-feature-preregistration docs/zhejiang-v1-20260715-multiscale-spatial-feature-v10-preregistration.json --workers 4 --evaluation-only --no-publish --confirm-coordinate-system bd09"
+  }
+}

@@ -14,6 +14,7 @@ data/birdreport-zhejiang.jsonl.*
 data/captcha-predict-*/
 data/prediction-models/
 data/prediction-snapshots/
+data/prediction-features/
 data/quarantine/
 
 android/.gradle/
@@ -37,6 +38,9 @@ ml/captcha-recognition/__pycache__/
 ml/captcha-recognition/*.pkl
 ml/captcha-recognition/*.pkl.corrupt-*
 ml/bird-prediction/__pycache__/
+tools/__pycache__/
+
+graphify-out/
 
 server-site.*.log
 *.log

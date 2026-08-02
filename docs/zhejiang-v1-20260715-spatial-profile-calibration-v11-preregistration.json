@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "kind": "zhejiang_spatial_profile_calibration_v11_preregistration",
+  "status": "frozen_before_single_development_diagnostic",
+  "purpose": "Test one falsifiable hypothesis after the v10 Development No-Go: frozen public multiscale WorldCover profiles explain enough spatially mixed species-calibration residual to justify species-by-profile beta calibration.",
+  "preregistrationPath": "docs/zhejiang-v1-20260715-spatial-profile-calibration-v11-preregistration.json",
+  "changeControl": {
+    "diagnosticOnly": true,
+    "developmentOnly": true,
+    "qualityThresholdsChanged": false,
+    "sealedDataRead": false,
+    "defaultModelModified": false,
+    "runtimeIntegrationForbidden": true,
+    "referenceMaterializationForbidden": true
+  },
+  "contract": {
+    "sha256": "e5d1174f3fc965546326c4195ad5b560969fc22669f4745a35e107a357a2288d",
+    "value": {
+      "id": "zhejiang_multiscale_profile_beta_calibration_v1",
+      "hypothesis": "The v10 spatial species-calibration failure is concentrated by frozen public multiscale WorldCover profile, so cross-fitted species-by-profile beta calibration can reduce worst-species ECE without degrading pooled Brier or ECE.",
+      "control": "existing_species_or_prevalence_group_beta_calibration",
+      "candidate": "species_by_profile_beta_calibration",
+      "eligibleSpeciesMinimumOuterTrainingPositiveCount": 200,
+      "featureContractId": "zhejiang_worldcover_h3_r6_multiscale_profiles_v1",
+      "profileModelSha256": "896848ec676c31f9aeed9117801b9e66a722b7f579b792c8047fc5312b0795e4",
+      "seasonFeatureEnabled": false,
+      "calibration": {
+        "family": "beta",
+        "ridge": 0.001,
+        "crossFit": "leave_one_development_outer_fold_out",
+        "guardScope": "candidate_scope_across_all_heldout_outer_folds",
+        "maximumRelativeBrierDegradation": 0.01,
+        "maximumEceDegradation": 0.01
+      },
+      "selection": {
+        "requireEveryFoldGuard": true,
+        "requirePooledGuard": true,
+        "requireStrictWorstSpeciesEceImprovement": true,
+        "requireAllFrozenSpatialQualityGates": true
+      },
+      "privacy": "public_taxon_id_and_public_profile_id_aggregates_only_no_context_or_location_identity"
+    }
+  },
+  "implementation": {
+    "scorerImplementationSha256": "809dda1e85b20d31eaedf929e91b52dedb45a62b3c101503c8c66b350c966e0c",
+    "preflightImplementationSha256": "0c8f1bd0b504e7dd39ece25a15fcab6f50e7a8bbf61a4aa3fe9795028a10546d"
+  },
+  "inputs": {
+    "sourceSnapshotPath": "data/prediction-snapshots/zhejiang-v1-20260715.sqlite",
+    "sourceSnapshotSha256": "92602be9b9c3aeb3d7c6cf966c459710a5a9bf6bc078e604a3805ab05fc0b16a",
+    "spatialSplitPath": "docs/zhejiang-v1-20260715-spatial-splits.json",
+    "spatialSplitFileSha256": "7deafec542c95b1463c92fe6948831247666a22923921b22890bb24adac9accc",
+    "spatialSplitManifestHash": "400bcc27bde3bd30f03ef022b9f76175cd6093ea5afc98fcbfccb79bde234e4d",
+    "featurePath": "data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json",
+    "featureFileSha256": "085b134fc86124213c7abf8f0d813ef25489de1754c908ff98e384a1b189d451",
+    "featureSetSha256": "b2a3ae75832f7b5bd0830375691a8f727c7214b7cb3e149dfa1fe8236bcb99f5",
+    "neighborCachePath": "data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite",
+    "neighborCacheSha256": "dc1b6a23ab408f101a6c301fe2da4e7b492aa8046a15f325cb7406aa2103015e",
+    "neighborCacheGenerationImplementationSha256": "226eba391fee4d6b8b2fc9282b14d138a1ce24cd6bce0c48484ebd42f61e10f1",
+    "featureCachePath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-feature-diagnostic-v10.sqlite",
+    "featureCacheSha256": "deb5af1b59581aee265013dc5526be61bbdb1196b08ae4409e6c6e074097fcdd",
+    "v10ModelPath": "data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite",
+    "v10ModelSha256": "0754e5cc0cba380cdcc865058d4f9c4300c95b6dadec7bfac5d75b9b901a5014",
+    "v10ReportPath": "data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite.report.json",
+    "v10ReportSha256": "f05a353ecdd5350fff15975ab9f894c1e07ed7c8a5e9f3c99c46faeb4c137b33",
+    "defaultModelPath": "data/prediction-models/zhejiang-v1-20260715.sqlite",
+    "defaultModelSha256": "c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582"
+  },
+  "v10Finding": {
+    "releaseQualityPassed": false,
+    "failures": [
+      "spatial.species_calibration.maximumEce"
+    ],
+    "maximumSpeciesEce": 0.10829956319678036,
+    "maximumSpeciesEceThreshold": 0.05,
+    "overThresholdSpeciesCount": 32,
+    "spatialBrierSkill": 0.05642857380918209,
+    "spatialOverallEce": 0.004081352313500836,
+    "spatialRecallAt20Delta": 0.05550597893985365,
+    "outerProfileCount": 6,
+    "dominantProfile": {
+      "profileId": "profile_14",
+      "publicCellCount": 188,
+      "contextRows": 296,
+      "evaluatedWeight": 533.6696521988952,
+      "evaluatedWeightShare": 0.4784584843240958
+    },
+    "interpretation": "The formal failure is not pooled calibration or ranking. Residual direction changes across frozen public profiles for multiple worst species, while profile_14 dominates evaluated weight and residual contribution."
+  },
+  "expectedLayout": {
+    "outerFoldCount": 5,
+    "featureProfileCount": 19,
+    "outerContextRows": 727,
+    "outerScoreRows": 347436,
+    "joinedBy": [
+      "outer_fold_id",
+      "context_index"
+    ],
+    "contextIdentityPersistedInOutput": false
+  },
+  "qualityThresholds": {
+    "minimumBrierSkill": 0,
+    "maximumEce": 0.1,
+    "maximumSpeciesEce": 0.05,
+    "maximumGroupEce": 0.1,
+    "minimumRecallAt20Delta": -0.02,
+    "maximumRelativeBrierDegradation": 0.01,
+    "maximumEceDegradation": 0.01
+  },
+  "decisionPolicy": {
+    "controlMustExactlyReproduceV10SpatialMetrics": true,
+    "candidateMustPassEveryFoldGuard": true,
+    "candidateMustPassPooledGuard": true,
+    "candidateMustStrictlyImproveWorstSpeciesEce": true,
+    "candidateMustPassAllFrozenSpatialQualityGates": true,
+    "ifPass": "stop_after_diagnostic_and_prepare_separate_frozen_runtime_integration_with_full_development_revalidation",
+    "ifFail": "stop_profile_calibration_path_and_reassess_feature_resolution_without_opening_sealed"
+  },
+  "privacyContract": {
+    "allowedOutputIdentifiers": [
+      "public_taxon_id",
+      "public_profile_id",
+      "outer_fold_id"
+    ],
+    "forbidden": [
+      "report_id",
+      "observer",
+      "coordinate",
+      "h3",
+      "space_unit_id",
+      "point_id",
+      "location_name",
+      "context_index"
+    ]
+  },
+  "outputs": {
+    "diagnosticPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-profile-calibration-v11.json",
+    "preflightPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-profile-calibration-v11-preflight.json",
+    "outputMustNotExistBeforeRun": true,
+    "shaSidecarRequired": true
+  },
+  "stopPolicy": {
+    "singleDiagnosticRunOnly": true,
+    "automaticRetryForbidden": true,
+    "runtimeIntegrationForbidden": true,
+    "fullModelBuildForbidden": true,
+    "referenceMaterializationForbidden": true,
+    "defaultModelOverwriteForbidden": true,
+    "sealedForbidden": true
+  },
+  "commands": {
+    "unitTest": "node --test tools/test-zhejiang-spatial-profile-calibration.js tools/test-zhejiang-spatial-profile-calibration-v11-preregistration.js",
+    "preflight": "node tools/preflight-zhejiang-spatial-profile-calibration.js --neighbor-cache data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite --feature-cache data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-feature-diagnostic-v10.sqlite --v10-report data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite.report.json --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json --preregistration docs/zhejiang-v1-20260715-spatial-profile-calibration-v11-preregistration.json --default-model data/prediction-models/zhejiang-v1-20260715.sqlite --output data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-profile-calibration-v11-preflight.json",
+    "candidateScoring": "node tools/score-zhejiang-spatial-profile-calibration.js --neighbor-cache data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite --feature-cache data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-feature-diagnostic-v10.sqlite --v10-report data/prediction-models/zhejiang-v1-20260715-development-multiscale-spatial-feature-v10.sqlite.report.json --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json --preregistration docs/zhejiang-v1-20260715-spatial-profile-calibration-v11-preregistration.json --output data/prediction-models/development-cache/zhejiang-v1-20260715-spatial-profile-calibration-v11.json"
+  }
+}

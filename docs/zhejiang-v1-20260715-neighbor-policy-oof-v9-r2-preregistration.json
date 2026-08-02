@@ -1,0 +1,226 @@
+{
+  "schemaVersion": 1,
+  "kind": "zhejiang_neighbor_policy_oof_cache_v9_preregistration",
+  "status": "frozen_before_single_long_development_cache_build",
+  "purpose": "Retry the failed v9-r1 neighbor-policy diagnostic after correcting fractional evaluation-weight validation; fold-streamed persistence, checkpoints, model policy, data, folds, and quality gates remain unchanged.",
+  "diagnosticOnly": true,
+  "preregistrationPath": "docs/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2-preregistration.json",
+  "changeControl": {
+    "parentAttempt": "zhejiang-v1-20260715-development-neighbor-policy-v9-r1",
+    "scope": "fractional_evaluation_weight_validation_only",
+    "modelParametersChanged": false,
+    "inputDataChanged": false,
+    "validationFoldsChanged": false,
+    "qualityThresholdsChanged": false,
+    "neighborPolicyContractChanged": false,
+    "sealedDataRead": false,
+    "legacyCheckpointReuseForbidden": true
+  },
+  "runtime": {
+    "nodeMaxOldSpaceSizeMb": 8192,
+    "workers": 4,
+    "hostPhysicalMemoryGiB": 32,
+    "persistence": "one_fold_set_per_sqlite_transaction",
+    "resume": "identity_bound_committed_fold_sets_only"
+  },
+  "implementation": {
+    "predictionImplementationSha256": "4c4cf9efda73e9034b53d1454863ccfbcbe14ac80ba08d66cf453ad93d021788",
+    "cacheGenerationImplementationSha256": "226eba391fee4d6b8b2fc9282b14d138a1ce24cd6bce0c48484ebd42f61e10f1",
+    "scorerImplementationSha256": "98294c790dc725b08ffaefd06907b8352f31d780b531974f316ad912dd030621"
+  },
+  "contract": {
+    "sha256": "511940f7e1013162f888900d6f9500a67fdfd5fa62fa3e9c39b261e63bf78262",
+    "value": {
+      "id": "zhejiang_continuous_habitat_neighbor_policy_diagnostic_v1",
+      "structuralCandidatePlanId": "zhejiang_continuous_habitat_v9_structural_candidates_v1",
+      "featureContractId": "zhejiang_esa_worldcover_h3_r6_continuous_v2",
+      "featureProjection": "worldcover_five_group_r6_v2",
+      "distance": "hellinger",
+      "maximumDistance": 0.35,
+      "kernelBandwidth": 0.18,
+      "evidenceExposureCap": 10,
+      "evidencePriorStrength": 30,
+      "excludeTargetCell": true,
+      "policies": [
+        {
+          "id": "same_city_exclusive_v1",
+          "role": "control",
+          "channels": [
+            {
+              "id": "habitat",
+              "applicationOrder": 0,
+              "selection": "same_city_when_at_least_8_otherwise_all_zhejiang",
+              "maximumNeighbors": 24,
+              "evidenceExposureCap": 10,
+              "evidencePriorStrength": 30
+            }
+          ]
+        },
+        {
+          "id": "same_city_min8_fill_zhejiang_v1",
+          "role": "challenger",
+          "channels": [
+            {
+              "id": "habitat",
+              "applicationOrder": 0,
+              "selection": "up_to_8_nearest_same_city_then_nearest_out_of_city_then_any_remaining_zhejiang",
+              "maximumNeighbors": 24,
+              "reservedSameCityNeighbors": 8,
+              "evidenceExposureCap": 10,
+              "evidencePriorStrength": 30
+            }
+          ]
+        },
+        {
+          "id": "dual_channel_same_city_zhejiang_v1",
+          "role": "challenger",
+          "channels": [
+            {
+              "id": "zhejiang_out_of_city",
+              "applicationOrder": 0,
+              "selection": "nearest_out_of_city",
+              "maximumNeighbors": 24,
+              "evidenceExposureCap": 10,
+              "evidencePriorStrength": 30
+            },
+            {
+              "id": "same_city",
+              "applicationOrder": 1,
+              "selection": "nearest_same_city",
+              "maximumNeighbors": 24,
+              "evidenceExposureCap": 10,
+              "evidencePriorStrength": 30
+            }
+          ]
+        }
+      ],
+      "selectionPolicy": {
+        "selectionEvidence": "four_inner_oof_folds_for_each_outer_fold",
+        "validationEvidence": "one_untouched_outer_fold",
+        "requireEveryInnerFoldGuard": true,
+        "maximumRelativeBrierDegradation": 0.01,
+        "maximumEceDegradation": 0.01,
+        "objectiveOrder": [
+          "minimum_worst_inner_fold_species_ece",
+          "minimum_pooled_inner_species_ece",
+          "minimum_pooled_inner_brier",
+          "minimum_pooled_inner_ece",
+          "policy_id"
+        ],
+        "currentPolicyId": "same_city_exclusive_v1"
+      },
+      "privacyPolicy": "cache_only_anonymous_fold_context_public_taxon_and_aggregated_channel_sufficient_statistics"
+    }
+  },
+  "inputs": {
+    "sourceSnapshotPath": "data/prediction-snapshots/zhejiang-v1-20260715.sqlite",
+    "sourceSnapshotSha256": "92602be9b9c3aeb3d7c6cf966c459710a5a9bf6bc078e604a3805ab05fc0b16a",
+    "spatialSplitPath": "docs/zhejiang-v1-20260715-spatial-splits.json",
+    "spatialSplitFileSha256": "7deafec542c95b1463c92fe6948831247666a22923921b22890bb24adac9accc",
+    "spatialSplitManifestHash": "400bcc27bde3bd30f03ef022b9f76175cd6093ea5afc98fcbfccb79bde234e4d",
+    "featurePath": "data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json",
+    "featureFileSha256": "085b134fc86124213c7abf8f0d813ef25489de1754c908ff98e384a1b189d451",
+    "featureSetSha256": "b2a3ae75832f7b5bd0830375691a8f727c7214b7cb3e149dfa1fe8236bcb99f5",
+    "tileManifestPath": "data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json.tiles.json",
+    "tileManifestFileSha256": "16ecbc0098902fbc843427fd5f676b5e5f246f075a4ddedbf1832757716496a9",
+    "tileManifestSha256": "628d7cd04eb659540fa1c8e05ad091645023dd812ea96cacbad29a324291b306",
+    "featureGenerationImplementationSha256": "3a729659d8f97ec89b1bc2a4b15330ddf9fa08bdde73715eea30d29388e54c82",
+    "targetIndependentAuditPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-continuous-habitat-v7-preregister-audit.json",
+    "targetIndependentAuditSha256": "d12726338e374e34a1b9419028b11ab2d983e2a061ba13bf28c011f2566d704f",
+    "sourceCardinality": {
+      "reportRows": 87107,
+      "observationRows": 1324993,
+      "distinctObservationKeys": 1324993,
+      "publicTaxonKeys": 589,
+      "orphanObservationRows": 0,
+      "duplicateObservationRows": 0
+    }
+  },
+  "expectedLayout": {
+    "outerFoldCount": 5,
+    "innerFoldCount": 20,
+    "outerScoreRows": 347436,
+    "innerScoreRows": 1385452,
+    "totalScoreRows": 1732888,
+    "neighborChannelsPerScoreRow": 4,
+    "neighborDetectionRows": 6931552
+  },
+  "outputs": {
+    "modelVersion": "zhejiang-v1-20260715-development-neighbor-policy-v9-r2",
+    "modelPath": "data/prediction-models/zhejiang-v1-20260715-development-neighbor-policy-v9-r2.sqlite",
+    "buildReportPath": "data/prediction-models/zhejiang-v1-20260715-development-neighbor-policy-v9-r2.sqlite.report.json",
+    "cachePath": "data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite",
+    "stdoutPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2-build.stdout.log",
+    "stderrPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2-build.stderr.log",
+    "modelMustNotExistBeforeRun": true,
+    "cacheMustNotExistBeforeRun": true,
+    "singleRegisteredRun": true,
+    "testOnly": true,
+    "evaluationOnly": true,
+    "noPublish": true
+  },
+  "scoring": {
+    "schemaVersion": 1,
+    "outputPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-candidates-v9-r2.json",
+    "outputMustNotExistBeforeRun": true,
+    "diagnosticOnly": true,
+    "freezeEligible": false,
+    "controlMustReproduceReferenceRawProbability": true,
+    "runtimeIntegrationRequiresSelectedChallengerAndAllNestedDevelopmentGates": true
+  },
+  "preflight": {
+    "schemaVersion": 1,
+    "implementationSha256": "47e21e1575b9f07158a7e61876a9a1700f933808547b08dd6248d49d884653d7",
+    "outputPath": "data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2-preflight.json",
+    "outputMustNotExistBeforeRun": true
+  },
+  "qualityThresholds": {
+    "minimumTimeFolds": 3,
+    "minimumCalibrationFolds": 2,
+    "minimumSpatialFolds": 3,
+    "minimumObserverFolds": 3,
+    "requireFinalHoldout": true,
+    "requireSpatialHoldout": true,
+    "requireObserverHoldout": true,
+    "minimumBrierSkill": 0,
+    "maximumEce": 0.1,
+    "maximumSpeciesEce": 0.05,
+    "maximumGroupEce": 0.1,
+    "minimumRecallAt20Delta": -0.02,
+    "minimumReverseNdcgLift": 0.05,
+    "maximumRelativeBrierDegradation": 0.01,
+    "maximumEceDegradation": 0.01
+  },
+  "privacyContract": {
+    "contextIdentity": "outer_inner_fold_local_dense_ordinal_without_location_mapping",
+    "publicTaxonId": true,
+    "reportIds": false,
+    "observers": false,
+    "coordinates": false,
+    "exactSpatialIdentifiers": false,
+    "neighborIdentifiers": false,
+    "featureVectors": false,
+    "names": false
+  },
+  "protectedState": {
+    "defaultModelPath": "data/prediction-models/zhejiang-v1-20260715.sqlite",
+    "defaultModelSha256": "c4d8f759cdb9275b9d9171877d80b339e8796342dd262b380cf99360108ac582",
+    "sealedPanelViewed": false
+  },
+  "stopPolicy": {
+    "sealedForbidden": true,
+    "defaultModelOverwriteForbidden": true,
+    "referenceMaterializationForbidden": true,
+    "qualityGateRelaxationForbidden": true,
+    "taxonRemovalForbidden": true,
+    "singleLongRunRequiresExplicitApproval": true,
+    "ifNeighborDiagnosticPasses": "preregister_selected_neighbor_policy_runtime_integration_and_full_development_revalidation",
+    "ifNeighborDiagnosticFails": "stop_neighbor_policy_path_and_prepare_frozen_feature_contract_diagnostic"
+  },
+  "commands": {
+    "unitTest": "node --test tools/test-zhejiang-neighbor-policy-oof-cache.js tools/test-zhejiang-neighbor-policy-preregistration.js tools/test-zhejiang-neighbor-policy-v9-r2-preregistration.js",
+    "preflight": "node tools/preflight-zhejiang-neighbor-policy-oof-cache.js --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json --preregistration docs/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2-preregistration.json --default-model data/prediction-models/zhejiang-v1-20260715.sqlite --output data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2-preflight.json",
+    "cacheBuild": "node --max-old-space-size=8192 tools/build-zhejiang-prediction-model.js --source data/prediction-snapshots/zhejiang-v1-20260715.sqlite --source-is-snapshot --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --output data/prediction-models/zhejiang-v1-20260715-development-neighbor-policy-v9-r2.sqlite --model-version zhejiang-v1-20260715-development-neighbor-policy-v9-r2 --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json --spatial-panel development --habitat-features data/prediction-features/zhejiang-v1-20260715-worldcover-h3-r6-continuous-v2.json --habitat-model zhejiang_worldcover_hellinger_kernel_v1 --write-neighbor-policy-oof-cache data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite --neighbor-policy-preregistration docs/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2-preregistration.json --workers 4 --evaluation-only --no-publish --confirm-coordinate-system bd09",
+    "candidateScoring": "node tools/score-zhejiang-neighbor-policy-oof-cache.js --cache data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2.sqlite --snapshot data/prediction-snapshots/zhejiang-v1-20260715.sqlite --spatial-split-manifest docs/zhejiang-v1-20260715-spatial-splits.json --preregistration docs/zhejiang-v1-20260715-neighbor-policy-oof-v9-r2-preregistration.json --output data/prediction-models/development-cache/zhejiang-v1-20260715-neighbor-policy-candidates-v9-r2.json"
+  }
+}

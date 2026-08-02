@@ -36,6 +36,7 @@ const {
   analyzeOccurrenceEvents,
   buildPredictionArtifact,
   cliResultSummary,
+  compactSpatialCalibrationRow,
   createArtifactSchema,
   createTrainingSnapshot,
   crossFitSpatialCalibrators,
@@ -309,6 +310,36 @@ test("nested calibration guard rejects harmful scopes and retains non-degrading 
   assert.equal(guarded.summary.acceptedCount, 1);
   assert.equal(guarded.summary.rejectedCount, 1);
   assert.equal(guarded.summary.identityCount, 1);
+});
+
+test("spatial calibration rows discard neighbor and administrative evidence", () => {
+  const compact = compactSpatialCalibrationRow({
+    contextIndex: 7,
+    taxonId: "4356",
+    positiveCount: 250,
+    actualPositive: 2,
+    total: 10,
+    rawProbability: 0.2,
+    baselineProbability: 0.1,
+    deepestLevel: "habitat_continuous",
+    adminEvidence: { city: { exposure: 10, detections: 2 } },
+    habitatEvidence: { exposure: 10, detections: 2 },
+    neighborPolicyEvidence: Array.from({ length: 4 }, () => ({
+      channels: Array.from({ length: 24 }, () => ({ detections: 1 }))
+    }))
+  });
+  assert.deepEqual(compact, {
+    contextIndex: 7,
+    taxonId: "4356",
+    positiveCount: 250,
+    actualPositive: 2,
+    total: 10,
+    rawProbability: 0.2,
+    baselineProbability: 0.1,
+    deepestLevel: "habitat_continuous"
+  });
+  assert.equal("adminEvidence" in compact, false);
+  assert.equal("neighborPolicyEvidence" in compact, false);
 });
 
 test("spatial calibration reuses cached rows, cross-fits five folds, and keeps inputs immutable", () => {
@@ -1270,6 +1301,95 @@ test("continuous habitat keeps reports and detections conserved without virtual 
       WHERE space_units.level = 'grid_r6'
     `).get().count,
     sourceObservationCount
+  );
+  artifact.close();
+  source.close();
+});
+
+test("continuous habitat keeps non-spatial reports at administrative fallback without dereferencing a missing grid", () => {
+  const directory = testDirectory("continuous-habitat-invalid-coordinate");
+  const sourcePath = join(directory, "source.sqlite");
+  createSourceDatabase(sourcePath, {
+    reportCount: 24,
+    yearSpan: 3,
+    observerModulo: 24
+  });
+  const source = new DatabaseSync(sourcePath);
+  source.prepare(
+    "UPDATE reports SET point_id = 'invalid-point', longitude = 0, latitude = 0 WHERE report_id = 'report-0'"
+  ).run();
+  const quality = inspectSnapshotQuality(source, {
+    minimumNormalReports: 1,
+    minimumCompleteCoverage: 1,
+    minimumCoordinateCoverage: 0.9,
+    minimumDateCoverage: 1,
+    coordinateSystemConfirmed: true
+  });
+  const h3Indexes = [...new Set(source.prepare(
+    "SELECT longitude, latitude FROM reports WHERE report_id <> 'report-0' ORDER BY report_id"
+  ).all().map((row) => {
+    const coordinate = bd09ToWgs84(row.longitude, row.latitude);
+    return gridCell(coordinate.longitude, coordinate.latitude, "grid_r6").h3Index;
+  }))].sort();
+  const fractions = {
+    "10": 0.4,
+    "20": 0.1,
+    "30": 0,
+    "40": 0.2,
+    "50": 0.1,
+    "60": 0,
+    "70": 0,
+    "80": 0.2,
+    "90": 0,
+    "95": 0,
+    "100": 0
+  };
+  const habitatFeatureSet = validateHabitatFeatureSet({
+    schemaVersion: CONTINUOUS_HABITAT_FEATURE_SCHEMA_VERSION,
+    kind: CONTINUOUS_HABITAT_FEATURE_KIND,
+    contract: CONTINUOUS_HABITAT_FEATURE_CONTRACT,
+    snapshotSha256: "a".repeat(64),
+    tileManifestSha256: "b".repeat(64),
+    generationImplementationSha256: "c".repeat(64),
+    cells: h3Indexes.map((h3Index) => ({
+      h3Index,
+      coverage: 1,
+      classFractions: fractions
+    }))
+  });
+  const artifact = new DatabaseSync(":memory:");
+  createArtifactSchema(artifact);
+  const options = {
+    ...DEFAULT_OPTIONS,
+    dataCutoffDate: quality.report.dataCutoffDate,
+    habitatFeatureSet,
+    habitatModel: CONTINUOUS_HABITAT_KERNEL_CONTRACT.id,
+    continuousHabitatKernel: CONTINUOUS_HABITAT_KERNEL_CONTRACT
+  };
+  const training = insertTrainingRows(
+    source,
+    artifact,
+    quality.pointStats,
+    quality.locationNormalization,
+    quality.report,
+    options
+  );
+  const sourceReportCount = Number(source.prepare("SELECT COUNT(*) count FROM reports").get().count);
+  const sourceObservationCount = Number(source.prepare("SELECT COUNT(*) count FROM observations").get().count);
+  assert.equal(training.stats.insertedReports, sourceReportCount);
+  assert.equal(training.stats.habitat.assignedReports, sourceReportCount - 1);
+  assert.equal(training.stats.habitat.coverage, (sourceReportCount - 1) / sourceReportCount);
+  assert.equal(
+    artifact.prepare("SELECT COUNT(*) count FROM training_reports WHERE grid_r6_unit IS NULL").get().count,
+    1
+  );
+  assert.equal(
+    artifact.prepare("SELECT COUNT(*) count FROM training_detections").get().count,
+    sourceObservationCount
+  );
+  assert.equal(
+    [...training.registry.units.values()].filter((unit) => unit.level === "habitat").length,
+    0
   );
   artifact.close();
   source.close();
