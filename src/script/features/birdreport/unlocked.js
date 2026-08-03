@@ -229,6 +229,16 @@ function renderUnlockedSpeciesList() {
   module.className = "unlocked-species-module";
   module.style.setProperty("--unlocked-visible-rows", String(UNLOCKED_SPECIES_VISIBLE_ROW_COUNT));
   module.setAttribute("aria-label", "全部未解锁鸟种列表");
+  module.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-unlocked-map-taxon]");
+    if (!button) return;
+    event.stopPropagation();
+    runtime.openBirdMapForSpecies?.({
+      taxonId: button.dataset.unlockedMapTaxon,
+      commonName: button.dataset.unlockedMapName,
+      latinname: button.dataset.unlockedMapScientific
+    });
+  });
   module.append(createUnlockedSpeciesModuleHeader(missing.length));
 
   if (!state.unlockedSpeciesTableVisible) {
@@ -361,6 +371,15 @@ function renderUnlockedSpeciesLocationPanel(species, context = {}) {
         <strong>浙江历史记录</strong>
         <span>${escapeHtml(reportCount.toLocaleString("zh-CN"))}</span>
       </div>
+    </div>
+    <div class="unlocked-map-action">
+      <button
+        type="button"
+        class="ghost"
+        data-unlocked-map-taxon="${escapeHtml(String(species?.taxon_id || species?.taxonid || ""))}"
+        data-unlocked-map-name="${escapeHtml(species?.taxonname || "该鸟种")}"
+        data-unlocked-map-scientific="${escapeHtml(species?.latinname || "")}"
+      >在地图查看浙江近两年地点</button>
     </div>
   `;
 

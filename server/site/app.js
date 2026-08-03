@@ -3,9 +3,11 @@ const { createReadStream, existsSync, statSync } = require("node:fs");
 const { extname, join, normalize, relative: relativePath, resolve, sep } = require("node:path");
 
 const { adminPage, changePasswordPage, loginPage } = require("./pages");
+const { handleMapApi } = require("./map-api");
+const { createBirdMapStore } = require("./map-store");
 const {
   changeUserPassword,
-  clearLoginFailures,
+  clearLoginIpFailures,
   createSession,
   createUser,
   deleteSession,
@@ -13,9 +15,9 @@ const {
   getUserById,
   getUserByUsername,
   initializeSiteDatabase,
-  isLoginLocked,
+  isLoginIpLocked,
   listUsers,
-  recordLoginFailure,
+  recordLoginIpFailure,
   resetUserPassword,
   setUserDisabled,
   toPublicUser,
@@ -24,6 +26,7 @@ const {
 } = require("./store");
 
 const DEFAULT_SECURITY = {
+  loginFailureWindowMs: 15 * 60 * 1000,
   lockoutMs: 15 * 60 * 1000,
   maxLoginFailures: 5,
   sessionTtlMs: 12 * 60 * 60 * 1000
@@ -126,14 +129,21 @@ function createSiteServer(options = {}) {
   const birdreportCookieJars = options.birdreportCookieJars || new Map();
   const secureCookies = Boolean(options.secureCookies || process.env.NODE_ENV === "production");
   const fetchImpl = options.fetchImpl || fetch;
+  const ownsMapStore = !options.mapStore;
+  const mapStore = options.mapStore || createBirdMapStore(options.mapDatabasePath || join(projectRoot, "data", "bird-map.sqlite"));
+  const amapJsKey = String(options.amapJsKey || process.env.BEAUBIRD_AMAP_JS_KEY || "").trim();
+  const amapSecurityCode = String(options.amapSecurityCode || process.env.BEAUBIRD_AMAP_SECURITY_CODE || "").trim();
 
-  return http.createServer(async (request, response) => {
+  const server = http.createServer(async (request, response) => {
     try {
       await routeRequest({
+        amapJsKey,
+        amapSecurityCode,
         database,
         birdreportRateLimiter,
         birdreportCookieJars,
         fetchImpl,
+        mapStore,
         projectRoot,
         request,
         requestLimits,
@@ -143,6 +153,12 @@ function createSiteServer(options = {}) {
         upstreamLimits
       });
     } catch (error) {
+      if (error instanceof UnsupportedMediaTypeError) {
+        return json(response, 415, { error: "Content-Type 必须为 application/json。" });
+      }
+      if (error instanceof MalformedJsonError) {
+        return json(response, 400, { error: "请求体必须是有效的 JSON 对象。" });
+      }
       if (error instanceof RequestBodyTooLargeError) {
         return json(response, 413, { error: "请求体过大。" });
       }
@@ -159,6 +175,8 @@ function createSiteServer(options = {}) {
       json(response, 500, { error: "服务器内部错误。" });
     }
   });
+  if (ownsMapStore) server.once("close", () => mapStore.close());
+  return server;
 }
 
 async function routeRequest(context) {
@@ -226,6 +244,19 @@ async function routeRequest(context) {
     }
     return handleAdminApi(context, pathname);
   }
+  if (request.method === "GET" && pathname.startsWith("/api/map/")) {
+    const result = handleMapApi({
+      amapJsKey: context.amapJsKey,
+      amapSecurityCode: context.amapSecurityCode,
+      mapStore: context.mapStore,
+      pathname,
+      url
+    });
+    return json(response, result.status, result.payload);
+  }
+  if (pathname.startsWith("/_AMapService")) {
+    return proxyAmapSecurity(context, pathname, url);
+  }
   if (pathname.startsWith("/api/birdreport/")) {
     return proxyBirdreport(context, pathname);
   }
@@ -246,22 +277,25 @@ async function routeRequest(context) {
 async function handleLogin(context) {
   const { database, request, response, security } = context;
   const body = await readJson(request, context.requestLimits);
-  const username = String(body.username || "").trim();
+  if (typeof body.username !== "string" || typeof body.password !== "string") {
+    return json(response, 400, { error: "用户名和密码必须是字符串。" });
+  }
+  const username = body.username.trim();
   const ip = getClientIp(request);
 
-  if (isLoginLocked(database, username, ip)) {
+  if (isLoginIpLocked(database, ip)) {
     writeAuditLog(database, { action: "login_locked", ip, details: { username } });
     return json(response, 429, { error: "登录尝试过多，请稍后再试。" });
   }
 
   const user = getUserByUsername(database, username);
   if (!user || user.disabled || !verifyPassword(body.password, user)) {
-    recordLoginFailure(database, username, ip, security);
+    recordLoginIpFailure(database, ip, security);
     writeAuditLog(database, { action: "login_failed", targetUserId: user?.id, ip, details: { username } });
     return json(response, 401, { error: "用户名或密码错误。" });
   }
 
-  clearLoginFailures(database, username, ip);
+  clearLoginIpFailures(database, ip);
   const session = createSession(database, user.id, security.sessionTtlMs);
   setSessionCookie(response, session.id, context.secureCookies, security.sessionTtlMs);
   writeAuditLog(database, { actorUserId: user.id, action: "login_success", targetUserId: user.id, ip });
@@ -334,6 +368,31 @@ async function handleAdminApi(context, pathname) {
     return json(response, 200, result);
   }
   return json(response, 404, { error: "Not found" });
+}
+
+async function proxyAmapSecurity(context, pathname, requestUrl) {
+  if (context.request.method !== "GET") return json(context.response, 405, { error: "Method not allowed" });
+  if (!context.amapSecurityCode) return json(context.response, 503, { error: "高德地图安全代理尚未配置。" });
+  const upstreamPath = pathname.slice("/_AMapService".length) || "/";
+  const upstreamUrl = new URL(upstreamPath, "https://restapi.amap.com");
+  for (const [key, value] of requestUrl.searchParams) {
+    if (key !== "jscode") upstreamUrl.searchParams.append(key, value);
+  }
+  upstreamUrl.searchParams.set("jscode", context.amapSecurityCode);
+  const upstream = await fetchUpstream(context, upstreamUrl, {
+    method: "GET",
+    headers: {
+      accept: context.request.headers.accept || "*/*",
+      "user-agent": context.request.headers["user-agent"] || "BeauBird Site"
+    }
+  });
+  const responseBody = await readUpstreamBuffer(upstream, context.upstreamLimits.maxResponseBytes);
+  context.response.writeHead(upstream.status, {
+    "content-type": upstream.headers.get("content-type") || "application/octet-stream",
+    "cache-control": upstream.headers.get("cache-control") || "private, max-age=300",
+    "x-content-type-options": "nosniff"
+  });
+  context.response.end(responseBody);
 }
 
 async function proxyBirdreport(context, pathname) {
@@ -922,11 +981,24 @@ async function readRaw(request, limits = DEFAULT_REQUEST_LIMITS) {
 }
 
 async function readJson(request, limits) {
+  const contentType = String(request.headers["content-type"] || "").trim();
+  if (!/^application\/json(?:\s*;|$)/i.test(contentType)) {
+    throw new UnsupportedMediaTypeError();
+  }
   const raw = await readRaw(request, limits);
   if (!raw.length) {
-    return {};
+    throw new MalformedJsonError();
   }
-  return JSON.parse(raw.toString("utf8"));
+  let value;
+  try {
+    value = JSON.parse(raw.toString("utf8"));
+  } catch {
+    throw new MalformedJsonError();
+  }
+  if (!value || Array.isArray(value) || typeof value !== "object") {
+    throw new MalformedJsonError();
+  }
+  return value;
 }
 
 function getBirdreportRateLimitKey(context) {
@@ -966,6 +1038,8 @@ function cleanupRateLimitBuckets(buckets, now) {
 
 class RequestBodyTooLargeError extends Error {}
 class RequestBodyTimeoutError extends Error {}
+class UnsupportedMediaTypeError extends Error {}
+class MalformedJsonError extends Error {}
 class UpstreamTimeoutError extends Error {}
 class UpstreamBodyTooLargeError extends Error {}
 
@@ -977,7 +1051,7 @@ function setBaseHeaders(response, contentType) {
   if (contentType.startsWith("text/html")) {
     response.setHeader(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://api.ebird.org https://api.birdreport.cn; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://webapi.amap.com https://jsapi-service.amap.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://*.amap.com; img-src 'self' data: blob: https://*.amap.com https://*.autonavi.com; connect-src 'self' https://api.ebird.org https://api.birdreport.cn https://*.amap.com https://*.autonavi.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
     );
   }
 }

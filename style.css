@@ -18,6 +18,7 @@
   --primary-soft: oklch(94% 0.03 175);
   --accent: oklch(45% 0.085 245);
   --accent-monitor: oklch(58% 0.12 65);
+  --accent-map: oklch(46% 0.08 170);
   --accent-unlocked: oklch(52% 0.1 248);
   --accent-ppt: oklch(51% 0.11 305);
   --accent-ebird: oklch(47% 0.09 148);
@@ -82,6 +83,7 @@
     --primary-soft: #e3f4ef;
     --accent: #346eb8;
     --accent-monitor: #b06e18;
+    --accent-map: #247566;
     --accent-unlocked: #3a6fbd;
     --accent-ppt: #7d5bb8;
     --accent-ebird: #2a7a4d;
@@ -277,6 +279,10 @@ body {
   --nav-accent: var(--accent-monitor);
 }
 
+.app-quicknav-btn[data-target="birdMapSection"] {
+  --nav-accent: var(--accent-map);
+}
+
 .app-quicknav-btn[data-target="unlockedSection"] {
   --nav-accent: var(--accent-unlocked);
 }
@@ -383,6 +389,10 @@ body {
 
 #monitorSection {
   --section-accent: var(--accent-monitor);
+}
+
+#birdMapSection {
+  --section-accent: var(--accent-map);
 }
 
 #unlockedSection {
@@ -2480,6 +2490,558 @@ canvas {
 .day-cell.empty {
   background: transparent;
   border-color: transparent;
+}
+
+.bird-map-panel-body {
+  gap: 12px;
+}
+
+.bird-map-toolbar {
+  display: grid;
+  grid-template-columns: auto minmax(260px, 420px) minmax(210px, 1fr);
+  align-items: end;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--controls-border);
+  border-radius: 12px;
+  background: var(--controls-surface);
+}
+
+.bird-map-mode-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.bird-map-mode-controls button {
+  min-height: 34px;
+  padding: 6px 11px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.bird-map-mode-controls button.is-active {
+  border-color: color-mix(in oklch, var(--accent-map) 30%, var(--border));
+  background: color-mix(in oklch, var(--accent-map) 12%, var(--surface));
+  color: var(--primary-strong);
+  box-shadow: var(--shadow-subtle);
+}
+
+.bird-map-search-control {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.bird-map-search-control > label {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.bird-map-search-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.bird-map-search-input-row input {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.bird-map-search-input-row button {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.bird-map-species-results {
+  position: absolute;
+  z-index: 850;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--shadow-panel-active);
+}
+
+.bird-map-species-results > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
+  text-align: left;
+}
+
+.bird-map-species-results > button:hover,
+.bird-map-species-results > button:focus-visible {
+  background: color-mix(in oklch, var(--accent-map) 9%, var(--panel-muted));
+}
+
+.bird-map-species-results > button > span:first-child {
+  display: grid;
+  gap: 1px;
+}
+
+.bird-map-species-results small,
+.bird-map-search-empty {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.bird-map-search-empty {
+  padding: 12px;
+  text-align: center;
+}
+
+.bird-map-toolbar-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.bird-map-filter-chip {
+  flex: 0 0 auto;
+  max-width: 180px;
+  overflow: hidden;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in oklch, var(--accent-map) 30%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent-map) 10%, var(--surface));
+  color: var(--primary-strong);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bird-map-message {
+  min-height: 20px;
+  margin: 0;
+}
+
+.bird-map-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 350px);
+  min-height: 650px;
+  overflow: hidden;
+  border: 1px solid var(--section-divider);
+  border-radius: 14px;
+  background: var(--panel-muted);
+}
+
+.bird-map-stage {
+  position: relative;
+  min-width: 0;
+  min-height: 650px;
+  border-right: 1px solid var(--section-divider);
+  background: color-mix(in oklch, var(--accent-map) 6%, var(--panel-muted));
+}
+
+.bird-map-canvas {
+  width: 100%;
+  height: 100%;
+  min-height: 650px;
+  outline: none;
+}
+
+.bird-map-canvas:focus-visible {
+  box-shadow: inset var(--focus-ring);
+}
+
+.bird-map-canvas-state {
+  position: absolute;
+  z-index: 500;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  padding: 32px;
+  background: color-mix(in oklch, var(--accent-map) 5%, var(--panel-muted));
+  color: var(--muted);
+  text-align: center;
+}
+
+.bird-map-canvas-state strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.bird-map-canvas-state[hidden] {
+  display: none;
+}
+
+.bird-map-snapshot-note {
+  position: absolute;
+  z-index: 480;
+  left: 12px;
+  bottom: 12px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in oklch, var(--border-strong) 75%, transparent);
+  border-radius: 7px;
+  background: color-mix(in oklch, var(--surface) 92%, transparent);
+  color: var(--muted);
+  font-size: 0.7rem;
+  box-shadow: var(--shadow-subtle);
+  pointer-events: none;
+}
+
+.bird-map-marker {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--accent-map);
+  box-shadow: 0 3px 10px rgba(18, 40, 36, 0.28);
+}
+
+.bird-map-marker > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+
+.bird-map-marker:focus-visible {
+  box-shadow: var(--focus-ring), 0 3px 10px rgba(18, 40, 36, 0.28);
+}
+
+.bird-map-cluster {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 2px solid color-mix(in oklch, var(--surface) 86%, transparent);
+  border-radius: 50%;
+  background: var(--primary-strong);
+  color: var(--surface);
+  font-size: 0.75rem;
+  font-weight: 800;
+  box-shadow: 0 3px 12px rgba(18, 40, 36, 0.28);
+}
+
+.bird-map-inspector {
+  display: grid;
+  grid-template-rows: minmax(210px, 0.72fr) minmax(300px, 1.28fr);
+  min-width: 0;
+  max-height: 650px;
+  background: var(--surface);
+}
+
+.bird-map-visible-section,
+.bird-map-detail {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.bird-map-visible-section {
+  border-bottom: 1px solid var(--section-divider);
+}
+
+.bird-map-inspector-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.bird-map-inspector-heading h3,
+.bird-map-detail h3,
+.bird-map-detail h4 {
+  margin: 0;
+}
+
+.bird-map-inspector-heading h3 {
+  font-size: 0.9rem;
+}
+
+.bird-map-inspector-heading > span {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.bird-map-visible-list {
+  display: grid;
+  gap: 3px;
+}
+
+.bird-map-place-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
+  text-align: left;
+}
+
+.bird-map-place-row:hover,
+.bird-map-place-row:focus-visible {
+  border-color: color-mix(in oklch, var(--accent-map) 20%, var(--border));
+  background: color-mix(in oklch, var(--accent-map) 7%, var(--panel-muted));
+}
+
+.bird-map-place-row > span:first-child,
+.bird-map-place-meta {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bird-map-place-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bird-map-place-row small,
+.bird-map-place-meta {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.bird-map-place-meta {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+.bird-map-detail {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.bird-map-detail-header {
+  display: grid;
+  gap: 5px;
+}
+
+.bird-map-detail-kicker {
+  color: var(--primary);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.bird-map-detail-header h3 {
+  font-size: 1.12rem;
+  line-height: 1.35;
+}
+
+.bird-map-detail-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.bird-map-detail-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+.bird-map-detail-stats span {
+  padding: 4px 7px;
+  border-radius: 7px;
+  background: var(--panel-muted);
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.bird-map-detail-section {
+  display: grid;
+  gap: 8px;
+}
+
+.bird-map-detail-section h4 {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--section-divider);
+  font-size: 0.82rem;
+}
+
+.bird-map-record-list,
+.bird-map-species-list {
+  display: grid;
+  gap: 6px;
+}
+
+.bird-map-record {
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-muted);
+}
+
+.bird-map-record > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.72rem;
+}
+
+.bird-map-record > div span,
+.bird-map-record p {
+  color: var(--muted);
+}
+
+.bird-map-record p {
+  margin: 5px 0 0;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.bird-map-species-list button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
+  text-align: left;
+}
+
+.bird-map-species-list button:hover,
+.bird-map-species-list button:focus-visible {
+  border-color: var(--border);
+  background: var(--panel-muted);
+}
+
+.bird-map-species-list button span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-align: right;
+}
+
+.bird-map-detail-loading {
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.unlocked-map-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+@media (max-width: 1180px) {
+  .bird-map-toolbar {
+    grid-template-columns: auto minmax(250px, 1fr);
+  }
+
+  .bird-map-toolbar-status {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .bird-map-workspace {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+}
+
+@media (max-width: 860px) {
+  .bird-map-toolbar {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .bird-map-mode-controls {
+    justify-self: start;
+  }
+
+  .bird-map-toolbar-status {
+    grid-column: auto;
+  }
+
+  .bird-map-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .bird-map-stage,
+  .bird-map-canvas {
+    min-height: 500px;
+  }
+
+  .bird-map-stage {
+    border-right: 0;
+    border-bottom: 1px solid var(--section-divider);
+  }
+
+  .bird-map-inspector {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: minmax(320px, auto);
+    max-height: none;
+  }
+
+  .bird-map-visible-section {
+    border-right: 1px solid var(--section-divider);
+    border-bottom: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .bird-map-mode-controls {
+    width: 100%;
+  }
+
+  .bird-map-mode-controls button {
+    flex: 1 1 50%;
+  }
+
+  .bird-map-stage,
+  .bird-map-canvas {
+    min-height: 420px;
+  }
+
+  .bird-map-inspector {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+  }
+
+  .bird-map-visible-section {
+    border-right: 0;
+    border-bottom: 1px solid var(--section-divider);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

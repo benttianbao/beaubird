@@ -41,6 +41,8 @@ ml/bird-prediction/__pycache__/
 tools/__pycache__/
 
 graphify-out/
+data/bird-map.sqlite*
+server/data/
 
 server-site.*.log
 *.log

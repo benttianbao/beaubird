@@ -28,6 +28,7 @@ export function installBootstrap(runtime) {
   const importText = (...args) => runtime.importText(...args);
   const initBirdreportProxy = (...args) => runtime.initBirdreportProxy(...args);
   const initEmbeddedAndroidQuickNav = (...args) => runtime.initEmbeddedAndroidQuickNav(...args);
+  const initBirdMap = (...args) => runtime.initBirdMap(...args);
   const initZhejiangRareSpeciesDailyQuery = (...args) => runtime.initZhejiangRareSpeciesDailyQuery(...args);
   const initZhejiangRareSpeciesMonitor = (...args) => runtime.initZhejiangRareSpeciesMonitor(...args);
   const isEmbeddedAndroidApp = (...args) => runtime.isEmbeddedAndroidApp(...args);
@@ -76,6 +77,7 @@ function bootstrap() {
   syncBirdPrepMacaulayOptions();
   initBirdreportProxy();
   initEmbeddedAndroidQuickNav();
+  initBirdMap();
   renderRegionQueryResults();
   renderEbirdSeasonalPrediction();
   renderZhejiangRareSpeciesPanel();

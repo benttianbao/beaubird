@@ -245,6 +245,7 @@ test("site auth and admin pages share the BeauBird product shell", () => {
 test("main tool modules follow the monitoring-first workflow order", () => {
   const order = [
     indexOfRequired(html, 'id="monitorSection"'),
+    indexOfRequired(html, 'id="birdMapSection"'),
     indexOfRequired(html, 'id="unlockedSection"'),
     indexOfRequired(html, 'id="birdPrepSection"'),
     indexOfRequired(html, 'id="ebirdSection"'),
@@ -262,6 +263,7 @@ test("quick navigation follows the same monitoring-first workflow order", () => 
   const targets = Array.from(nav[0].matchAll(/data-target="([^"]+)"/g), (match) => match[1]);
   assert.deepEqual(targets, [
     "monitorSection",
+    "birdMapSection",
     "unlockedSection",
     "birdPrepSection",
     "ebirdSection",
@@ -270,7 +272,7 @@ test("quick navigation follows the same monitoring-first workflow order", () => 
 
   assert.match(
     script,
-    /const sections = \["monitorSection", "unlockedSection", "birdPrepSection", "ebirdSection", "birdreportSection"\]/
+    /const sections = \["monitorSection", "birdMapSection", "unlockedSection", "birdPrepSection", "ebirdSection", "birdreportSection"\]/
   );
 });
 
@@ -497,10 +499,10 @@ test("shared data, utility, and BirdReport core modules load before the app scri
 });
 
 test("frontend shared assets use the current deployment cache version", () => {
-  assert.match(html, /style\.css\?v=20260719-wetland-mist/);
+  assert.match(html, /style\.css\?v=20260802-bird-map/);
   assert.match(html, /beaubird-birdreport-core\.js\?v=20260622-0001/);
   assert.match(html, /bird-prep-ppt-core\.js\?v=20260719-0001/);
-  assert.match(html, /script\.js\?v=20260622-0001/);
+  assert.match(html, /script\.js\?v=20260803-amap-proxy3/);
 });
 
 test("main script consumes shared modules and removes the unused unlocked export overlay", () => {

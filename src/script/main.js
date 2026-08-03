@@ -13,6 +13,7 @@ import { installBirdreportRegions } from "./features/birdreport/regions.js";
 import { installBirdreportQuery } from "./features/birdreport/query.js";
 import { installUnlockedSpecies } from "./features/birdreport/unlocked.js";
 import { installRareMonitor } from "./features/birdreport/rare-monitor.js";
+import { installBirdMap } from "./features/bird-map.js";
 import { installBirdPrepMedia } from "./features/bird-prep/media.js";
 import { installBirdPrepProfiles } from "./features/bird-prep/profiles.js";
 import { installBirdPrepWorkflow } from "./features/bird-prep/workflow.js";
@@ -66,6 +67,7 @@ installBirdreportRegions(runtime);
 installBirdreportQuery(runtime);
 installUnlockedSpecies(runtime);
 installRareMonitor(runtime);
+installBirdMap(runtime);
 installBirdPrepMedia(runtime);
 installBirdPrepProfiles(runtime);
 installBirdPrepWorkflow(runtime);
@@ -235,7 +237,18 @@ const elements = {
   speciesDiscoverySummary: document.querySelector("#speciesDiscoverySummary"),
   speciesDiscoveryContainer: document.querySelector("#speciesDiscoveryContainer"),
   calendarLegend: document.querySelector("#calendarLegend"),
-  calendarHeatmap: document.querySelector("#calendarHeatmap")
+  calendarHeatmap: document.querySelector("#calendarHeatmap"),
+  birdMapModeControls: document.querySelector("#birdMapModeControls"),
+  birdMapDatasetStatus: document.querySelector("#birdMapDatasetStatus"),
+  birdMapSpeciesSearch: document.querySelector("#birdMapSpeciesSearch"),
+  birdMapSpeciesResults: document.querySelector("#birdMapSpeciesResults"),
+  birdMapActiveSpecies: document.querySelector("#birdMapActiveSpecies"),
+  birdMapClearSpecies: document.querySelector("#birdMapClearSpecies"),
+  birdMapMessage: document.querySelector("#birdMapMessage"),
+  birdMapCanvas: document.querySelector("#birdMapCanvas"),
+  birdMapCanvasState: document.querySelector("#birdMapCanvasState"),
+  birdMapVisibleList: document.querySelector("#birdMapVisibleList"),
+  birdMapDetail: document.querySelector("#birdMapDetail")
 };
 
 const EMPTY_STATE_COPY = {

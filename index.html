@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
     <title>BeauBird 观鸟助手</title>
-    <link rel="stylesheet" href="./style.css?v=20260719-wetland-mist" />
+    <link rel="stylesheet" href="./style.css?v=20260802-bird-map" />
   </head>
   <body>
     <div class="workspace-shell">
@@ -30,6 +30,12 @@
                 <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
               </span>
               <span class="quicknav-text">监测</span>
+            </button>
+            <button class="app-quicknav-btn" data-target="birdMapSection" type="button">
+              <span class="quicknav-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="m3 6 5-3 8 3 5-3v15l-5 3-8-3-5 3z"/><path d="M8 3v15M16 6v15"/></svg>
+              </span>
+              <span class="quicknav-text">鸟种地图</span>
             </button>
             <button class="app-quicknav-btn" data-target="unlockedSection" type="button">
               <span class="quicknav-icon" aria-hidden="true">
@@ -102,6 +108,64 @@
           role="dialog"
           aria-label="浙江稀有鸟种观测地点详情"
         ></div>
+
+        <section id="birdMapSection" class="panel workspace-panel bird-map-panel" aria-labelledby="birdMapSectionTitle">
+          <header class="workspace-panel-header">
+            <div class="workspace-panel-title">
+              <p class="workspace-panel-kicker">空间记录</p>
+              <h2 id="birdMapSectionTitle">鸟种地图</h2>
+            </div>
+            <p class="workspace-panel-description">移动地图查看周围鸟点，或按鸟种反查浙江近两年的记录地点。个人模式展示全国历史个人记录。</p>
+          </header>
+
+          <div class="workspace-panel-body bird-map-panel-body">
+            <div class="bird-map-toolbar">
+              <div id="birdMapModeControls" class="bird-map-mode-controls" role="group" aria-label="地图数据范围">
+                <button class="is-active" type="button" data-map-mode="zhejiang" aria-pressed="true">浙江近两年</button>
+                <button class="ghost" type="button" data-map-mode="personal" aria-pressed="false">个人全国</button>
+              </div>
+              <div class="bird-map-search-control">
+                <label for="birdMapSpeciesSearch">按鸟种找地点</label>
+                <div class="bird-map-search-input-row">
+                  <input id="birdMapSpeciesSearch" type="text" placeholder="输入中文名或学名" autocomplete="off" aria-controls="birdMapSpeciesResults" />
+                  <button id="birdMapClearSpecies" class="ghost" type="button" hidden>清除</button>
+                </div>
+                <div id="birdMapSpeciesResults" class="bird-map-species-results" role="listbox" aria-label="匹配鸟种" hidden></div>
+              </div>
+              <div class="bird-map-toolbar-status">
+                <span id="birdMapDatasetStatus">正在读取地图数据...</span>
+                <span id="birdMapActiveSpecies" class="bird-map-filter-chip" hidden></span>
+              </div>
+            </div>
+
+            <p id="birdMapMessage" class="message bird-map-message" aria-live="polite"></p>
+            <div class="bird-map-workspace">
+              <div class="bird-map-stage">
+                <div id="birdMapCanvas" class="bird-map-canvas" tabindex="0" aria-label="可拖动和缩放的鸟种地图"></div>
+                <div id="birdMapCanvasState" class="bird-map-canvas-state" role="status">
+                  <strong>正在准备地图</strong>
+                  <span>读取点位数据与高德地图配置。</span>
+                </div>
+                <div class="bird-map-snapshot-note">静态快照，不代表实时鸟况</div>
+              </div>
+
+              <aside class="bird-map-inspector" aria-label="当前范围鸟点与详情">
+                <section class="bird-map-visible-section" aria-labelledby="birdMapVisibleTitle">
+                  <div class="bird-map-inspector-heading">
+                    <h3 id="birdMapVisibleTitle">当前范围最近鸟点</h3>
+                    <span>最多列出 12 个</span>
+                  </div>
+                  <div id="birdMapVisibleList" class="bird-map-visible-list">
+                    <div class="empty-state"><strong>等待地图</strong><span>地图加载后会显示中心周围的鸟点。</span></div>
+                  </div>
+                </section>
+                <section id="birdMapDetail" class="bird-map-detail" aria-live="polite">
+                  <div class="empty-state"><strong>选择一个鸟点</strong><span>可查看这个地点的最近记录和最近出现的鸟。</span></div>
+                </section>
+              </aside>
+            </div>
+          </div>
+        </section>
 
         <section id="unlockedSection" class="panel workspace-panel birdreport-unlocked-panel" aria-labelledby="unlockedSectionTitle">
           <header class="workspace-panel-header">
@@ -404,6 +468,6 @@
     <script src="./beaubird-birdreport-core.js?v=20260622-0001"></script>
     <script src="./ebird-seasonal-core.js?v=20260507-0004"></script>
     <script src="./bird-prep-ppt-core.js?v=20260719-0001"></script>
-    <script src="./script.js?v=20260622-0001"></script>
+    <script src="./script.js?v=20260803-amap-proxy3"></script>
   </body>
 </html>

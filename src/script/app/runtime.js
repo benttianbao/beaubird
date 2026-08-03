@@ -50,7 +50,7 @@ function initEmbeddedAndroidQuickNav() {
     return;
   }
 
-  const sections = ["monitorSection", "unlockedSection", "birdPrepSection", "ebirdSection", "birdreportSection"]
+  const sections = ["monitorSection", "birdMapSection", "unlockedSection", "birdPrepSection", "ebirdSection", "birdreportSection"]
     .map((id) => document.getElementById(id))
     .filter(Boolean);
 

@@ -37,13 +37,12 @@ function initializeSiteDatabase(databasePath) {
       created_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS login_attempts (
-      username TEXT NOT NULL,
-      ip TEXT NOT NULL,
+    CREATE TABLE IF NOT EXISTS login_ip_attempts (
+      ip TEXT PRIMARY KEY,
       failed_count INTEGER NOT NULL DEFAULT 0,
+      window_started_at INTEGER NOT NULL DEFAULT 0,
       locked_until INTEGER NOT NULL DEFAULT 0,
-      updated_at TEXT NOT NULL,
-      PRIMARY KEY (username, ip)
+      updated_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS audit_logs (
@@ -219,31 +218,40 @@ function getSessionUser(db, sessionId) {
   };
 }
 
-function getLoginAttempt(db, username, ip) {
-  return db.prepare("SELECT * FROM login_attempts WHERE username = ? AND ip = ?").get(normalizeUsername(username), ip);
+function getLoginIpAttempt(db, ip) {
+  return db.prepare("SELECT * FROM login_ip_attempts WHERE ip = ?").get(String(ip || ""));
 }
 
-function isLoginLocked(db, username, ip) {
-  const attempt = getLoginAttempt(db, username, ip);
+function isLoginIpLocked(db, ip) {
+  const attempt = getLoginIpAttempt(db, ip);
   return Boolean(attempt && attempt.locked_until > Date.now());
 }
 
-function recordLoginFailure(db, username, ip, security) {
-  const attempt = getLoginAttempt(db, username, ip);
-  const failedCount = (attempt?.failed_count || 0) + 1;
-  const lockedUntil = failedCount >= security.maxLoginFailures ? Date.now() + security.lockoutMs : 0;
+function recordLoginIpFailure(db, ip, security) {
+  const now = Date.now();
+  const windowMs = Math.max(1, Number(security.loginFailureWindowMs) || Number(security.lockoutMs) || 1);
+  const attempt = getLoginIpAttempt(db, ip);
+  const expired =
+    !attempt ||
+    (attempt.locked_until > 0 && attempt.locked_until <= now) ||
+    attempt.window_started_at + windowMs <= now;
+  const windowStartedAt = expired ? now : attempt.window_started_at;
+  const failedCount = (expired ? 0 : attempt.failed_count) + 1;
+  const lockedUntil = failedCount >= security.maxLoginFailures ? now + security.lockoutMs : 0;
+
   db.prepare(
-    `INSERT INTO login_attempts (username, ip, failed_count, locked_until, updated_at)
+    `INSERT INTO login_ip_attempts (ip, failed_count, window_started_at, locked_until, updated_at)
      VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(username, ip) DO UPDATE SET
+     ON CONFLICT(ip) DO UPDATE SET
        failed_count = excluded.failed_count,
+       window_started_at = excluded.window_started_at,
        locked_until = excluded.locked_until,
        updated_at = excluded.updated_at`
-  ).run(normalizeUsername(username), ip, failedCount, lockedUntil, nowIso());
+  ).run(String(ip || ""), failedCount, windowStartedAt, lockedUntil, nowIso());
 }
 
-function clearLoginFailures(db, username, ip) {
-  db.prepare("DELETE FROM login_attempts WHERE username = ? AND ip = ?").run(normalizeUsername(username), ip);
+function clearLoginIpFailures(db, ip) {
+  db.prepare("DELETE FROM login_ip_attempts WHERE ip = ?").run(String(ip || ""));
 }
 
 function writeAuditLog(db, entry) {
@@ -263,7 +271,7 @@ module.exports = {
   assertPassword,
   assertUsername,
   changeUserPassword,
-  clearLoginFailures,
+  clearLoginIpFailures,
   createSession,
   createUser,
   deleteSession,
@@ -272,9 +280,9 @@ module.exports = {
   getUserById,
   getUserByUsername,
   initializeSiteDatabase,
-  isLoginLocked,
+  isLoginIpLocked,
   listUsers,
-  recordLoginFailure,
+  recordLoginIpFailure,
   resetUserPassword,
   setUserDisabled,
   toPublicUser,

@@ -97,6 +97,14 @@ test("serves the generated root script bundle byte-for-byte after login", async 
       assert.match(bundle.headers.get("content-type") || "", /^text\/javascript\b/);
       assert.equal(bundle.headers.get("x-content-type-options"), "nosniff");
 
+      const home = await request("/", {
+        headers: { cookie: cookieFrom(login) }
+      });
+      assert.equal(home.status, 200);
+      assert.match(home.headers.get("content-security-policy") || "", /script-src[^;]*'unsafe-eval'[^;]*webapi\.amap\.com/);
+      assert.match(home.headers.get("content-security-policy") || "", /script-src[^;]*jsapi-service\.amap\.com/);
+      assert.match(home.headers.get("content-security-policy") || "", /worker-src 'self' blob:/);
+
       const servedBytes = Buffer.from(await bundle.arrayBuffer());
       const rootBytes = readFileSync(join(process.cwd(), "script.js"));
       assert.deepEqual(servedBytes, rootBytes);
@@ -231,7 +239,7 @@ test("returns a clear validation error when a new password is too weak", async (
   }
 });
 
-test("locks login attempts after repeated failures for the same username and ip", async () => {
+test("rate limits failed logins by source ip without locking the account for other clients", async () => {
   const temp = createTempDatabase();
   try {
     const db = initializeSiteDatabase(temp.databasePath);
@@ -258,12 +266,13 @@ test("locks login attempts after repeated failures for the same username and ip"
           assert.equal(failed.status, 401);
         }
 
-        const locked = await request("/api/auth/login", {
+        const lockedAcrossUsernames = await request("/api/auth/login", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+          body: JSON.stringify({ username: "another-user", password: "wrong-password" })
         });
-        assert.equal(locked.status, 429);
+        assert.equal(lockedAcrossUsernames.status, 429);
+        const locked = lockedAcrossUsernames;
         assert.equal((await json(locked)).error, "登录尝试过多，请稍后再试。");
       }
     );
@@ -498,6 +507,96 @@ test("rejects request bodies over the configured limit", async () => {
   }
 });
 
+test("rejects non-JSON and malformed JSON login requests as client errors", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    await withServer({ database: db, projectRoot: process.cwd() }, async ({ request }) => {
+      const form = await request("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "username=admin&password=wrong"
+      });
+      assert.equal(form.status, 415);
+      assert.equal((await json(form)).error, "Content-Type 必须为 application/json。");
+
+      const malformed = await request("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: '{"username":"admin"'
+      });
+      assert.equal(malformed.status, 400);
+      assert.equal((await json(malformed)).error, "请求体必须是有效的 JSON 对象。");
+
+      const nonObject = await request("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "[]"
+      });
+      assert.equal(nonObject.status, 400);
+
+      const invalidFields = await request("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: { $gt: "" }, password: "wrong" })
+      });
+      assert.equal(invalidFields.status, 400);
+      assert.equal((await json(invalidFields)).error, "用户名和密码必须是字符串。");
+    });
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("resets the source-ip failure counter after the bounded lockout window", async () => {
+  const temp = createTempDatabase();
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+
+    await withServer(
+      {
+        database: db,
+        projectRoot: process.cwd(),
+        security: { maxLoginFailures: 2, lockoutMs: 10, loginFailureWindowMs: 10 }
+      },
+      async ({ request }) => {
+        for (let index = 0; index < 2; index += 1) {
+          const failed = await request("/api/auth/login", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ username: "admin", password: "wrong-password" })
+          });
+          assert.equal(failed.status, 401);
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 25));
+
+        const firstFailureInNewWindow = await request("/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: "admin", password: "wrong-password" })
+        });
+        assert.equal(firstFailureInNewWindow.status, 401);
+
+        const recovered = await request("/api/auth/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+        });
+        assert.equal(recovered.status, 200);
+      }
+    );
+  } finally {
+    temp.cleanup();
+  }
+});
+
 test("locks login attempts by the reverse-proxy real ip instead of spoofable forwarded chains", async () => {
   const temp = createTempDatabase();
   try {
@@ -537,6 +636,16 @@ test("locks login attempts by the reverse-proxy real ip instead of spoofable for
           body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
         });
         assert.equal(locked.status, 429);
+
+        const allowedFromAnotherIp = await request("/api/auth/login", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-real-ip": "198.51.100.6"
+          },
+          body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+        });
+        assert.equal(allowedFromAnotherIp.status, 200);
       }
     );
   } finally {
@@ -1112,6 +1221,86 @@ test("serves the all birds profile data and shards as static assets", async () =
         await shardIndex.text(),
         '{"names":{"白鹭":{"name":"白鹭","shard":"shard-000.json","script":"shard-000.js"}}}'
       );
+    });
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test("serves authenticated bird map APIs and keeps the AMap security code server-side", async () => {
+  const temp = createTempDatabase();
+  const upstreamUrls = [];
+  try {
+    const db = initializeSiteDatabase(temp.databasePath);
+    createUser(db, {
+      username: "admin",
+      password: "AdminPass123!",
+      role: "admin",
+      mustChangePassword: false
+    });
+    const point = {
+      placeId: "birdreport:100",
+      name: "西湖",
+      longitude: 120.12,
+      latitude: 30.26,
+      reportCount: 2,
+      speciesCount: 1,
+      latestAt: "2026-07-15 08:00"
+    };
+    const mapStore = {
+      available: true,
+      getMetadata() {
+        return { window_start_date: "2024-07-16", window_end_date: "2026-07-15", place_count: "1" };
+      },
+      listPoints() {
+        return { points: [point], truncated: false };
+      },
+      searchSpecies() {
+        return [{ taxonId: "1", commonName: "小白鹭", placeCount: 1 }];
+      },
+      getPlace(placeId) {
+        return placeId === point.placeId ? point : null;
+      }
+    };
+
+    await withServer({
+      database: db,
+      projectRoot: process.cwd(),
+      mapStore,
+      amapJsKey: "public-js-key",
+      amapSecurityCode: "private-security-code",
+      fetchImpl: async (url) => {
+        upstreamUrls.push(String(url));
+        return new Response("ok", { status: 200, headers: { "content-type": "text/plain" } });
+      }
+    }, async ({ request }) => {
+      assert.equal((await request("/api/map/status")).status, 401);
+      const login = await request("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username: "admin", password: "AdminPass123!" })
+      });
+      const headers = { cookie: cookieFrom(login) };
+
+      const config = await json(await request("/api/map/config", { headers }));
+      assert.equal(config.enabled, true);
+      assert.equal(config.key, "public-js-key");
+      assert.equal(config.securityServiceHost, "/_AMapService");
+      assert.doesNotMatch(JSON.stringify(config), /private-security-code/);
+
+      const points = await json(await request("/api/map/points?west=118&south=27&east=123&north=32", { headers }));
+      assert.equal(points.points[0].placeId, "birdreport:100");
+      const detail = await json(await request("/api/map/points/birdreport%3A100", { headers }));
+      assert.equal(detail.place.name, "西湖");
+
+      const proxied = await request("/_AMapService/v4/map/styles?key=public-js-key&jscode=spoofed", { headers });
+      assert.equal(proxied.status, 200);
+      assert.equal(await proxied.text(), "ok");
+      assert.equal(upstreamUrls.length, 1);
+      const upstreamUrl = new URL(upstreamUrls[0]);
+      assert.equal(upstreamUrl.origin, "https://restapi.amap.com");
+      assert.equal(upstreamUrl.pathname, "/v4/map/styles");
+      assert.equal(upstreamUrl.searchParams.get("jscode"), "private-security-code");
     });
   } finally {
     temp.cleanup();
