@@ -7,6 +7,7 @@ const html = readFileSync("index.html", "utf8");
 const css = readFileSync("style.css", "utf8");
 const script = readScriptSourceCorpus();
 const scriptBundle = readFileSync("script.js", "utf8");
+const birdMapSource = readFileSync("src/script/features/bird-map.js", "utf8");
 const birdreportCore = readFileSync("beaubird-birdreport-core.js", "utf8");
 const siteApp = readFileSync("server/site/app.js", "utf8");
 const sitePages = readFileSync("server/site/pages.js", "utf8");
@@ -502,7 +503,17 @@ test("frontend shared assets use the current deployment cache version", () => {
   assert.match(html, /style\.css\?v=20260802-bird-map/);
   assert.match(html, /beaubird-birdreport-core\.js\?v=20260622-0001/);
   assert.match(html, /bird-prep-ppt-core\.js\?v=20260719-0001/);
-  assert.match(html, /script\.js\?v=20260803-amap-proxy3/);
+  assert.match(html, /script\.js\?v=20260803-map-load2/);
+});
+
+test("bird map bounds loading is cancellable, bounded and accessible", () => {
+  assert.match(birdMapSource, /let pointRequestController = null/);
+  assert.match(birdMapSource, /pointRequestController\?\.abort\(\)/);
+  assert.match(birdMapSource, /timeoutMs: 15000/);
+  assert.match(birdMapSource, /if \(zoom <= 7\) return 3000/);
+  assert.match(birdMapSource, /if \(zoom <= 9\) return 5000/);
+  assert.match(birdMapSource, /setAttribute\("aria-busy", String\(Boolean\(isBusy\)\)\)/);
+  assert.match(birdMapSource, /放大地图可查看更完整的点位/);
 });
 
 test("main script consumes shared modules and removes the unused unlocked export overlay", () => {

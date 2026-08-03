@@ -12,19 +12,47 @@ export function installBirdMap(runtime) {
   let personalPlaces = new Map();
   let refreshTimer = null;
   let requestSequence = 0;
+  let pointRequestController = null;
   let fitSpeciesOnNextRefresh = false;
 
-  async function fetchJson(url) {
-    const response = await fetch(url, { headers: { accept: "application/json" } });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || `请求失败（${response.status}）`);
-    return payload;
+  async function fetchJson(url, options = {}) {
+    const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 15000);
+    const controller = new AbortController();
+    let abortedByParent = false;
+    const abortFromParent = () => {
+      abortedByParent = true;
+      controller.abort();
+    };
+    if (options.signal?.aborted) abortFromParent();
+    else options.signal?.addEventListener("abort", abortFromParent, { once: true });
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        headers: { accept: "application/json" },
+        signal: controller.signal
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || `请求失败（${response.status}）`);
+      return payload;
+    } catch (error) {
+      if (error?.name === "AbortError" && !abortedByParent) {
+        throw new Error("请求超时，请稍后重试。");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+      options.signal?.removeEventListener("abort", abortFromParent);
+    }
   }
 
   function setMapMessage(message, isError = false) {
     if (!elements.birdMapMessage) return;
     elements.birdMapMessage.textContent = message;
     elements.birdMapMessage.classList.toggle("error", isError);
+  }
+
+  function setMapBusy(isBusy) {
+    elements.birdMapCanvas?.setAttribute("aria-busy", String(Boolean(isBusy)));
   }
 
   function setCanvasState(title, description, hidden = false) {
@@ -197,23 +225,32 @@ export function installBirdMap(runtime) {
   async function refreshVisiblePoints() {
     if (!map || !amap) return;
     const sequence = ++requestSequence;
+    pointRequestController?.abort();
+    const requestController = new AbortController();
+    pointRequestController = requestController;
+    setMapBusy(true);
     setMapMessage("正在加载当前地图范围内的鸟点...");
     try {
       let points;
+      let truncated = false;
       if (activeMode === "personal") {
         points = buildPersonalPoints();
       } else {
         const bounds = fitSpeciesOnNextRefresh
           ? { west: 118, south: 27, east: 123.5, north: 31.5 }
           : getMapBounds();
+        const pointLimit = getPointRequestLimit();
         const params = new URLSearchParams({
           west: String(bounds.west), south: String(bounds.south),
-          east: String(bounds.east), north: String(bounds.north), limit: "10000"
+          east: String(bounds.east), north: String(bounds.north), limit: String(pointLimit)
         });
         if (activeSpecies?.taxonId) params.set("taxonId", activeSpecies.taxonId);
-        const payload = await fetchJson(`/api/map/points?${params}`);
+        const payload = await fetchJson(`/api/map/points?${params}`, {
+          signal: requestController.signal,
+          timeoutMs: 15000
+        });
         points = payload.points || [];
-        if (payload.truncated) setMapMessage("当前范围点位超过上限，请放大地图后查看。", true);
+        truncated = Boolean(payload.truncated);
       }
       if (sequence !== requestSequence) return;
       visiblePoints = points;
@@ -221,14 +258,31 @@ export function installBirdMap(runtime) {
       renderVisibleList(points);
       if (fitSpeciesOnNextRefresh && points.length) fitMapToPoints(points);
       fitSpeciesOnNextRefresh = false;
-      setMapMessage(points.length ? `当前范围显示 ${points.length.toLocaleString("zh-CN")} 个鸟点。` : "当前范围没有符合条件的鸟点。", false);
+      if (truncated) {
+        setMapMessage(`当前范围鸟点较多，先显示最近 ${points.length.toLocaleString("zh-CN")} 个；放大地图可查看更完整的点位。`);
+      } else {
+        setMapMessage(points.length ? `当前范围显示 ${points.length.toLocaleString("zh-CN")} 个鸟点。` : "当前范围没有符合条件的鸟点。", false);
+      }
     } catch (error) {
       if (sequence !== requestSequence) return;
       visiblePoints = [];
       renderMarkers([]);
       renderVisibleList([]);
       setMapMessage(`鸟点加载失败：${error.message}`, true);
+    } finally {
+      if (sequence === requestSequence) {
+        setMapBusy(false);
+        if (pointRequestController === requestController) pointRequestController = null;
+      }
     }
+  }
+
+  function getPointRequestLimit() {
+    if (fitSpeciesOnNextRefresh) return 10000;
+    const zoom = Number(map?.getZoom?.()) || 7;
+    if (zoom <= 7) return 3000;
+    if (zoom <= 9) return 5000;
+    return 10000;
   }
 
   function getMapBounds() {
